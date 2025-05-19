@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  /* Custom component styles */
+  .domain-boundary {
+    @apply border-2 rounded transition-all duration-200;
+  }
+  
+  .domain-boundary:hover {
+    @apply shadow-md scale-105;
+  }
+}

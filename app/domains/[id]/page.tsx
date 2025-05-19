@@ -118,10 +118,10 @@ export default function DomainDetailPage() {
           </Button>
           <div>
             <h1 className="text-3xl font-bold">
-              Domain {domain.domain_number}: {domain.pdb_id}_{domain.chain_id}
+              Domain: {domain.domain_id || `${domain.pdb_id}_${domain.chain_id}_d${domain.domain_number}`}
             </h1>
             <p className="text-gray-600 mt-1">
-              Range: {domain.range} | Classification: {domain.t_group || 'Unclassified'}
+              Range: {domain.range || `${domain.start_pos}-${domain.end_pos}`} | Classification: {domain.t_group || 'None'}
             </p>
           </div>
         </div>
@@ -149,7 +149,7 @@ export default function DomainDetailPage() {
             <h3 className="text-sm font-medium text-gray-700 mb-2">Basic Information</h3>
             <div className="space-y-2 text-sm">
               <div><span className="font-medium">ID:</span> {domain.domain_id || 'N/A'}</div>
-              <div><span className="font-medium">Range:</span> {domain.range}</div>
+              <div><span className="font-medium">Range:</span> {domain.range || `${domain.start_pos}-${domain.end_pos}`}</div>
               <div><span className="font-medium">Length:</span> {domain.end_pos - domain.start_pos + 1} residues</div>
               <div><span className="font-medium">Source:</span> {domain.source || 'N/A'}</div>
             </div>
@@ -158,10 +158,10 @@ export default function DomainDetailPage() {
           <div>
             <h3 className="text-sm font-medium text-gray-700 mb-2">Classification</h3>
             <div className="space-y-2 text-sm">
-              <div><span className="font-medium">T-Group:</span> {domain.t_group || 'N/A'}</div>
-              <div><span className="font-medium">H-Group:</span> {domain.h_group || 'N/A'}</div>
-              <div><span className="font-medium">X-Group:</span> {domain.x_group || 'N/A'}</div>
-              <div><span className="font-medium">A-Group:</span> {domain.a_group || 'N/A'}</div>
+              <div><span className="font-medium">T-Group:</span> {domain.t_group || 'Not assigned'}</div>
+              <div><span className="font-medium">H-Group:</span> {domain.h_group || 'Not assigned'}</div>
+              <div><span className="font-medium">X-Group:</span> {domain.x_group || 'Not assigned'}</div>
+              <div><span className="font-medium">A-Group:</span> {domain.a_group || 'Not assigned'}</div>
             </div>
           </div>
 
@@ -213,13 +213,16 @@ export default function DomainDetailPage() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   <div>
-                    <div><span className="font-medium">Hit ID:</span> {ev.hit_id || 'N/A'}</div>
+                    <div><span className="font-medium">Hit ID:</span> {ev.hit_id || ev.source_id || 'N/A'}</div>
                     <div><span className="font-medium">Query Range:</span> {ev.query_range || 'N/A'}</div>
                     <div><span className="font-medium">Hit Range:</span> {ev.hit_range || 'N/A'}</div>
                   </div>
                   <div>
                     <div><span className="font-medium">Classification:</span> {ev.t_group || 'N/A'}</div>
-                    <div><span className="font-medium">PDB:</span> {ev.pdb_id ? `${ev.pdb_id}_${ev.chain_id}` : 'N/A'}</div>
+                    <div><span className="font-medium">PDB:</span> {
+                      ev.pdb_id && ev.chain_id ? `${ev.pdb_id}_${ev.chain_id}` :
+                      ev.source_id || ev.hit_id || 'N/A'
+                    }</div>
                     <div><span className="font-medium">HSP Count:</span> {ev.hsp_count || 'N/A'}</div>
                   </div>
                 </div>

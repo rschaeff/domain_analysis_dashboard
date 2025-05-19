@@ -1,15 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    turbo: {
-      rules: {
-        '*.css': {
-          loaders: ['css-loader'],
-          options: {},
-        }
-      }
-    }
-  },
   // Enable CORS for local development
   async headers() {
     return [

@@ -1,8 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
-  // Enable CORS for local development
   async headers() {
     return [
       {
@@ -17,4 +15,4 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig
+export default nextConfig

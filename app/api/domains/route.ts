@@ -3,10 +3,17 @@ import { prisma } from '@/lib/database'
 import { DomainFilters, PaginationParams } from '@/lib/types'
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@/lib/config'
 
+// Custom JSON serializer to handle BigInt
+function serializeBigInt(obj: any): any {
+  return JSON.parse(JSON.stringify(obj, (key, value) =>
+    typeof value === 'bigint' ? Number(value) : value
+  ))
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    
+
     // Parse pagination parameters
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
     const size = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(searchParams.get('size') || DEFAULT_PAGE_SIZE.toString())))
@@ -14,34 +21,34 @@ export async function GET(request: NextRequest) {
 
     // Parse filters
     const filters: DomainFilters = {}
-    
+
     if (searchParams.get('pdb_id')) {
       filters.pdb_id = searchParams.get('pdb_id')!
     }
-    
+
     if (searchParams.get('chain_id')) {
       filters.chain_id = searchParams.get('chain_id')!
     }
-    
+
     if (searchParams.get('t_groups')) {
       filters.t_group = searchParams.get('t_groups')!.split(',')
     }
-    
+
     if (searchParams.get('h_groups')) {
       filters.h_group = searchParams.get('h_groups')!.split(',')
     }
-    
+
     if (searchParams.get('min_confidence')) {
       filters.min_confidence = parseFloat(searchParams.get('min_confidence')!)
     }
-    
+
     if (searchParams.get('max_confidence')) {
       filters.max_confidence = parseFloat(searchParams.get('max_confidence')!)
     }
 
     // Build the raw SQL query for partition_domain_summary view
     let baseQuery = `
-      SELECT 
+      SELECT
         pp.pdb_id,
         pp.chain_id,
         pp.batch_id,
@@ -113,7 +120,7 @@ export async function GET(request: NextRequest) {
 
     // Add GROUP BY and ORDER BY
     baseQuery += `
-      GROUP BY 
+      GROUP BY
         pp.pdb_id, pp.chain_id, pp.batch_id, pp.reference_version, pp.timestamp,
         pd.domain_number, pd.domain_id, pd.start_pos, pd.end_pos, pd.range,
         pd.source, pd.source_id, pd.confidence, pd.t_group, pd.h_group, pd.x_group, pd.a_group
@@ -130,15 +137,16 @@ export async function GET(request: NextRequest) {
 
     // Execute queries
     const [results, countResult] = await Promise.all([
-      prisma.$queryRawUnsafe(`${baseQuery} LIMIT ${paramIndex} OFFSET ${paramIndex + 1}`, ...queryParams, size, skip),
+      prisma.$queryRawUnsafe(`${baseQuery} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`, ...queryParams, size, skip),
       prisma.$queryRawUnsafe(countQuery, ...queryParams.slice(0, whereConditions.length))
     ])
 
-    // Convert BigInt to number for JSON serialization
+    // Serialize results to handle BigInt
+    const serializedResults = serializeBigInt(results)
     const total = Number((countResult as any)[0]?.total || 0)
 
     return NextResponse.json({
-      data: results,
+      data: serializedResults,
       pagination: {
         page,
         size,

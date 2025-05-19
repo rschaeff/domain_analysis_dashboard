@@ -6,8 +6,10 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const proteinId = parseInt(params.id)
-    
+    // Await params before accessing properties (Next.js 15 requirement)
+    const { id } = await params
+    const proteinId = parseInt(id)
+
     if (isNaN(proteinId)) {
       return NextResponse.json(
         { error: 'Invalid protein ID' },
@@ -17,7 +19,7 @@ export async function GET(
 
     // Fetch protein overview
     const proteinQuery = `
-      SELECT 
+      SELECT
         pp.id,
         pp.pdb_id,
         pp.chain_id,
@@ -33,14 +35,14 @@ export async function GET(
       FROM pdb_analysis.partition_proteins pp
       LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
       WHERE pp.id = $1
-      GROUP BY 
+      GROUP BY
         pp.id, pp.pdb_id, pp.chain_id, pp.batch_id, pp.reference_version,
         pp.is_classified, pp.sequence_length, pp.coverage, pp.residues_assigned,
         pp.domains_with_evidence, pp.fully_classified_domains
     `
 
     const result = await prisma.$queryRawUnsafe(proteinQuery, proteinId)
-    
+
     if (!result || (result as any[]).length === 0) {
       return NextResponse.json(
         { error: 'Protein not found' },

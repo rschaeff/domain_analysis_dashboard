@@ -6,8 +6,10 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const domainId = parseInt(params.id)
-    
+    // Await params before accessing properties (Next.js 15 requirement)
+    const { id } = await params
+    const domainId = parseInt(id)
+
     if (isNaN(domainId)) {
       return NextResponse.json(
         { error: 'Invalid domain ID' },
@@ -17,7 +19,7 @@ export async function GET(
 
     // Fetch comparisons for this domain
     const comparisonsQuery = `
-      SELECT 
+      SELECT
         dc.id,
         dc.partition_domain_id,
         dc.reference_type,

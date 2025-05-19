@@ -8,18 +8,18 @@ export async function GET(
   try {
     // Await params before accessing properties (Next.js 15 requirement)
     const { id } = await params
-    const domainId = parseInt(id)
-
-    if (isNaN(domainId)) {
+    const proteinId = parseInt(id)
+    
+    if (isNaN(proteinId)) {
       return NextResponse.json(
-        { error: 'Invalid domain ID' },
+        { error: 'Invalid protein ID' },
         { status: 400 }
       )
     }
 
-    // Fetch domain details using raw SQL query
-    const domainQuery = `
-      SELECT
+    // Fetch domains for this protein
+    const domainsQuery = `
+      SELECT 
         pd.id,
         pd.protein_id,
         pp.pdb_id,
@@ -44,29 +44,23 @@ export async function GET(
       FROM pdb_analysis.partition_domains pd
       JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id
       LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-      WHERE pd.id = $1
-      GROUP BY
+      WHERE pp.id = $1
+      GROUP BY 
         pd.id, pd.protein_id, pp.pdb_id, pp.chain_id, pp.batch_id,
         pp.reference_version, pp.timestamp, pd.domain_number, pd.domain_id,
         pd.start_pos, pd.end_pos, pd.range, pd.source, pd.source_id,
         pd.confidence, pd.t_group, pd.h_group, pd.x_group, pd.a_group
+      ORDER BY pd.domain_number
     `
 
-    const result = await prisma.$queryRawUnsafe(domainQuery, domainId)
+    const domains = await prisma.$queryRawUnsafe(domainsQuery, proteinId)
 
-    if (!result || (result as any[]).length === 0) {
-      return NextResponse.json(
-        { error: 'Domain not found' },
-        { status: 404 }
-      )
-    }
-
-    return NextResponse.json((result as any[])[0])
+    return NextResponse.json(domains)
 
   } catch (error) {
-    console.error('Error fetching domain details:', error)
+    console.error('Error fetching protein domains:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch domain details' },
+      { error: 'Failed to fetch protein domains' },
       { status: 500 }
     )
   }

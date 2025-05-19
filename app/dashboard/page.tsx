@@ -94,9 +94,19 @@ export default function DashboardPage() {
     router.push(`/domain/${domain.id}`)
   }
 
-  const handleViewProtein = (domain: DomainSummary) => {
-    router.push(`/protein/${domain.protein_id}`)
-  }
+    const handleViewProtein = (domain: DomainSummary) => {
+        // Debug: let's see what fields are available
+        console.log('Domain object:', domain)
+
+        // Try different possible field names for protein ID
+        const proteinId = domain.protein_id || domain.id || domain.pdb_id
+
+        if (proteinId) {
+          router.push(`/protein/${proteinId}`)
+        } else {
+          console.error('No protein ID found for domain:', domain)
+        }
+      }
 
   // Table columns configuration
   const columns = [

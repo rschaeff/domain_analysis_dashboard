@@ -98,19 +98,18 @@ export default function DashboardPage() {
     router.push(`/domains/${domain.id}`)
   }
 
-  const handleViewProtein = (domain: DomainSummary) => {
-        // Debug: let's see what fields are available
-        console.log('Domain object:', domain)
+const handleViewProtein = (domain: DomainSummary) => {
+    // Use the protein_id field that should now be available from the API
+    const proteinId = domain.protein_id
 
-        // Try different possible field names for protein ID
-        const proteinId = domain.protein_id || domain.id || domain.pdb_id
-
-        if (proteinId) {
-          router.push(`/protein/${proteinId}`)
-        } else {
-          console.error('No protein ID found for domain:', domain)
-        }
-   }
+    if (proteinId) {
+      router.push(`/protein/${proteinId}`)
+    } else {
+      console.error('No protein ID found for domain:', domain)
+      // Fallback: construct from pdb_id and chain_id if needed
+      // You might need to fetch protein ID from a separate endpoint
+    }
+  }
 
   // Table columns configuration
   const columns = [

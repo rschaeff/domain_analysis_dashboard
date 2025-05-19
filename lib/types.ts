@@ -1,26 +1,26 @@
 // Domain analysis types
 export interface DomainSummary {
-  id: number;
-  protein_id: number;
-  pdb_id: string;
-  chain_id: string;
-  batch_id: number | null;
-  reference_version: string | null;
-  timestamp: Date;
-  domain_number: number;
-  domain_id: string | null;
-  start_pos: number;
-  end_pos: number;
-  range: string;
-  source: string | null;
-  source_id: string | null;
-  confidence: number | null;
-  t_group: string | null;
-  h_group: string | null;
-  x_group: string | null;
-  a_group: string | null;
-  evidence_count: number;
-  evidence_types: string;
+  id: number
+  protein_id?: number  // Add this field
+  pdb_id: string
+  chain_id: string
+  batch_id: number
+  reference_version: string
+  timestamp: string
+  domain_number: number
+  domain_id: string
+  start_pos: number
+  end_pos: number
+  range: string
+  source: string
+  source_id: string
+  confidence: number | null
+  t_group: string | null
+  h_group: string | null
+  x_group: string | null
+  a_group: string | null
+  evidence_count: number
+  evidence_types: string
 }
 
 export interface DomainEvidence {

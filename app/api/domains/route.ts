@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
-import { DomainFilters, PaginationParams } from '@/lib/types'
+import { DomainFilters } from '@/lib/types'
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@/lib/config'
 
 // Custom JSON serializer to handle BigInt
@@ -46,32 +46,31 @@ export async function GET(request: NextRequest) {
       filters.max_confidence = parseFloat(searchParams.get('max_confidence')!)
     }
 
-    // Build the raw SQL query for partition_domain_summary view
+    // Build the query using the updated view
     let baseQuery = `
       SELECT
-        pd.id,
-        pp.pdb_id,
-        pp.chain_id,
-        pp.batch_id,
-        pp.reference_version,
-        pp.timestamp,
-        pd.domain_number,
-        pd.domain_id,
-        pd.start_pos,
-        pd.end_pos,
-        pd.range,
-        pd.source,
-        pd.source_id,
-        pd.confidence,
-        pd.t_group,
-        pd.h_group,
-        pd.x_group,
-        pd.a_group,
-        COUNT(de.id) as evidence_count,
-        COALESCE(STRING_AGG(DISTINCT de.evidence_type, ', '), 'none') as evidence_types
-      FROM pdb_analysis.partition_proteins pp
-      JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
-      LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
+        id,
+        protein_id,
+        pdb_id,
+        chain_id,
+        batch_id,
+        reference_version,
+        timestamp,
+        domain_number,
+        domain_id,
+        start_pos,
+        end_pos,
+        range,
+        source,
+        source_id,
+        confidence,
+        t_group,
+        h_group,
+        x_group,
+        a_group,
+        evidence_count,
+        evidence_types
+      FROM pdb_analysis.partition_domain_summary
     `
 
     // Build WHERE clause
@@ -80,37 +79,37 @@ export async function GET(request: NextRequest) {
     let paramIndex = 1
 
     if (filters.pdb_id) {
-      whereConditions.push(`pp.pdb_id = $${paramIndex}`)
+      whereConditions.push(`pdb_id = $${paramIndex}`)
       queryParams.push(filters.pdb_id)
       paramIndex++
     }
 
     if (filters.chain_id) {
-      whereConditions.push(`pp.chain_id = $${paramIndex}`)
+      whereConditions.push(`chain_id = $${paramIndex}`)
       queryParams.push(filters.chain_id)
       paramIndex++
     }
 
     if (filters.t_group && filters.t_group.length > 0) {
-      whereConditions.push(`pd.t_group = ANY($${paramIndex})`)
+      whereConditions.push(`t_group = ANY($${paramIndex})`)
       queryParams.push(filters.t_group)
       paramIndex++
     }
 
     if (filters.h_group && filters.h_group.length > 0) {
-      whereConditions.push(`pd.h_group = ANY($${paramIndex})`)
+      whereConditions.push(`h_group = ANY($${paramIndex})`)
       queryParams.push(filters.h_group)
       paramIndex++
     }
 
     if (filters.min_confidence !== undefined) {
-      whereConditions.push(`pd.confidence >= $${paramIndex}`)
+      whereConditions.push(`confidence >= $${paramIndex}`)
       queryParams.push(filters.min_confidence)
       paramIndex++
     }
 
     if (filters.max_confidence !== undefined) {
-      whereConditions.push(`pd.confidence <= $${paramIndex}`)
+      whereConditions.push(`confidence <= $${paramIndex}`)
       queryParams.push(filters.max_confidence)
       paramIndex++
     }
@@ -119,20 +118,13 @@ export async function GET(request: NextRequest) {
       baseQuery += ' WHERE ' + whereConditions.join(' AND ')
     }
 
-    // Add GROUP BY and ORDER BY
-    baseQuery += `
-      GROUP BY
-        pd.id, pp.pdb_id, pp.chain_id, pp.batch_id, pp.reference_version, pp.timestamp,
-        pd.domain_number, pd.domain_id, pd.start_pos, pd.end_pos, pd.range,
-        pd.source, pd.source_id, pd.confidence, pd.t_group, pd.h_group, pd.x_group, pd.a_group
-      ORDER BY pp.pdb_id, pp.chain_id, pd.domain_number
-    `
+    // Add ORDER BY
+    baseQuery += ' ORDER BY pdb_id, chain_id, domain_number'
 
     // Get total count for pagination
     const countQuery = `
-      SELECT COUNT(DISTINCT (pp.id, pd.id)) as total
-      FROM pdb_analysis.partition_proteins pp
-      JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
+      SELECT COUNT(*) as total
+      FROM pdb_analysis.partition_domain_summary
       ${whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : ''}
     `
 
@@ -158,8 +150,9 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Error fetching domains:', error)
+    console.error('Error details:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch domains' },
+      { error: 'Failed to fetch domains', details: error.message },
       { status: 500 }
     )
   }

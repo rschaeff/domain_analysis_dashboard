@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
+// Custom JSON serializer to handle BigInt
+function serializeBigInt(obj: any): any {
+  return JSON.parse(JSON.stringify(obj, (key, value) =>
+    typeof value === 'bigint' ? Number(value) : value
+  ))
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -10,6 +17,9 @@ export async function GET(
     const { id } = await params
     const domainId = parseInt(id)
 
+    console.log('API received domain ID:', id)
+    console.log('Parsed as integer:', domainId)
+
     if (isNaN(domainId)) {
       return NextResponse.json(
         { error: 'Invalid domain ID' },
@@ -17,43 +27,60 @@ export async function GET(
       )
     }
 
-    // Fetch evidence for this domain
-    const evidenceQuery = `
+    // Fetch domain details using raw SQL query
+    const domainQuery = `
       SELECT
-        de.id,
-        de.domain_id,
-        de.evidence_type,
-        de.source_id,
-        de.domain_ref_id,
-        de.hit_id,
-        de.pdb_id,
-        de.chain_id,
-        de.confidence,
-        de.probability,
-        de.evalue,
-        de.score,
-        de.hsp_count,
-        de.is_discontinuous,
-        de.t_group,
-        de.h_group,
-        de.x_group,
-        de.a_group,
-        de.query_range,
-        de.hit_range,
-        de.created_at
-      FROM pdb_analysis.domain_evidence de
-      WHERE de.domain_id = $1
-      ORDER BY de.evidence_type, de.confidence DESC
+        pd.id,
+        pd.protein_id,
+        pp.pdb_id,
+        pp.chain_id,
+        pp.batch_id,
+        pp.reference_version,
+        pp.timestamp,
+        pd.domain_number,
+        pd.domain_id,
+        pd.start_pos,
+        pd.end_pos,
+        pd.range,
+        pd.source,
+        pd.source_id,
+        pd.confidence,
+        pd.t_group,
+        pd.h_group,
+        pd.x_group,
+        pd.a_group,
+        COUNT(de.id) as evidence_count,
+        COALESCE(STRING_AGG(DISTINCT de.evidence_type, ', '), 'none') as evidence_types
+      FROM pdb_analysis.partition_domains pd
+      JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id
+      LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
+      WHERE pd.id = $1
+      GROUP BY
+        pd.id, pd.protein_id, pp.pdb_id, pp.chain_id, pp.batch_id,
+        pp.reference_version, pp.timestamp, pd.domain_number, pd.domain_id,
+        pd.start_pos, pd.end_pos, pd.range, pd.source, pd.source_id,
+        pd.confidence, pd.t_group, pd.h_group, pd.x_group, pd.a_group
     `
 
-    const evidence = await prisma.$queryRawUnsafe(evidenceQuery, domainId)
+    const result = await prisma.$queryRawUnsafe(domainQuery, domainId)
+    console.log('Query result:', result)
 
-    return NextResponse.json(evidence)
+    if (!result || (result as any[]).length === 0) {
+      return NextResponse.json(
+        { error: 'Domain not found' },
+        { status: 404 }
+      )
+    }
+
+    // Serialize the result to handle BigInt values
+    const serializedResult = serializeBigInt((result as any[])[0])
+
+    return NextResponse.json(serializedResult)
 
   } catch (error) {
-    console.error('Error fetching domain evidence:', error)
+    console.error('Error fetching domain details:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch domain evidence' },
+      { error: 'Failed to fetch domain details' },
       { status: 500 }
     )
   }

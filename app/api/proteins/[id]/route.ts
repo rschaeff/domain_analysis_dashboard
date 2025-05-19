@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
+// Custom JSON serializer to handle BigInt
+function serializeBigInt(obj: any): any {
+  return JSON.parse(JSON.stringify(obj, (key, value) =>
+    typeof value === 'bigint' ? Number(value) : value
+  ))
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -50,7 +57,10 @@ export async function GET(
       )
     }
 
-    return NextResponse.json((result as any[])[0])
+    // Serialize the result to handle BigInt values
+    const serializedResult = serializeBigInt((result as any[])[0])
+
+    return NextResponse.json(serializedResult)
 
   } catch (error) {
     console.error('Error fetching protein details:', error)

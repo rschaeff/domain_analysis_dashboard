@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
+// Custom JSON serializer to handle BigInt
+function serializeBigInt(obj: any): any {
+  return JSON.parse(JSON.stringify(obj, (key, value) =>
+    typeof value === 'bigint' ? Number(value) : value
+  ))
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -9,7 +16,7 @@ export async function GET(
     // Await params before accessing properties (Next.js 15 requirement)
     const { id } = await params
     const proteinId = parseInt(id)
-    
+
     if (isNaN(proteinId)) {
       return NextResponse.json(
         { error: 'Invalid protein ID' },
@@ -19,7 +26,7 @@ export async function GET(
 
     // Fetch domains for this protein
     const domainsQuery = `
-      SELECT 
+      SELECT
         pd.id,
         pd.protein_id,
         pp.pdb_id,
@@ -45,7 +52,7 @@ export async function GET(
       JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id
       LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
       WHERE pp.id = $1
-      GROUP BY 
+      GROUP BY
         pd.id, pd.protein_id, pp.pdb_id, pp.chain_id, pp.batch_id,
         pp.reference_version, pp.timestamp, pd.domain_number, pd.domain_id,
         pd.start_pos, pd.end_pos, pd.range, pd.source, pd.source_id,
@@ -55,7 +62,10 @@ export async function GET(
 
     const domains = await prisma.$queryRawUnsafe(domainsQuery, proteinId)
 
-    return NextResponse.json(domains)
+    // Serialize the results to handle BigInt values
+    const serializedDomains = serializeBigInt(domains)
+
+    return NextResponse.json(serializedDomains)
 
   } catch (error) {
     console.error('Error fetching protein domains:', error)

@@ -130,19 +130,20 @@ export async function GET(request: NextRequest) {
 
     // Execute queries
     const [results, countResult] = await Promise.all([
-      prisma.$queryRawUnsafe(`${baseQuery} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`, ...queryParams, size, skip),
+      prisma.$queryRawUnsafe(`${baseQuery} LIMIT ${paramIndex} OFFSET ${paramIndex + 1}`, ...queryParams, size, skip),
       prisma.$queryRawUnsafe(countQuery, ...queryParams.slice(0, whereConditions.length))
     ])
 
-    const total = (countResult as any)[0]?.total || 0
+    // Convert BigInt to number for JSON serialization
+    const total = Number((countResult as any)[0]?.total || 0)
 
     return NextResponse.json({
       data: results,
       pagination: {
         page,
         size,
-        total: parseInt(total),
-        totalPages: Math.ceil(parseInt(total) / size)
+        total: total,
+        totalPages: Math.ceil(total / size)
       }
     })
 

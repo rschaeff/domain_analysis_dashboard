@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Existing schema tables
+model PartitionProteins {
+  id                       Int      @id @default(autoincrement())
+  pdb_id                   String
+  chain_id                 String
+  batch_id                 Int?
+  timestamp                DateTime @default(now())
+  reference_version        String?
+  is_classified            Boolean  @default(false)
+  sequence_length          Int      @default(0)
+  coverage                 Float    @default(0)
+  residues_assigned        Int      @default(0)
+  domains_with_evidence    Int      @default(0)
+  fully_classified_domains Int      @default(0)
+  source_file_id           Int?
+  process_version          String?
+
+  // Relations
+  domains       PartitionDomains[]
+  references    PartitionProteinReferences[]
+  modifications DomainModifications[]
+
+  @@unique([pdb_id, chain_id, batch_id, timestamp])
+  @@map("partition_proteins")
+  @@schema("pdb_analysis")
+}
+
+model PartitionDomains {
+  id           Int     @id @default(autoincrement())
+  protein_id   Int
+  domain_number Int
+  domain_id    String?
+  start_pos    Int
+  end_pos      Int
+  range        String
+  source       String?
+  source_id    String?
+  confidence   Float?
+  t_group      String?
+  h_group      String?
+  x_group      String?
+  a_group      String?
+  is_manual_rep Boolean @default(false)
+  is_f70       Boolean @default(false)
+  is_f40       Boolean @default(false)
+  is_f99       Boolean @default(false)
+  created_at   DateTime @default(now())
+
+  // Relations
+  protein      PartitionProteins     @relation(fields: [protein_id], references: [id], onDelete: Cascade)
+  evidence     DomainEvidence[]
+  comparisons  DomainComparisons[]
+  modifications DomainModifications[]
+
+  @@unique([protein_id, domain_number])
+  @@map("partition_domains")
+  @@schema("pdb_analysis")
+}
+
+model DomainEvidence {
+  id               Int      @id @default(autoincrement())
+  domain_id        Int
+  evidence_type    String
+  source_id        String?
+  domain_ref_id    String?
+  hit_id           String?
+  pdb_id           String?
+  chain_id         String?
+  confidence       Float?
+  probability      Float?
+  evalue           Float?
+  score            Float?
+  hsp_count        Int?
+  is_discontinuous Boolean  @default(false)
+  t_group          String?
+  h_group          String?
+  x_group          String?
+  a_group          String?
+  query_range      String?
+  hit_range        String?
+  created_at       DateTime @default(now())
+
+  // Relations
+  domain PartitionDomains @relation(fields: [domain_id], references: [id], onDelete: Cascade)
+
+  @@map("domain_evidence")
+  @@schema("pdb_analysis")
+}
+
+model DomainComparisons {
+  id                     Int      @id @default(autoincrement())
+  partition_domain_id    Int
+  reference_type         String
+  reference_domain_id    String?
+  reference_domain_range String?
+  jaccard_similarity     Float?
+  overlap_residues       Int?
+  union_residues         Int?
+  precision              Float?
+  recall                 Float?
+  f1_score               Float?
+  t_group_match          Boolean  @default(false)
+  h_group_match          Boolean  @default(false)
+  x_group_match          Boolean  @default(false)
+  a_group_match          Boolean  @default(false)
+  created_at             DateTime @default(now())
+
+  // Relations
+  partition_domain PartitionDomains @relation(fields: [partition_domain_id], references: [id])
+
+  @@map("domain_comparisons")
+  @@schema("pdb_analysis")
+}
+
+// New tables for dashboard functionality
+model DomainModifications {
+  id             Int      @id @default(autoincrement())
+  protein_id     Int
+  domain_id      Int?
+  modification_type String // 'boundary_edit', 'reassignment', 'split', 'merge', 'create', 'delete'
+  original_start Int?
+  original_end   Int?
+  new_start      Int?
+  new_end        Int?
+  original_classification String?
+  new_classification String?
+  reason         String?
+  created_by     String   @default("system")
+  created_at     DateTime @default(now())
+  applied        Boolean  @default(false)
+
+  // Relations
+  protein PartitionProteins @relation(fields: [protein_id], references: [id])
+  domain  PartitionDomains? @relation(fields: [domain_id], references: [id])
+
+  @@map("domain_modifications")
+  @@schema("pdb_analysis")
+}
+
+model PartitionProteinReferences {
+  id                  Int      @id @default(autoincrement())
+  protein_id          Int
+  sequence_md5        String
+  swissprot_id        String?
+  proteomes_id        String?
+  reference_pdb_id    String?
+  reference_chain_id  String?
+  is_exact_match      Boolean  @default(true)
+  match_quality       Float?
+  created_at          DateTime @default(now())
+
+  // Relations
+  protein PartitionProteins @relation(fields: [protein_id], references: [id], onDelete: Cascade)
+
+  @@map("partition_protein_references")
+  @@schema("pdb_analysis")
+}
+
+// View for dashboard summary (we'll create this as a view)
+// This would typically be defined as a PostgreSQL view

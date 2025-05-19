@@ -2,48 +2,39 @@ import type { Config } from 'tailwindcss'
 
 const config: Config = {
   content: [
-    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+    './pages/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './app/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {
       colors: {
-        // Domain boundary visualization colors
-        boundary: {
-          'putative': '#3b82f6',
-          'reference': '#ef4444',
-          'overlap': '#8b5cf6',
-          'conflict': '#f59e0b',
-        },
-        // Classification group colors
-        classification: {
-          't-group': '#10b981',
-          'h-group': '#f59e0b',
-          'x-group': '#ef4444',
-          'a-group': '#8b5cf6',
-        },
-        // Evidence confidence colors
+        // Custom color schemes for domain analysis
         confidence: {
-          'high': '#10b981',
-          'medium': '#f59e0b',
-          'low': '#ef4444',
-          'none': '#6b7280',
-        }
+          high: '#10b981',    // green-500
+          medium: '#f59e0b',  // amber-500
+          low: '#ef4444',     // red-500
+        },
+        boundary: {
+          putative: '#3b82f6',   // blue-500
+          reference: '#ef4444',  // red-500
+          overlap: '#8b5cf6',    // violet-500
+          conflict: '#f59e0b',   // amber-500
+        },
+        classification: {
+          't-group': '#3b82f6',  // blue-500
+          'h-group': '#10b981',  // emerald-500
+          'x-group': '#8b5cf6',  // violet-500
+          'a-group': '#f59e0b',  // amber-500
+        },
       },
-      spacing: {
-        '18': '4.5rem',
-        '88': '22rem',
+      animation: {
+        'spin-slow': 'spin 3s linear infinite',
       },
-      zIndex: {
-        '60': '60',
-        '70': '70',
-        '80': '80',
-        '90': '90',
-        '100': '100',
-      }
+      fontFamily: {
+        mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', 'monospace'],
+      },
     },
   },
   plugins: [],
 }
-export default config

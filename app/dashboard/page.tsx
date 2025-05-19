@@ -90,8 +90,8 @@ export default function DashboardPage() {
     setSelectedDomain(domain)
   }
 
-  const handleViewDomain = (domain: DomainSummary) => {
-    router.push(`/domain/${domain.id}`)
+const handleViewDomain = (domain: DomainSummary) => {
+    router.push(`/domains/${domain.id}`)  // Changed from /domain/ to /domains/
   }
 
     const handleViewProtein = (domain: DomainSummary) => {

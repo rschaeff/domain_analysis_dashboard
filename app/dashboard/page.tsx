@@ -191,7 +191,6 @@ export default function DashboardPage() {
   const avgConfidence = domains.reduce((sum, d) => sum + (d.confidence || 0), 0) / domains.length
 
   return (
-    <div className="w-screen px-4">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -356,7 +355,6 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
-    </div>
     </div>
   )
 }

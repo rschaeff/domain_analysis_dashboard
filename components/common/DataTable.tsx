@@ -1,19 +1,19 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
-import { PaginationParams } from '@/lib/types'
+import React, { useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown } from 'lucide-react'
+import { PaginationParams } from '@/lib/types'
 
-interface Column<T> {
+interface Column<T = any> {
   key: string
   label: string
   sortable?: boolean
-  render?: (value: any, item: T, index: number) => React.ReactNode
+  render?: (value: any, item: T) => React.ReactNode
+  width?: string
 }
 
-interface DataTableProps<T> {
+interface DataTableProps<T = any> {
   data: T[]
   columns: Column<T>[]
   pagination?: PaginationParams
@@ -32,190 +32,215 @@ export function DataTable<T extends Record<string, any>>({
   loading = false,
   className = ''
 }: DataTableProps<T>) {
-  const [sortConfig, setSortConfig] = useState<{
-    key: string
-    direction: 'asc' | 'desc'
-  } | null>(null)
+  const [sortField, setSortField] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
-  const sortedData = useMemo(() => {
-    if (!sortConfig) return data
+  // Handle sorting
+  const handleSort = (columnKey: string) => {
+    if (sortField === columnKey) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(columnKey)
+      setSortDirection('asc')
+    }
+  }
+
+  // Sort data if needed
+  const sortedData = React.useMemo(() => {
+    if (!sortField) return data
 
     return [...data].sort((a, b) => {
-      const aValue = a[sortConfig.key]
-      const bValue = b[sortConfig.key]
+      const aValue = a[sortField]
+      const bValue = b[sortField]
 
       if (aValue === null || aValue === undefined) return 1
       if (bValue === null || bValue === undefined) return -1
 
-      if (aValue < bValue) {
-        return sortConfig.direction === 'asc' ? -1 : 1
-      }
-      if (aValue > bValue) {
-        return sortConfig.direction === 'asc' ? 1 : -1
-      }
-      return 0
-    })
-  }, [data, sortConfig])
-
-  const handleSort = (key: string) => {
-    const column = columns.find(col => col.key === key)
-    if (!column?.sortable) return
-
-    setSortConfig(current => {
-      if (current?.key === key) {
-        if (current.direction === 'asc') {
-          return { key, direction: 'desc' }
-        } else {
-          return null // Remove sorting
-        }
+      let comparison = 0
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        comparison = aValue.localeCompare(bValue)
+      } else if (typeof aValue === 'number' && typeof bValue === 'number') {
+        comparison = aValue - bValue
       } else {
-        return { key, direction: 'asc' }
+        comparison = String(aValue).localeCompare(String(bValue))
       }
+
+      return sortDirection === 'asc' ? comparison : -comparison
     })
-  }
+  }, [data, sortField, sortDirection])
 
-  const getSortIcon = (key: string) => {
-    if (!sortConfig || sortConfig.key !== key) {
-      return <ChevronUp className="w-4 h-4 text-gray-400" />
+  // Pagination calculations
+  const currentPage = pagination?.page || 1
+  const pageSize = pagination?.size || 50
+  const totalItems = pagination?.total || data.length
+  const totalPages = Math.ceil(totalItems / pageSize)
+
+  const startItem = (currentPage - 1) * pageSize + 1
+  const endItem = Math.min(currentPage * pageSize, totalItems)
+
+  // Generate pagination range
+  const getPaginationRange = () => {
+    const range = []
+    const maxVisible = 5
+
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) {
+        range.push(i)
+      }
+    } else {
+      const start = Math.max(1, currentPage - Math.floor(maxVisible / 2))
+      const end = Math.min(totalPages, start + maxVisible - 1)
+
+      for (let i = start; i <= end; i++) {
+        range.push(i)
+      }
     }
-    return sortConfig.direction === 'asc' 
-      ? <ChevronUp className="w-4 h-4 text-blue-600" />
-      : <ChevronDown className="w-4 h-4 text-blue-600" />
+
+    return range
   }
 
-  const renderPagination = () => {
-    if (!pagination || !onPageChange) return null
+  const pageRange = getPaginationRange()
 
-    const { page, size, total } = pagination
-    const totalPages = Math.ceil(total / size)
-    const startItem = (page - 1) * size + 1
-    const endItem = Math.min(page * size, total)
-
+  if (loading) {
     return (
-      <div className="flex items-center justify-between px-6 py-3 border-t">
-        <div className="text-sm text-gray-500">
-          Showing {startItem} to {endItem} of {total} results
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onPageChange(page - 1)}
-            disabled={page <= 1}
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Previous
-          </Button>
-          
-          {/* Page numbers */}
-          <div className="flex gap-1">
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              let pageNum
-              if (totalPages <= 5) {
-                pageNum = i + 1
-              } else if (page <= 3) {
-                pageNum = i + 1
-              } else if (page >= totalPages - 2) {
-                pageNum = totalPages - 4 + i
-              } else {
-                pageNum = page - 2 + i
-              }
-
-              return (
-                <Button
-                  key={pageNum}
-                  variant={pageNum === page ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => onPageChange(pageNum)}
-                  className="w-8 h-8 p-0"
-                >
-                  {pageNum}
-                </Button>
-              )
-            })}
-          </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onPageChange(page + 1)}
-            disabled={page >= totalPages}
-          >
-            Next
-            <ChevronRight className="w-4 h-4" />
-          </Button>
+      <div className="border rounded-lg">
+        <div className="p-8 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-500">Loading...</p>
         </div>
       </div>
     )
   }
 
-  if (loading) {
-    return (
-      <Card className={className}>
-        <div className="p-8 text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </Card>
-    )
-  }
-
-  if (data.length === 0) {
-    return (
-      <Card className={className}>
-        <div className="p-8 text-center text-gray-500">
-          <p className="text-lg font-medium">No data found</p>
-          <p className="text-sm">Try adjusting your filters</p>
-        </div>
-      </Card>
-    )
-  }
-
   return (
-    <Card className={className}>
+    <div className={`border rounded-lg bg-white ${className}`}>
+      {/* Table */}
       <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b bg-gray-50">
-              {columns.map(column => (
+        <table className="w-full min-w-full table-auto">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              {columns.map((column) => (
                 <th
                   key={column.key}
-                  className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${
-                    column.sortable ? 'cursor-pointer hover:bg-gray-100' : ''
-                  }`}
-                  onClick={() => handleSort(column.key)}
+                  className={`text-left px-6 py-4 text-sm font-medium text-gray-700 whitespace-nowrap ${
+                    column.width ? `w-[${column.width}]` : ''
+                  } ${column.sortable ? 'cursor-pointer hover:bg-gray-100' : ''}`}
+                  onClick={() => column.sortable && handleSort(column.key)}
                 >
                   <div className="flex items-center gap-2">
                     <span>{column.label}</span>
-                    {column.sortable && getSortIcon(column.key)}
+                    {column.sortable && (
+                      <div className="flex flex-col">
+                        {sortField === column.key ? (
+                          sortDirection === 'asc' ? (
+                            <ChevronUp className="w-4 h-4" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4" />
+                          )
+                        ) : (
+                          <div className="text-gray-400">
+                            <ChevronUp className="w-3 h-3 -mb-1" />
+                            <ChevronDown className="w-3 h-3" />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {sortedData.map((item, index) => (
-              <tr
-                key={index}
-                className={`hover:bg-gray-50 transition-colors ${
-                  onRowClick ? 'cursor-pointer' : ''
-                }`}
-                onClick={() => onRowClick?.(item)}
-              >
-                {columns.map(column => (
-                  <td key={column.key} className="px-6 py-4 whitespace-nowrap">
-                    {column.render 
-                      ? column.render(item[column.key], item, index)
-                      : <span className="text-sm text-gray-900">{item[column.key]}</span>
-                    }
-                  </td>
-                ))}
+          <tbody className="divide-y divide-gray-200">
+            {sortedData.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length} className="px-6 py-8 text-center text-gray-500">
+                  No data available
+                </td>
               </tr>
-            ))}
+            ) : (
+              sortedData.map((item, index) => (
+                <tr
+                  key={item.id || index}
+                  className={`hover:bg-gray-50 ${onRowClick ? 'cursor-pointer' : ''}`}
+                  onClick={() => onRowClick?.(item)}
+                >
+                  {columns.map((column) => (
+                    <td key={column.key} className="px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
+                      {column.render
+                        ? column.render(item[column.key], item)
+                        : item[column.key] || '-'}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
-      {renderPagination()}
-    </Card>
+
+      {/* Pagination */}
+      {pagination && totalPages > 1 && (
+        <div className="flex items-center justify-between px-6 py-4 border-t bg-gray-50">
+          <div className="text-sm text-gray-700">
+            Showing {startItem.toLocaleString()} to {endItem.toLocaleString()} of{' '}
+            {totalItems.toLocaleString()} results
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* First page */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange?.(1)}
+              disabled={currentPage === 1}
+            >
+              <ChevronsLeft className="w-4 h-4" />
+            </Button>
+
+            {/* Previous page */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange?.(currentPage - 1)}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+
+            {/* Page numbers */}
+            {pageRange.map((pageNum) => (
+              <Button
+                key={pageNum}
+                variant={pageNum === currentPage ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => onPageChange?.(pageNum)}
+              >
+                {pageNum}
+              </Button>
+            ))}
+
+            {/* Next page */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange?.(currentPage + 1)}
+              disabled={currentPage === totalPages}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+
+            {/* Last page */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange?.(totalPages)}
+              disabled={currentPage === totalPages}
+            >
+              <ChevronsRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

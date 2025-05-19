@@ -263,13 +263,15 @@ export default function DashboardPage() {
               <Button onClick={() => fetchDomains()}>Retry</Button>
             </Card>
           ) : viewMode === 'table' ? (
-            <DataTable
-              data={domains}
-              columns={columns}
-              pagination={pagination}
-              onPageChange={handlePageChange}
-              onRowClick={handleDomainClick}
-            />
+            <div className="w-full min-w-0">
+              <DataTable
+                data={domains}
+                columns={columns}
+                pagination={pagination}
+                onPageChange={handlePageChange}
+                onRowClick={handleDomainClick}
+              />
+            </div>
           ) : (
             <div className="space-y-6">
               {/* Group by protein for visualization */}

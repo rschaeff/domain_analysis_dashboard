@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
 
     // Execute queries
     const [results, countResult] = await Promise.all([
-      prisma.$queryRawUnsafe(`$${baseQuery} LIMIT $${paramIndex} OFFSET ${paramIndex + 1}`, ...queryParams, size, skip),
+      prisma.$queryRawUnsafe(`$${baseQuery} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`, ...queryParams, size, skip),
       prisma.$queryRawUnsafe(countQuery, ...queryParams.slice(0, whereConditions.length))
     ])
 

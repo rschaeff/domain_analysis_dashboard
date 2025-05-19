@@ -1,36 +1,104 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Domain Analysis Dashboard
+
+A NextJS/React dashboard for analyzing domain boundary predictions from the pyECOD pipeline.
+
+## Features
+
+- **Interactive Domain Visualization**: Compare putative domain boundaries with reference domains
+- **Advanced Filtering**: Filter by protein, classification groups, confidence thresholds
+- **Evidence Analysis**: View supporting evidence for domain assignments
+- **Structure Integration**: Placeholder for Mol* 3D structure viewer
+- **Sequence Analysis**: Placeholder for EBI Nightingale sequence annotation viewer
+- **Manual Curation**: Tools for boundary editing and domain reassignment
+
+## Tech Stack
+
+- **Framework**: Next.js 14 with App Router
+- **Database**: PostgreSQL with Prisma ORM
+- **Styling**: Tailwind CSS
+- **State Management**: Zustand
+- **Data Fetching**: TanStack Query (React Query)
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Node.js 18+
+- PostgreSQL database with the pdb_analysis schema
+- Domain partition data loaded into the database
+
+### Installation
+
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Set up environment variables:
+   ```bash
+   cp .env.local.example .env.local
+   # Edit .env.local with your database connection details
+   ```
+
+4. Initialize Prisma:
+   ```bash
+   npx prisma generate
+   npx prisma db push
+   ```
+
+5. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+6. Open [http://localhost:3000](http://localhost:3000) in your browser
+
+## Project Structure
+
+```
+src/
+├── app/                 # Next.js app router pages
+├── components/          # Reusable UI components
+├── lib/                # Utilities, types, database config
+├── store/              # Zustand state stores
+└── hooks/              # Custom React hooks
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Database Schema
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The dashboard works with the following key tables in the `pdb_analysis` schema:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `partition_proteins` - Proteins being analyzed
+- `partition_domains` - Putative domain assignments
+- `domain_evidence` - Supporting evidence for assignments
+- `domain_comparisons` - Comparisons with reference domains
 
-## Learn More
+## Future Integrations
 
-To learn more about Next.js, take a look at the following resources:
+### Mol* Structure Viewer
+- 3D protein structure visualization
+- Domain boundary highlighting
+- Interactive domain selection
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### EBI Nightingale
+- Sequence annotation viewer
+- Integration with UniProt, Pfam
+- Secondary structure display
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Manual Curation Tools
+- Boundary editing interface
+- Domain reassignment workflow
+- Batch curation capabilities
 
-## Deploy on Vercel
+## Contributing
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## License
+
+This project is licensed under the MIT License.

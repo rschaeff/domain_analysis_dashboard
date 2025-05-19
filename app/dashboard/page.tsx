@@ -90,11 +90,15 @@ export default function DashboardPage() {
     setSelectedDomain(domain)
   }
 
-const handleViewDomain = (domain: DomainSummary) => {
-    router.push(`/domains/${domain.id}`)  // Changed from /domain/ to /domains/
+
+  const handleViewDomain = (domain: DomainSummary) => {
+    console.log('Clicking domain with ID:', domain.id)
+    console.log('Full domain object:', domain)
+    console.log('Available keys:', Object.keys(domain))
+    router.push(`/domains/${domain.id}`)
   }
 
-    const handleViewProtein = (domain: DomainSummary) => {
+  const handleViewProtein = (domain: DomainSummary) => {
         // Debug: let's see what fields are available
         console.log('Domain object:', domain)
 
@@ -106,7 +110,7 @@ const handleViewDomain = (domain: DomainSummary) => {
         } else {
           console.error('No protein ID found for domain:', domain)
         }
-      }
+   }
 
   // Table columns configuration
   const columns = [

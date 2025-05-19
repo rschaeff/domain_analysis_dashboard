@@ -1,165 +1,314 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/database'
-import { DomainFilters, PaginationParams } from '@/lib/types'
-import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@/lib/config'
+'use client'
 
-// Custom JSON serializer to handle BigInt
-function serializeBigInt(obj: any): any {
-  return JSON.parse(JSON.stringify(obj, (key, value) =>
-    typeof value === 'bigint' ? Number(value) : value
-  ))
-}
+import React from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { DomainSummary, DomainEvidence, DomainComparison } from '@/lib/types'
+import { SequenceViewer } from './components/SequenceViewer'
+import { StructureViewer } from './components/StructureViewer'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { ArrowLeft, Edit, Download, Share } from 'lucide-react'
 
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url)
+export default function DomainDetailPage() {
+  const params = useParams()
+  const router = useRouter()
+  const domainId = params.id as string
 
-    // Parse pagination parameters
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
-    const size = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(searchParams.get('size') || DEFAULT_PAGE_SIZE.toString())))
-    const skip = (page - 1) * size
+  const [domain, setDomain] = useState<DomainSummary | null>(null)
+  const [evidence, setEvidence] = useState<DomainEvidence[]>([])
+  const [comparisons, setComparisons] = useState<DomainComparison[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-    // Parse filters
-    const filters: DomainFilters = {}
+  // Fetch domain details
+  useEffect(() => {
+    const fetchDomainDetails = async () => {
+      setLoading(true)
+      setError(null)
 
-    if (searchParams.get('pdb_id')) {
-      filters.pdb_id = searchParams.get('pdb_id')!
-    }
+      try {
+        // Fetch domain data
+        const domainResponse = await fetch(`/api/domains/${domainId}`)
+        if (!domainResponse.ok) {
+          throw new Error('Failed to fetch domain details')
+        }
+        const domainData = await domainResponse.json()
+        setDomain(domainData)
 
-    if (searchParams.get('chain_id')) {
-      filters.chain_id = searchParams.get('chain_id')!
-    }
+        // Fetch evidence
+        const evidenceResponse = await fetch(`/api/domains/${domainId}/evidence`)
+        if (evidenceResponse.ok) {
+          const evidenceData = await evidenceResponse.json()
+          setEvidence(evidenceData)
+        }
 
-    if (searchParams.get('t_groups')) {
-      filters.t_group = searchParams.get('t_groups')!.split(',')
-    }
-
-    if (searchParams.get('h_groups')) {
-      filters.h_group = searchParams.get('h_groups')!.split(',')
-    }
-
-    if (searchParams.get('min_confidence')) {
-      filters.min_confidence = parseFloat(searchParams.get('min_confidence')!)
-    }
-
-    if (searchParams.get('max_confidence')) {
-      filters.max_confidence = parseFloat(searchParams.get('max_confidence')!)
-    }
-
-    // Build the raw SQL query for partition_domain_summary view
-    let baseQuery = `
-      SELECT
-        pp.pdb_id,
-        pp.chain_id,
-        pp.batch_id,
-        pp.reference_version,
-        pp.timestamp,
-        pd.domain_number,
-        pd.domain_id,
-        pd.start_pos,
-        pd.end_pos,
-        pd.range,
-        pd.source,
-        pd.source_id,
-        pd.confidence,
-        pd.t_group,
-        pd.h_group,
-        pd.x_group,
-        pd.a_group,
-        COUNT(de.id) as evidence_count,
-        COALESCE(STRING_AGG(DISTINCT de.evidence_type, ', '), 'none') as evidence_types
-      FROM pdb_analysis.partition_proteins pp
-      JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
-      LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-    `
-
-    // Build WHERE clause
-    const whereConditions: string[] = []
-    const queryParams: any[] = []
-    let paramIndex = 1
-
-    if (filters.pdb_id) {
-      whereConditions.push(`pp.pdb_id = $${paramIndex}`)
-      queryParams.push(filters.pdb_id)
-      paramIndex++
-    }
-
-    if (filters.chain_id) {
-      whereConditions.push(`pp.chain_id = $${paramIndex}`)
-      queryParams.push(filters.chain_id)
-      paramIndex++
-    }
-
-    if (filters.t_group && filters.t_group.length > 0) {
-      whereConditions.push(`pd.t_group = ANY($${paramIndex})`)
-      queryParams.push(filters.t_group)
-      paramIndex++
-    }
-
-    if (filters.h_group && filters.h_group.length > 0) {
-      whereConditions.push(`pd.h_group = ANY($${paramIndex})`)
-      queryParams.push(filters.h_group)
-      paramIndex++
-    }
-
-    if (filters.min_confidence !== undefined) {
-      whereConditions.push(`pd.confidence >= $${paramIndex}`)
-      queryParams.push(filters.min_confidence)
-      paramIndex++
-    }
-
-    if (filters.max_confidence !== undefined) {
-      whereConditions.push(`pd.confidence <= $${paramIndex}`)
-      queryParams.push(filters.max_confidence)
-      paramIndex++
-    }
-
-    if (whereConditions.length > 0) {
-      baseQuery += ' WHERE ' + whereConditions.join(' AND ')
-    }
-
-    // Add GROUP BY and ORDER BY
-    baseQuery += `
-      GROUP BY
-        pp.pdb_id, pp.chain_id, pp.batch_id, pp.reference_version, pp.timestamp,
-        pd.domain_number, pd.domain_id, pd.start_pos, pd.end_pos, pd.range,
-        pd.source, pd.source_id, pd.confidence, pd.t_group, pd.h_group, pd.x_group, pd.a_group
-      ORDER BY pp.pdb_id, pp.chain_id, pd.domain_number
-    `
-
-    // Get total count for pagination
-    const countQuery = `
-      SELECT COUNT(DISTINCT (pp.id, pd.id)) as total
-      FROM pdb_analysis.partition_proteins pp
-      JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
-      ${whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : ''}
-    `
-
-    // Execute queries
-    const [results, countResult] = await Promise.all([
-      prisma.$queryRawUnsafe(`${baseQuery} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`, ...queryParams, size, skip),
-      prisma.$queryRawUnsafe(countQuery, ...queryParams.slice(0, whereConditions.length))
-    ])
-
-    // Serialize results to handle BigInt
-    const serializedResults = serializeBigInt(results)
-    const total = Number((countResult as any)[0]?.total || 0)
-
-    return NextResponse.json({
-      data: serializedResults,
-      pagination: {
-        page,
-        size,
-        total: total,
-        totalPages: Math.ceil(total / size)
+        // Fetch comparisons
+        const comparisonsResponse = await fetch(`/api/domains/${domainId}/comparisons`)
+        if (comparisonsResponse.ok) {
+          const comparisonsData = await comparisonsResponse.json()
+          setComparisons(comparisonsData)
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred')
+      } finally {
+        setLoading(false)
       }
-    })
+    }
 
-  } catch (error) {
-    console.error('Error fetching domains:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch domains' },
-      { status: 500 }
+    if (domainId) {
+      fetchDomainDetails()
+    }
+  }, [domainId])
+
+  const handleBack = () => {
+    router.back()
+  }
+
+  const handleEdit = () => {
+    // Placeholder for edit functionality
+    console.log('Edit domain:', domainId)
+  }
+
+  const handleDownload = () => {
+    // Placeholder for download functionality
+    console.log('Download domain data:', domainId)
+  }
+
+  const handleShare = () => {
+    // Placeholder for share functionality
+    navigator.clipboard.writeText(window.location.href)
+  }
+
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center">
+          <LoadingSpinner size="lg" />
+          <p className="mt-4 text-gray-600">Loading domain details...</p>
+        </div>
+      </div>
     )
   }
+
+  if (error || !domain) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Card className="p-8 text-center">
+          <h2 className="text-xl font-semibold mb-2">Error Loading Domain</h2>
+          <p className="text-gray-600 mb-4">{error || 'Domain not found'}</p>
+          <Button onClick={handleBack}>Go Back</Button>
+        </Card>
+      </div>
+    )
+  }
+
+  // Mock sequence data (would come from API)
+  const mockSequence = 'MKWVTFISLLLLFSSAYSRGVFRRDTHKSEIAHRFKDLGEEHFKGLVLIAFSQYLQQCPFDEHVKLVNELTEFAKTCVADESHAGCEKSLHTLFGDELCKVASLRETYGDMADCCEKQEPERNECFLSHKDDSPDLPKLKPDPNTLCDEFKADEKKFWGKYLYEIARRHPYFYAPELLYYANKYNGVFQECCQAEDKGACLLPKIETMREKVLASSARQRLRCASIQKFGERALKAWSVARLSQKFPKAEFVEVTKLVTDLTKVHKECCHGDLLECADDRADLAKYICDNQDTISSKLKECCDKPLLEKSHCIAEVEKDAIPENLPPLTADFAEDKDVCKNYQEAKDAFLGSFLYEYSRRHPEYAVSVLLRLAKEYEATLEECCAKDDPHACYSTVFDKLKHLVDEPQNLIKQNCDQFEKLGEYGFQNALIVRYTRKVPQVSTPTLVEVSRSLGKVGTRCCTKPESERMPCTEDYLSLILNRLCVLHEKTPVSEKVTKCCTESLVNRRPCFSALTPDETYVPKAFDEKLFTFHADICTLPDTEKQIKKQTALVELLKHKPKATEEQLKTVMENFVAFVDKCCAADDKEACFAVEGPKLVVSTQTALA'
+
+  return (
+    <div className="container mx-auto px-4 py-8 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" onClick={handleBack}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">
+              Domain: {domain.domain_id || `${domain.pdb_id}_${domain.chain_id}_d${domain.domain_number}`}
+            </h1>
+            <p className="text-gray-600 mt-1">
+              Range: {domain.range || `${domain.start_pos}-${domain.end_pos}`} | Classification: {domain.t_group || 'None'}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleEdit}>
+            <Edit className="w-4 h-4 mr-2" />
+            Edit
+          </Button>
+          <Button variant="outline" onClick={handleShare}>
+            <Share className="w-4 h-4 mr-2" />
+            Share
+          </Button>
+          <Button variant="outline" onClick={handleDownload}>
+            <Download className="w-4 h-4 mr-2" />
+            Download
+          </Button>
+        </div>
+      </div>
+
+      {/* Domain Overview */}
+      <Card className="p-6">
+        <h2 className="text-xl font-semibold mb-4">Domain Overview</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Basic Information</h3>
+            <div className="space-y-2 text-sm">
+              <div><span className="font-medium">ID:</span> {domain.domain_id || 'N/A'}</div>
+              <div><span className="font-medium">Range:</span> {domain.range || `${domain.start_pos}-${domain.end_pos}`}</div>
+              <div><span className="font-medium">Length:</span> {domain.end_pos - domain.start_pos + 1} residues</div>
+              <div><span className="font-medium">Source:</span> {domain.source || 'N/A'}</div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Classification</h3>
+            <div className="space-y-2 text-sm">
+              <div><span className="font-medium">T-Group:</span> {domain.t_group || 'Not assigned'}</div>
+              <div><span className="font-medium">H-Group:</span> {domain.h_group || 'Not assigned'}</div>
+              <div><span className="font-medium">X-Group:</span> {domain.x_group || 'Not assigned'}</div>
+              <div><span className="font-medium">A-Group:</span> {domain.a_group || 'Not assigned'}</div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Quality Metrics</h3>
+            <div className="space-y-2 text-sm">
+              <div>
+                <span className="font-medium">Confidence:</span>{' '}
+                <span className={`${
+                  domain.confidence && domain.confidence >= 0.8 ? 'text-green-600' :
+                  domain.confidence && domain.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'
+                }`}>
+                  {domain.confidence ? domain.confidence.toFixed(3) : 'N/A'}
+                </span>
+              </div>
+              <div><span className="font-medium">Evidence Count:</span> {domain.evidence_count}</div>
+              <div><span className="font-medium">Evidence Types:</span> {domain.evidence_types}</div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Processing Info</h3>
+            <div className="space-y-2 text-sm">
+              <div><span className="font-medium">Batch:</span> {domain.batch_id || 'N/A'}</div>
+              <div><span className="font-medium">Reference:</span> {domain.reference_version || 'N/A'}</div>
+              <div><span className="font-medium">Timestamp:</span> {new Date(domain.timestamp).toLocaleDateString()}</div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Evidence Details */}
+      {evidence.length > 0 && (
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-4">Supporting Evidence</h2>
+          <div className="space-y-4">
+            {evidence.map((ev, index) => (
+              <div key={ev.id} className="border rounded-lg p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-medium">{ev.evidence_type.toUpperCase()} Evidence</h3>
+                    <p className="text-sm text-gray-600">Source: {ev.source_id || 'N/A'}</p>
+                  </div>
+                  <div className="text-right text-sm">
+                    {ev.evalue && <div>E-value: {ev.evalue}</div>}
+                    {ev.probability && <div>Probability: {ev.probability.toFixed(3)}</div>}
+                    {ev.score && <div>Score: {ev.score}</div>}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <div><span className="font-medium">Hit ID:</span> {ev.hit_id || ev.source_id || 'N/A'}</div>
+                    <div><span className="font-medium">Query Range:</span> {ev.query_range || 'N/A'}</div>
+                    <div><span className="font-medium">Hit Range:</span> {ev.hit_range || 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div><span className="font-medium">Classification:</span> {ev.t_group || 'N/A'}</div>
+                    <div><span className="font-medium">PDB:</span> {
+                      ev.pdb_id && ev.chain_id ? `${ev.pdb_id}_${ev.chain_id}` :
+                      ev.source_id || ev.hit_id || 'N/A'
+                    }</div>
+                    <div><span className="font-medium">HSP Count:</span> {ev.hsp_count || 'N/A'}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Comparison with References */}
+      {comparisons.length > 0 && (
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-4">Reference Comparisons</h2>
+          <div className="space-y-4">
+            {comparisons.map((comp, index) => (
+              <div key={comp.id} className="border rounded-lg p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-medium">{comp.reference_type} Reference</h3>
+                    <p className="text-sm text-gray-600">
+                      Domain: {comp.reference_domain_id} | Range: {comp.reference_domain_range}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {comp.t_group_match && <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">T-Match</span>}
+                    {comp.h_group_match && <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">H-Match</span>}
+                    {comp.x_group_match && <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded">X-Match</span>}
+                    {comp.a_group_match && <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs rounded">A-Match</span>}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <div className="font-medium">Jaccard Similarity</div>
+                    <div>{comp.jaccard_similarity ? comp.jaccard_similarity.toFixed(3) : 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">Precision</div>
+                    <div>{comp.precision ? comp.precision.toFixed(3) : 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">Recall</div>
+                    <div>{comp.recall ? comp.recall.toFixed(3) : 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">F1 Score</div>
+                    <div>{comp.f1_score ? comp.f1_score.toFixed(3) : 'N/A'}</div>
+                  </div>
+                </div>
+                <div className="mt-3 text-sm">
+                  <div>
+                    <span className="font-medium">Overlap:</span> {comp.overlap_residues} residues |{' '}
+                    <span className="font-medium">Union:</span> {comp.union_residues} residues
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Visualization Tabs */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <SequenceViewer
+          protein_id={`${domain.pdb_id}_${domain.chain_id}`}
+          sequence={mockSequence}
+          domains={[{
+            start: domain.start_pos,
+            end: domain.end_pos,
+            label: `Domain ${domain.domain_number}`,
+            color: '#3b82f6'
+          }]}
+          features={[]}
+        />
+
+        <StructureViewer
+          pdb_id={domain.pdb_id}
+          chain_id={domain.chain_id}
+          domains={[{
+            start: domain.start_pos,
+            end: domain.end_pos,
+            label: `Domain ${domain.domain_number}`,
+            color: '#3b82f6'
+          }]}
+          onDomainClick={(domain) => console.log('Domain clicked:', domain)}
+        />
+      </div>
+    </div>
+  )
 }

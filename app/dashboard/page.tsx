@@ -343,10 +343,10 @@ export default function DashboardPage() {
                 <div>
                   <label className="text-sm font-medium text-gray-700">Classification</label>
                   <div className="text-sm space-y-1">
-                    <div>T: {selectedDomain.t_group || 'N/A'}</div>
-                    <div>H: {selectedDomain.h_group || 'N/A'}</div>
-                    <div>X: {selectedDomain.x_group || 'N/A'}</div>
-                    <div>A: {selectedDomain.a_group || 'N/A'}</div>
+                    <div>T: {selectedDomain.t_group || 'Not assigned'}</div>
+                    <div>H: {selectedDomain.h_group || 'Not assigned'}</div>
+                    <div>X: {selectedDomain.x_group || 'Not assigned'}</div>
+                    <div>A: {selectedDomain.a_group || 'Not assigned'}</div>
                   </div>
                 </div>
                 <div>

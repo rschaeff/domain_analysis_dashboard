@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
 import { Eye, Download, BarChart3 } from 'lucide-react'
+import { useNavigation } from '@/lib/navigation'
 
 // Enhanced API Response Type
 interface DomainsResponse {
@@ -24,8 +25,11 @@ interface DomainsResponse {
   }
 }
 
+
+
 export default function DashboardPage() {
   const router = useRouter()
+  const nav = useNavigation()
   const [domains, setDomains] = useState<DomainSummary[]>([])
   const [loading, setLoading] = useState(false) // Start with false to avoid hydration issues
   const [statsLoading, setStatsLoading] = useState(false)
@@ -147,10 +151,14 @@ export default function DashboardPage() {
   }
 
   const handleViewProtein = (domain: DomainSummary) => {
-    if (domain.protein_id) {
-      router.push(`/protein/${domain.protein_id}`)
+    if (domain.pdb_id && domain.chain_id) {
+      // Use the navigation helper for consistent URL generation
+      nav.toProtein({
+        pdb_id: domain.pdb_id,
+        chain_id: domain.chain_id
+      })
     } else {
-      console.error('No protein_id found for domain:', domain)
+      console.error('Missing pdb_id or chain_id for domain:', domain)
     }
   }
 

@@ -2,17 +2,15 @@
 'use client'
 
 import React from 'react'
-import { Molstar } from 'molstar-react'
+import { CustomMolstar } from './CustomMolstar'
 
 export function MolstarTest() {
   return (
-    <div style={{ width: '100%', height: '400px' }}>
-      <Molstar
+    <div className="border rounded-lg overflow-hidden" style={{ width: '100%', height: '400px' }}>
+      <CustomMolstar
         pdbId="1cbs"
-        options={{
-          layoutIsExpanded: false,
-          viewportBackground: '#f8fafc',
-        }}
+        chainId="A"
+        onReady={(plugin) => console.log('Mol* is ready')}
       />
     </div>
   )

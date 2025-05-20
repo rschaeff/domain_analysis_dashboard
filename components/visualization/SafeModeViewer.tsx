@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
+import { getValidFormatName, detectFormatFromContent, getFileExtension } from './formats';
 
 interface MolstarViewerProps {
   pdbId: string;
@@ -171,14 +172,17 @@ export function SafeModeViewer({
         // Try parsing with determined format
         let trajectory;
         try {
-          trajectory = await plugin.builders.structure.parseTrajectory(data, dataFormat);
+          log(`Explicitly using format: "${dataFormat}"`);
+          trajectory = await plugin.builders.structure.parseTrajectory(data, dataFormat, { label });
           log(`${dataFormat.toUpperCase()} format parsed successfully`);
         } catch (parseError) {
-          // Try fallback format
-          log(`Error parsing as ${dataFormat}, trying alternative format`);
-          const fallbackFormat = dataFormat === 'mmcif' ? 'pdb' : 'mmcif';
+          log(`Error parsing as ${dataFormat}: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
 
-          trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat);
+          // Try fallback format
+          const fallbackFormat = dataFormat === 'mmcif' ? 'pdb' : 'mmcif';
+          log(`Trying alternative format: "${fallbackFormat}"`);
+
+          trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat, { label });
           log(`${fallbackFormat.toUpperCase()} format parsed successfully`);
         }
 
@@ -241,34 +245,6 @@ export function SafeModeViewer({
     }
   }, [pdbId, chainId, status, canLoad, handleError, log, onReady]);
 
-    // Debug function to show structure info
-      const showStructureInfo = useCallback((plugin: any) => {
-        try {
-          if (!plugin.managers?.structure?.hierarchy?.current?.structures) {
-            log('No structures available');
-            return;
-          }
-
-          const structures = plugin.managers.structure.hierarchy.current.structures;
-          log(`Structure count: ${structures.length}`);
-
-          structures.forEach((struct: any, i: number) => {
-            const label = struct.cell?.obj?.label || 'Unnamed';
-            const atoms = struct.cell?.obj?.data?.model?.atomCount || 0;
-            log(`Structure ${i+1}: ${label} (${atoms} atoms)`);
-
-            if (struct.components?.length) {
-              log(`  Components: ${struct.components.length}`);
-              struct.components.forEach((comp: any, j: number) => {
-                log(`  - Component ${j+1}: ${comp.cell?.obj?.label || 'Unnamed'}`);
-              });
-            }
-          });
-        } catch (error) {
-          log(`Error in structure info: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }, [log]);
-
   // CSS styling effect
   useEffect(() => {
     try {
@@ -313,6 +289,34 @@ export function SafeModeViewer({
       log(`Error adding CSS: ${cssError instanceof Error ? cssError.message : String(cssError)}`);
     }
   }, []);
+
+    // Debug function to show structure info
+      const showStructureInfo = useCallback((plugin: any) => {
+        try {
+          if (!plugin.managers?.structure?.hierarchy?.current?.structures) {
+            log('No structures available');
+            return;
+          }
+
+          const structures = plugin.managers.structure.hierarchy.current.structures;
+          log(`Structure count: ${structures.length}`);
+
+          structures.forEach((struct: any, i: number) => {
+            const label = struct.cell?.obj?.label || 'Unnamed';
+            const atoms = struct.cell?.obj?.data?.model?.atomCount || 0;
+            log(`Structure ${i+1}: ${label} (${atoms} atoms)`);
+
+            if (struct.components?.length) {
+              log(`  Components: ${struct.components.length}`);
+              struct.components.forEach((comp: any, j: number) => {
+                log(`  - Component ${j+1}: ${comp.cell?.obj?.label || 'Unnamed'}`);
+              });
+            }
+          });
+        } catch (error) {
+          log(`Error in structure info: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }, [log]);
 
   // Cleanup effect
   useEffect(() => {

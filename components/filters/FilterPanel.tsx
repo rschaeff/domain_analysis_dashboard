@@ -1,21 +1,210 @@
-// Enhanced Filter Panel with Better UX
-// components/filters/FilterPanel.tsx
-
-'use client'
-
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { DomainFilters } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { Select } from '@/components/ui/Select'
 import { Card } from '@/components/ui/Card'
-import { ChevronDown, ChevronUp, Filter, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Filter, X, Search, Loader } from 'lucide-react'
 
 interface FilterPanelProps {
   filters: DomainFilters
   onFiltersChange: (filters: DomainFilters) => void
   onReset: () => void
   className?: string
+}
+
+interface GroupOption {
+  value: string
+  label: string
+  count: number
+}
+
+interface AutocompleteProps {
+  type: 'x_group' | 'h_group' | 't_group' | 'a_group'
+  value: string[]
+  onChange: (value: string[]) => void
+  placeholder: string
+  label: string
+}
+
+// Autocomplete component for classification groups
+function ClassificationAutocomplete({ type, value, onChange, placeholder, label }: AutocompleteProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [options, setOptions] = useState<GroupOption[]>([])
+  const [loading, setLoading] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const searchTimeoutRef = useRef<NodeJS.Timeout>()
+
+  // Fetch options from API
+  const fetchOptions = useCallback(async (searchTerm: string = '') => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({
+        type,
+        limit: '20'
+      })
+      if (searchTerm) {
+        params.set('search', searchTerm)
+      }
+
+      const response = await fetch(`/api/filter-options?${params}`)
+      if (!response.ok) throw new Error('Failed to fetch options')
+
+      const data = await response.json()
+      setOptions(data.options || [])
+      setHasMore(data.hasMore || false)
+    } catch (error) {
+      console.error('Error fetching filter options:', error)
+      setOptions([])
+    } finally {
+      setLoading(false)
+    }
+  }, [type])
+
+  // Debounced search
+  const debouncedSearch = useCallback((searchTerm: string) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      fetchOptions(searchTerm)
+    }, 300)
+  }, [fetchOptions])
+
+  // Handle search input
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const searchTerm = e.target.value
+    setSearch(searchTerm)
+    debouncedSearch(searchTerm)
+  }
+
+  // Initial load
+  useEffect(() => {
+    if (isOpen && options.length === 0) {
+      fetchOptions()
+    }
+  }, [isOpen, fetchOptions, options.length])
+
+  // Handle clicks outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Toggle option selection
+  const toggleOption = (optionValue: string) => {
+    const newValue = value.includes(optionValue)
+      ? value.filter(v => v !== optionValue)
+      : [...value, optionValue]
+    onChange(newValue)
+  }
+
+  // Remove selected option
+  const removeOption = (optionValue: string) => {
+    onChange(value.filter(v => v !== optionValue))
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="block text-sm font-medium mb-2">
+        {label}
+        {value.length > 0 && (
+          <span className="ml-2 text-xs text-gray-500">
+            ({value.length} selected)
+          </span>
+        )}
+      </label>
+
+      {/* Selected values */}
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {value.map(val => (
+            <span
+              key={val}
+              className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm"
+            >
+              {val}
+              <button
+                onClick={() => removeOption(val)}
+                className="hover:text-blue-900"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Input field */}
+      <div className="relative">
+        <Input
+          placeholder={placeholder}
+          value={search}
+          onChange={handleSearchChange}
+          onFocus={() => setIsOpen(true)}
+          className="pr-10"
+        />
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="absolute right-3 top-1/2 transform -translate-y-1/2"
+        >
+          {loading ? (
+            <Loader className="w-4 h-4 animate-spin text-gray-500" />
+          ) : (
+            <Search className="w-4 h-4 text-gray-500" />
+          )}
+        </button>
+      </div>
+
+      {/* Dropdown */}
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
+          {options.length === 0 && !loading ? (
+            <div className="px-3 py-2 text-gray-500 text-sm">
+              {search ? 'No matching groups found' : 'Start typing to search...'}
+            </div>
+          ) : (
+            <>
+              {options.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => toggleOption(option.value)}
+                  className={`w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center justify-between ${
+                    value.includes(option.value) ? 'bg-blue-50 text-blue-700' : ''
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={value.includes(option.value)}
+                      readOnly
+                      className="w-4 h-4"
+                    />
+                    {option.label}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {option.count.toLocaleString()}
+                  </span>
+                </button>
+              ))}
+              {hasMore && (
+                <div className="px-3 py-2 text-xs text-gray-500 border-t">
+                  Type to search for more groups...
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function FilterPanel({
@@ -25,147 +214,6 @@ export function FilterPanel({
   className = ''
 }: FilterPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false)
-
-  // Correct mock data with proper ECOD hierarchy
-  const xGroups = ['2001', '2002', '2003', '2004', '2005', '3001', '3002', '3003', '3004', '3005']
-  const allHGroups = [
-    '2001.1', '2001.2', '2001.3',
-    '2002.1', '2002.2',
-    '2003.1', '2003.2', '2003.3',
-    '2004.1', '2004.2',
-    '2005.1', '2005.2',
-    '3001.1', '3001.2',
-    '3002.1', '3002.2',
-    '3003.1', '3003.2', '3003.3',
-    '3004.1', '3004.2',
-    '3005.1', '3005.2'
-  ]
-  const allTGroups = [
-    '2001.1.1', '2001.1.2', '2001.2.1', '2001.3.1',
-    '2002.1.1', '2002.1.2', '2002.2.1',
-    '2003.1.1', '2003.1.2', '2003.2.1', '2003.3.1',
-    '2004.1.1', '2004.1.2', '2004.2.1',
-    '2005.1.1', '2005.2.1',
-    '3001.1.1', '3001.1.2', '3001.2.1',
-    '3002.1.1', '3002.1.2',
-    '3003.1.1', '3003.2.1', '3003.3.1',
-    '3004.1.1', '3004.1.2',
-    '3005.1.1', '3005.1.2'
-  ]
-
-  // Helper functions for correct hierarchical filtering
-  const getParentHGroup = (tGroup: string): string => {
-    const parts = tGroup.split('.')
-    return `${parts[0]}.${parts[1]}` // e.g., "2001.1.1" -> "2001.1"
-  }
-
-  const getParentXGroup = (hGroup: string): string => {
-    return hGroup.split('.')[0] // e.g., "2001.1" -> "2001"
-  }
-
-  const getTGroupsForHGroup = (hGroup: string): string[] => {
-    return allTGroups.filter(tGroup => tGroup.startsWith(hGroup + '.'))
-  }
-
-  const getHGroupsForXGroup = (xGroup: string): string[] => {
-    return allHGroups.filter(hGroup => hGroup.startsWith(xGroup + '.'))
-  }
-
-  const getFilteredTGroups = (): string[] => {
-    const selectedHGroups = filters.h_group || []
-    if (selectedHGroups.length === 0) {
-      return allTGroups
-    }
-    // Only show T-groups that belong to selected H-groups
-    return allTGroups.filter(tGroup =>
-      selectedHGroups.some(hGroup => tGroup.startsWith(hGroup + '.'))
-    )
-  }
-
-  const getFilteredHGroups = (): string[] => {
-    const selectedXGroups = filters.x_group || []
-    if (selectedXGroups.length === 0) {
-      return allHGroups
-    }
-    // Only show H-groups that belong to selected X-groups
-    return allHGroups.filter(hGroup =>
-      selectedXGroups.some(xGroup => hGroup.startsWith(xGroup + '.'))
-    )
-  }
-
-  // Enhanced update filter to handle correct hierarchical relationships
-  const updateFilterWithHierarchy = useCallback(<K extends keyof DomainFilters>(
-    key: K,
-    value: DomainFilters[K]
-  ) => {
-    let newFilters = { ...filters, [key]: value }
-
-    // Handle X-group changes - clear conflicting H-groups and T-groups
-    if (key === 'x_group' && Array.isArray(value)) {
-      const selectedXGroups = value as string[]
-      const currentHGroups = filters.h_group || []
-      const currentTGroups = filters.t_group || []
-
-      if (selectedXGroups.length > 0) {
-        // Filter H-groups to only keep those that belong to selected X-groups
-        const validHGroups = currentHGroups.filter(hGroup =>
-          selectedXGroups.some(xGroup => hGroup.startsWith(xGroup + '.'))
-        )
-        newFilters.h_group = validHGroups.length > 0 ? validHGroups : undefined
-
-        // Filter T-groups based on remaining valid H-groups
-        if (validHGroups.length > 0) {
-          const validTGroups = currentTGroups.filter(tGroup =>
-            validHGroups.some(hGroup => tGroup.startsWith(hGroup + '.'))
-          )
-          newFilters.t_group = validTGroups.length > 0 ? validTGroups : undefined
-        } else {
-          newFilters.t_group = undefined
-        }
-      }
-    }
-
-    // Handle H-group changes - clear conflicting T-groups, auto-select X-groups
-    if (key === 'h_group' && Array.isArray(value)) {
-      const selectedHGroups = value as string[]
-      const currentTGroups = filters.t_group || []
-
-      if (selectedHGroups.length > 0) {
-        // Auto-select parent X-groups
-        const parentXGroups = [...new Set(selectedHGroups.map(getParentXGroup))]
-        const currentXGroups = filters.x_group || []
-        const allXGroups = [...new Set([...currentXGroups, ...parentXGroups])]
-        newFilters.x_group = allXGroups
-
-        // Filter T-groups to only keep those that belong to selected H-groups
-        const validTGroups = currentTGroups.filter(tGroup =>
-          selectedHGroups.some(hGroup => tGroup.startsWith(hGroup + '.'))
-        )
-        newFilters.t_group = validTGroups.length > 0 ? validTGroups : undefined
-      }
-    }
-
-    // Handle T-group changes - auto-select parent H-groups and X-groups
-    if (key === 't_group' && Array.isArray(value)) {
-      const selectedTGroups = value as string[]
-
-      if (selectedTGroups.length > 0) {
-        // Auto-select parent H-groups
-        const parentHGroups = [...new Set(selectedTGroups.map(getParentHGroup))]
-        const currentHGroups = filters.h_group || []
-        const allHGroups = [...new Set([...currentHGroups, ...parentHGroups])]
-        newFilters.h_group = allHGroups
-
-        // Auto-select parent X-groups
-        const parentXGroups = [...new Set(parentHGroups.map(getParentXGroup))]
-        const currentXGroups = filters.x_group || []
-        const allXGroups = [...new Set([...currentXGroups, ...parentXGroups])]
-        newFilters.x_group = allXGroups
-      }
-    }
-
-    onFiltersChange(newFilters)
-  }, [filters, onFiltersChange])
 
   const updateFilter = useCallback(<K extends keyof DomainFilters>(
     key: K,
@@ -185,10 +233,13 @@ export function FilterPanel({
 
   const activeFilterCount = Object.keys(filters).filter(key => {
     const value = filters[key as keyof DomainFilters]
+    if (Array.isArray(value)) {
+      return value.length > 0
+    }
     return value !== undefined && value !== null && value !== ''
   }).length
 
-  // Quick clear for specific filter types
+  // Quick clear functions
   const clearConfidenceFilters = () => {
     const newFilters = { ...filters }
     delete newFilters.min_confidence
@@ -208,7 +259,7 @@ export function FilterPanel({
   return (
     <Card className={`p-6 ${className}`}>
       <div className="space-y-6">
-        {/* Header with filter count */}
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Filter className="w-5 h-5 text-gray-500" />
@@ -251,8 +302,8 @@ export function FilterPanel({
           </div>
         </div>
 
-        {/* Primary filters - always visible */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Primary filters */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium mb-2">PDB ID</label>
             <Input
@@ -273,88 +324,18 @@ export function FilterPanel({
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">
-              X-Groups (Architecture)
-              {filters.x_group && filters.x_group.length > 0 && (
-                <span className="ml-2 text-xs text-gray-500">
-                  ({filters.x_group.length} selected)
-                </span>
-              )}
-            </label>
-            <Select
-              multiple
-              placeholder="Select X-Groups..."
-              value={filters.x_group || []}
-              onChange={(value) => updateFilterWithHierarchy('x_group', value.length > 0 ? value : undefined)}
-              options={availableGroups.x_groups.map(group => ({ value: group, label: `X-Group ${group}` }))}
-              search
+            <label className="block text-sm font-medium mb-2">Domain Number</label>
+            <Input
+              type="number"
+              min="1"
+              placeholder="e.g., 1"
+              value={filters.domain_number ?? ''}
+              onChange={(e) => updateFilter('domain_number', e.target.value ? parseInt(e.target.value) : undefined)}
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              H-Groups (Homology)
-              {filters.h_group && filters.h_group.length > 0 && (
-                <span className="ml-2 text-xs text-gray-500">
-                  ({filters.h_group.length} selected)
-                </span>
-              )}
-            </label>
-            <Select
-              multiple
-              placeholder={
-                filters.x_group && filters.x_group.length > 0
-                  ? "Select H-Groups from chosen X-Groups..."
-                  : "Select H-Groups..."
-              }
-              value={filters.h_group || []}
-              onChange={(value) => updateFilterWithHierarchy('h_group', value.length > 0 ? value : undefined)}
-              options={getFilteredHGroups().map(group => ({
-                value: group,
-                label: `H-Group ${group}`
-              }))}
-              search
-            />
-            {filters.x_group && filters.x_group.length > 0 && (
-              <div className="mt-1 text-xs text-blue-600">
-                Showing H-groups for: {filters.x_group.join(', ')}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              T-Groups (Topology)
-              {filters.t_group && filters.t_group.length > 0 && (
-                <span className="ml-2 text-xs text-gray-500">
-                  ({filters.t_group.length} selected)
-                </span>
-              )}
-            </label>
-            <Select
-              multiple
-              placeholder={
-                filters.h_group && filters.h_group.length > 0
-                  ? "Select T-Groups from chosen H-Groups..."
-                  : "Select T-Groups..."
-              }
-              value={filters.t_group || []}
-              onChange={(value) => updateFilterWithHierarchy('t_group', value.length > 0 ? value : undefined)}
-              options={getFilteredTGroups().map(group => ({
-                value: group,
-                label: `T-Group ${group}`
-              }))}
-              search
-            />
-            {filters.h_group && filters.h_group.length > 0 && (
-              <div className="mt-1 text-xs text-blue-600">
-                Showing T-groups for: {filters.h_group.join(', ')}
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Confidence range with quick presets */}
+        {/* Confidence range */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-sm font-medium">Confidence Range</label>
@@ -402,7 +383,7 @@ export function FilterPanel({
                 }}
                 className="px-2 py-1 text-xs"
               >
-                High
+                High (≥0.8)
               </Button>
               <Button
                 size="sm"
@@ -413,7 +394,7 @@ export function FilterPanel({
                 }}
                 className="px-2 py-1 text-xs"
               >
-                Med
+                Medium
               </Button>
               <Button
                 size="sm"
@@ -424,76 +405,109 @@ export function FilterPanel({
                 }}
                 className="px-2 py-1 text-xs"
               >
-                Low
+                Low (<0.5)
               </Button>
             </div>
+          </div>
+        </div>
+
+        {/* ECOD Classification - always visible with autocomplete */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-md font-medium text-gray-700">ECOD Classification</h4>
+            {(filters.t_group?.length || filters.h_group?.length || filters.x_group?.length || filters.a_group?.length) && (
+              <button
+                onClick={clearClassificationFilters}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                Clear All Classification
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ClassificationAutocomplete
+              type="x_group"
+              value={filters.x_group || []}
+              onChange={(value) => updateFilter('x_group', value.length > 0 ? value : undefined)}
+              placeholder="Search X-Groups (Architecture)..."
+              label="X-Groups (Architecture)"
+            />
+
+            <ClassificationAutocomplete
+              type="h_group"
+              value={filters.h_group || []}
+              onChange={(value) => updateFilter('h_group', value.length > 0 ? value : undefined)}
+              placeholder="Search H-Groups (Homology)..."
+              label="H-Groups (Homology)"
+            />
+
+            <ClassificationAutocomplete
+              type="t_group"
+              value={filters.t_group || []}
+              onChange={(value) => updateFilter('t_group', value.length > 0 ? value : undefined)}
+              placeholder="Search T-Groups (Topology)..."
+              label="T-Groups (Topology)"
+            />
+
+            <ClassificationAutocomplete
+              type="a_group"
+              value={filters.a_group || []}
+              onChange={(value) => updateFilter('a_group', value.length > 0 ? value : undefined)}
+              placeholder="Search A-Groups (Fold)..."
+              label="A-Groups (Fold)"
+            />
           </div>
         </div>
 
         {/* Advanced filters - expandable */}
         {isExpanded && (
           <div className="border-t pt-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h4 className="text-md font-medium text-gray-700">Additional Classification</h4>
-              {(filters.x_group || filters.a_group) && (
-                <button
-                  onClick={clearClassificationFilters}
-                  className="text-xs text-gray-500 hover:text-gray-700"
-                >
-                  Clear All Classification
-                </button>
-              )}
-            </div>
+            <h4 className="text-md font-medium text-gray-700">Additional Filters</h4>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-2">X-Groups (Architecture)</label>
-                <Select
-                  multiple
-                  placeholder="Select X-Groups..."
-                  value={filters.x_group || []}
-                  onChange={(value) => updateFilter('x_group', value.length > 0 ? value : undefined)}
-                  options={hGroups.map(group => ({ value: group, label: group }))}
-                  search
+                <label className="block text-sm font-medium mb-2">Min Sequence Length</label>
+                <Input
+                  type="number"
+                  min="1"
+                  placeholder="e.g., 50"
+                  value={filters.sequence_length_min ?? ''}
+                  onChange={(e) => updateFilter('sequence_length_min', e.target.value ? parseInt(e.target.value) : undefined)}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">A-Groups (Fold)</label>
-                <Select
-                  multiple
-                  placeholder="Select A-Groups..."
-                  value={filters.a_group || []}
-                  onChange={(value) => updateFilter('a_group', value.length > 0 ? value : undefined)}
-                  options={['a.1', 'a.2', 'a.3', 'a.4', 'a.5'].map(group => ({ value: group, label: group }))}
-                  search
+                <label className="block text-sm font-medium mb-2">Max Sequence Length</label>
+                <Input
+                  type="number"
+                  min="1"
+                  placeholder="e.g., 1000"
+                  value={filters.sequence_length_max ?? ''}
+                  onChange={(e) => updateFilter('sequence_length_max', e.target.value ? parseInt(e.target.value) : undefined)}
                 />
               </div>
-            </div>
 
-            <div>
-              <h4 className="text-md font-medium text-gray-700 mb-3">Sequence Properties</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Min Sequence Length</label>
-                  <Input
-                    type="number"
-                    min="1"
-                    placeholder="e.g., 50"
-                    value={filters.sequence_length_min ?? ''}
-                    onChange={(e) => updateFilter('sequence_length_min', e.target.value ? parseInt(e.target.value) : undefined)}
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Min Evidence Count</label>
+                <Input
+                  type="number"
+                  min="0"
+                  placeholder="e.g., 1"
+                  value={filters.min_evidence_count ?? ''}
+                  onChange={(e) => updateFilter('min_evidence_count', e.target.value ? parseInt(e.target.value) : undefined)}
+                />
+              </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-2">Max Sequence Length</label>
-                  <Input
-                    type="number"
-                    min="1"
-                    placeholder="e.g., 1000"
-                    value={filters.sequence_length_max ?? ''}
-                    onChange={(e) => updateFilter('sequence_length_max', e.target.value ? parseInt(e.target.value) : undefined)}
-                  />
+              <div>
+                <label className="block text-sm font-medium mb-2">Evidence Types</label>
+                <Input
+                  placeholder="e.g., blast,hhsearch"
+                  value={filters.evidence_types || ''}
+                  onChange={(e) => updateFilter('evidence_types', e.target.value || undefined)}
+                />
+                <div className="text-xs text-gray-500 mt-1">
+                  Comma-separated: blast, hhsearch, domain_blast
                 </div>
               </div>
             </div>
@@ -506,19 +520,19 @@ export function FilterPanel({
             <div className="flex flex-wrap gap-2">
               {Object.entries(filters).map(([key, value]) => {
                 if (value === undefined || value === null || value === '') return null
+                if (Array.isArray(value) && value.length === 0) return null
 
                 let displayValue: string
                 if (Array.isArray(value)) {
-                  if (value.length === 0) return null
                   displayValue = value.length === 1 ? value[0] : `${value.length} selected`
                 } else {
                   displayValue = String(value)
                 }
 
-                // Prettier key names with hierarchy indication
                 const keyLabels: Record<string, string> = {
                   pdb_id: 'PDB',
                   chain_id: 'Chain',
+                  domain_number: 'Domain #',
                   t_group: 'T-Groups',
                   h_group: 'H-Groups',
                   x_group: 'X-Groups',
@@ -526,7 +540,9 @@ export function FilterPanel({
                   min_confidence: 'Min Confidence',
                   max_confidence: 'Max Confidence',
                   sequence_length_min: 'Min Length',
-                  sequence_length_max: 'Max Length'
+                  sequence_length_max: 'Max Length',
+                  min_evidence_count: 'Min Evidence',
+                  evidence_types: 'Evidence Types'
                 }
 
                 return (

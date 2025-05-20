@@ -1,7 +1,6 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@import 'molstar/build/viewer/molstar.css'
 
 :root {
   --foreground-rgb: 0, 0, 0;
@@ -97,3 +96,5 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #a1a1a1;
 }
+
+@import 'molstar/build/viewer/molstar.css';

@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface TabsProps {
@@ -10,16 +10,29 @@ interface TabsProps {
   className?: string
 }
 
-export function Tabs({ 
-  value, 
-  onValueChange, 
-  children, 
-  className 
+export function Tabs({
+  value,
+  onValueChange,
+  children,
+  className
 }: TabsProps) {
+  // Creating a new context provider for each Tabs component instance
+  const [contextValue] = useState({
+    value,
+    onValueChange
+  })
+
+  // Update the context value when props change
+  React.useEffect(() => {
+    contextValue.value = value
+  }, [contextValue, value])
+
   return (
-    <div className={cn('', className)}>
-      {children}
-    </div>
+    <TabsContext.Provider value={contextValue}>
+      <div className={cn('', className)}>
+        {children}
+      </div>
+    </TabsContext.Provider>
   )
 }
 
@@ -28,9 +41,9 @@ interface TabsListProps {
   children: React.ReactNode
 }
 
-export function TabsList({ 
-  className, 
-  children 
+export function TabsList({
+  className,
+  children
 }: TabsListProps) {
   return (
     <div className={cn('flex items-center p-1 bg-gray-100 rounded-md', className)}>
@@ -46,28 +59,28 @@ interface TabsTriggerProps {
   onClick?: () => void
 }
 
-export function TabsTrigger({ 
-  value, 
-  children, 
+export function TabsTrigger({
+  value,
+  children,
   className,
   onClick
 }: TabsTriggerProps) {
   const context = React.useContext(TabsContext)
-  
+
   const handleClick = () => {
     context?.onValueChange(value)
     if (onClick) onClick()
   }
-  
+
   const isActive = context?.value === value
-  
+
   return (
     <button
       onClick={handleClick}
       className={cn(
         'flex-1 py-2 px-3 text-sm font-medium text-center transition-colors rounded-sm',
-        isActive 
-          ? 'bg-white shadow-sm text-gray-900' 
+        isActive
+          ? 'bg-white shadow-sm text-gray-900'
           : 'text-gray-600 hover:text-gray-900 hover:bg-white/50',
         className
       )}
@@ -83,17 +96,17 @@ interface TabsContentProps {
   className?: string
 }
 
-export function TabsContent({ 
-  value, 
-  children, 
-  className 
+export function TabsContent({
+  value,
+  children,
+  className
 }: TabsContentProps) {
   const context = React.useContext(TabsContext)
-  
+
   if (context?.value !== value) {
     return null
   }
-  
+
   return (
     <div className={cn('mt-4', className)}>
       {children}
@@ -109,5 +122,5 @@ interface TabsContextValue {
 
 const TabsContext = React.createContext<TabsContextValue | undefined>(undefined)
 
-// Update Tabs component to provide context
+// Export for testing
 export { TabsContext }

@@ -1,11 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+@import 'molstar/build/viewer/molstar.css'
 
 :root {
   --foreground-rgb: 0, 0, 0;
   --background-rgb: 245, 247, 250;
 }
+
+canvas { border: 1px solid red; }
 
 body {
   color: rgb(var(--foreground-rgb));

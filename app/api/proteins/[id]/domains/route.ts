@@ -12,9 +12,12 @@ function serializeBigInt(obj: any): any {
 function parseRange(range: string): { start: number; end: number } | null {
   if (!range) return null
 
-  // Handle simple range like "1-100" (take first segment if multiple)
+  // Handle simple range like "A:1-100" or "1-100" (take first segment if multiple)
   const firstSegment = range.split(',')[0].trim()
-  const parts = firstSegment.split('-')
+
+  // Remove chain prefix if present (e.g., "A:1-100" -> "1-100")
+  const withoutChain = firstSegment.includes(':') ? firstSegment.split(':')[1] : firstSegment
+  const parts = withoutChain.split('-')
 
   if (parts.length === 2) {
     const start = parseInt(parts[0])
@@ -115,6 +118,7 @@ export async function GET(
     const putativeDomains = await prisma.$queryRawUnsafe(putativeDomainsQuery, pdbId, chainId)
 
     // Fetch reference domains used as evidence
+    // Fixed: Use pdb_analysis.domain (singular) not pdb_analysis.domains (plural)
     const referenceDomainsQuery = `
       SELECT DISTINCT
         d.id,
@@ -139,7 +143,7 @@ export async function GET(
         'reference' as domain_type
       FROM pdb_analysis.domain_evidence de
       JOIN pdb_analysis.partition_domain_summary pds ON de.domain_id = pds.id
-      JOIN pdb_analysis.domains d ON (
+      JOIN pdb_analysis.domain d ON (
         de.source_id = d.ecod_domain_id OR
         de.hit_id = d.ecod_domain_id OR
         de.domain_ref_id = d.ecod_domain_id
@@ -157,7 +161,7 @@ export async function GET(
     ]
 
     const processedDomains = allDomains.map((domain, index) => {
-      // Parse range to get start_pos and end_pos
+      // Parse range to get start_pos and end_pos (handles chain prefixes)
       const parsedRange = parseRange(domain.range)
 
       return {

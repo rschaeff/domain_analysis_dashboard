@@ -52,6 +52,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
   const loadedRef = useRef(false);
+  const lastAppliedDomainsRef = useRef<Domain[]>([]);
 
   // State
   const [isLoading, setIsLoading] = useState(true);
@@ -64,14 +65,35 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     }
   };
 
+  // Check if a domain selection exists in the structure
+  const checkSelectionExists = (viewer: any, selection: any): boolean => {
+    if (!viewer) return false;
+
+    try {
+      const atoms = viewer.selectedAtoms(selection);
+      const exists = atoms && atoms.length > 0;
+      debugLog(`Selection ${JSON.stringify(selection)} has ${atoms?.length || 0} atoms`);
+      return exists;
+    } catch (err) {
+      debugLog('Error checking selection:', err);
+      return false;
+    }
+  };
+
   // Expose the viewer methods via ref
   useImperativeHandle(ref, () => ({
     current: {
       viewerRef: viewerRef,
       reset: () => {
         if (viewerRef.current) {
-          viewerRef.current.zoomTo();
-          viewerRef.current.render();
+          try {
+            // Apply the original domain styling
+            applyDomainStyling(viewerRef.current);
+            viewerRef.current.zoomTo();
+            viewerRef.current.render();
+          } catch (error) {
+            debugLog('Error in reset:', error);
+          }
         }
       },
       exportImage: () => {
@@ -87,25 +109,45 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
         try {
           debugLog(`Highlighting domain: ${domain.id}, range: ${domain.start}-${domain.end}`);
 
-          // Clear all selections
-          viewerRef.current.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });
+          // Create a selection to check if this range exists in the structure
+          const selection = {
+            chain: domain.chainId || chainId || 'A',
+            resi: `${domain.start}-${domain.end}`
+          };
+
+          // Check if this selection has any atoms in the structure
+          const selectionExists = checkSelectionExists(viewerRef.current, selection);
+
+          if (!selectionExists) {
+            debugLog('Domain selection appears invalid - no atoms found in this range');
+
+            // Don't clear anything - just alert the user of the issue
+            if (typeof window !== 'undefined') {
+              const warningMsg = `Warning: No atoms found in range ${domain.start}-${domain.end} for domain ${domain.id}. This may be due to PDB numbering differences.`;
+              debugLog(warningMsg);
+
+              // Reset to original view to ensure something is visible
+              applyDomainStyling(viewerRef.current);
+              viewerRef.current.zoomTo();
+              viewerRef.current.render();
+              return;
+            }
+          }
+
+          // Lower opacity of everything first
+          viewerRef.current.setStyle({}, { cartoon: { color: 'gray', opacity: 0.4 } });
 
           // Highlight the specific chain
           if (chainId) {
             viewerRef.current.setStyle({chain: chainId}, {
               cartoon: {
                 color: 'gray',
-                opacity: 0.8
+                opacity: 0.7
               }
             });
           }
 
-          // Highlight the specific domain
-          const selection = {
-            chain: domain.chainId,
-            resi: `${domain.start}-${domain.end}`
-          };
-
+          // Highlight the specific domain with full opacity
           viewerRef.current.setStyle(selection, {
             cartoon: {
               color: domain.color,
@@ -113,10 +155,23 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             }
           });
 
-          viewerRef.current.zoomTo(selection);
+          // Zoom to the domain if it exists
+          if (selectionExists) {
+            viewerRef.current.zoomTo(selection);
+          }
+
           viewerRef.current.render();
         } catch (error) {
-          console.error('Error highlighting domain:', error);
+          debugLog('Error highlighting domain:', error);
+
+          // Recovery: restore original styling
+          try {
+            applyDomainStyling(viewerRef.current);
+            viewerRef.current.zoomTo();
+            viewerRef.current.render();
+          } catch (recoveryError) {
+            debugLog('Failed to recover from highlighting error:', recoveryError);
+          }
         }
       }
     }
@@ -124,13 +179,14 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
 
   // Safe error handler
   const handleError = (message: string) => {
+    debugLog(`Error: ${message}`);
     setErrorMessage(message);
     setIsLoading(false);
     if (onError) {
       try {
         onError(message);
       } catch (callbackError) {
-        console.log('Error in onError callback:', callbackError);
+        debugLog('Error in onError callback:', callbackError);
       }
     }
   };
@@ -140,6 +196,10 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     if (!viewer) return;
 
     debugLog(`Applying styling for ${domains.length} domains`);
+    debugLog('Domain ranges:', domains.map(d => `${d.id}: ${d.start}-${d.end} (${d.chainId || chainId || 'A'})`));
+
+    // Cache the domains we're applying styling for
+    lastAppliedDomainsRef.current = [...domains];
 
     // Set base style for all atoms with reduced opacity
     viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.4 } });
@@ -169,11 +229,17 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
           const domainChainId = domain.chainId || chainId || 'A';
 
           // Create selection for this domain
-          // Using a string for residue range which is more reliable
           const selection = {
             chain: domainChainId,
             resi: `${domain.start}-${domain.end}`
           };
+
+          // Check if selection exists
+          const selectionExists = checkSelectionExists(viewer, selection);
+          if (!selectionExists) {
+            debugLog(`Warning: Domain ${domain.id} (${domain.start}-${domain.end}) may not match PDB numbering`);
+            // Continue anyway to apply styling - it won't break anything
+          }
 
           debugLog(`Setting style for domain ${index}:`, selection);
 
@@ -219,6 +285,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     setIsLoading(true);
     setErrorMessage(null);
     loadedRef.current = false;
+    lastAppliedDomainsRef.current = [];
 
     // Dynamically import 3DMol.js
     const init3DMol = async () => {
@@ -311,8 +378,20 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
   // Update domain styling when domains or chainId change
   useEffect(() => {
     if (viewerRef.current && loadedRef.current) {
-      debugLog('Domain or chain info changed, updating styling');
-      applyDomainStyling(viewerRef.current);
+      // Check if domains actually changed
+      const prevDomains = lastAppliedDomainsRef.current;
+      const domainsChanged = domains.length !== prevDomains.length ||
+        domains.some((d, i) => {
+          return !prevDomains[i] ||
+            d.start !== prevDomains[i].start ||
+            d.end !== prevDomains[i].end ||
+            d.chainId !== prevDomains[i].chainId;
+        });
+
+      if (domainsChanged || chainId !== lastAppliedDomainsRef.current[0]?.chainId) {
+        debugLog('Domain or chain info changed, updating styling');
+        applyDomainStyling(viewerRef.current);
+      }
     }
   }, [domains, chainId, showControls]);
 

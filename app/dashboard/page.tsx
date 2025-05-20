@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/Button'
 import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
 import { MultiTrackDomainVisualization } from '@/components/visualization/MultiTrackDomainVisualization'
 import { Eye, Download, BarChart3, Users } from 'lucide-react'
-import { MolstarTest } from '@/components/visualization/MolstarTest'
 
 // Enhanced API Response Type
 interface DomainsResponse {
@@ -377,7 +376,6 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <MolstarTest />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Domain Analysis Dashboard</h1>

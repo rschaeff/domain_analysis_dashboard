@@ -45,8 +45,9 @@ export default function MinimalMolstarDebug() {
       addLog("✅ Molstar CSS loaded");
       setCssLoaded(true);
     };
-    link.onerror = () => {
-      const msg = "❌ Failed to load Molstar CSS";
+    link.onerror = (e) => {
+      console.error("CSS load error details:", e);
+      const msg = `❌ Failed to load Molstar CSS: ${e.type}`;
       addLog(msg);
       setError(msg);
     };

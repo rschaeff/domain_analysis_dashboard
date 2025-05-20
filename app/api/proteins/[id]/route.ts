@@ -8,6 +8,29 @@ function serializeBigInt(obj: any): any {
   ))
 }
 
+// Parse range string to get total residues covered
+function parseRangeCoverage(range: string): number {
+  if (!range) return 0
+
+  // Handle multiple ranges like "1-100,150-200"
+  const segments = range.split(',')
+  let totalCoverage = 0
+
+  for (const segment of segments) {
+    const trimmed = segment.trim()
+    const parts = trimmed.split('-')
+    if (parts.length === 2) {
+      const start = parseInt(parts[0])
+      const end = parseInt(parts[1])
+      if (!isNaN(start) && !isNaN(end) && start <= end) {
+        totalCoverage += (end - start + 1)
+      }
+    }
+  }
+
+  return totalCoverage
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -30,7 +53,7 @@ export async function GET(
         )
       }
 
-      // Query by pdb_id and chain_id with comprehensive protein information
+      // Query by pdb_id and chain_id
       proteinQuery = `
         SELECT
           p.id,
@@ -43,31 +66,9 @@ export async function GET(
           p.tax_id,
           p.length as sequence_length,
           p.created_at,
-          p.updated_at,
-          -- Domain statistics
-          COUNT(d.id) as domain_count,
-          COUNT(CASE WHEN d.t_group IS NOT NULL THEN 1 END) as fully_classified_domains,
-          COUNT(CASE WHEN de.id IS NOT NULL THEN 1 END) as domains_with_evidence,
-          -- Calculate coverage (sum of domain lengths / sequence length)
-          CASE
-            WHEN p.length > 0 AND COUNT(d.id) > 0 THEN
-              COALESCE(SUM(d.end_pos - d.start_pos + 1)::float / p.length, 0)
-            ELSE 0
-          END as coverage,
-          COALESCE(SUM(d.end_pos - d.start_pos + 1), 0) as residues_assigned,
-          -- Classification status
-          CASE WHEN COUNT(d.id) > 0 THEN true ELSE false END as is_classified,
-          -- Batch and reference information
-          MAX(pp.batch_id) as batch_id,
-          MAX(pp.reference_version) as reference_version
+          p.updated_at
         FROM pdb_analysis.protein p
-        LEFT JOIN pdb_analysis.domain d ON p.id = d.protein_id
-        LEFT JOIN pdb_analysis.domain_evidence de ON d.id = de.domain_id
-        LEFT JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
         WHERE p.pdb_id = $1 AND p.chain_id = $2
-        GROUP BY
-          p.id, p.pdb_id, p.chain_id, p.source_id, p.unp_acc,
-          p.name, p.type, p.tax_id, p.length, p.created_at, p.updated_at
       `
       queryParams = [pdbId, chainId]
 
@@ -87,31 +88,9 @@ export async function GET(
           p.tax_id,
           p.length as sequence_length,
           p.created_at,
-          p.updated_at,
-          -- Domain statistics
-          COUNT(d.id) as domain_count,
-          COUNT(CASE WHEN d.t_group IS NOT NULL THEN 1 END) as fully_classified_domains,
-          COUNT(CASE WHEN de.id IS NOT NULL THEN 1 END) as domains_with_evidence,
-          -- Calculate coverage (sum of domain lengths / sequence length)
-          CASE
-            WHEN p.length > 0 AND COUNT(d.id) > 0 THEN
-              COALESCE(SUM(d.end_pos - d.start_pos + 1)::float / p.length, 0)
-            ELSE 0
-          END as coverage,
-          COALESCE(SUM(d.end_pos - d.start_pos + 1), 0) as residues_assigned,
-          -- Classification status
-          CASE WHEN COUNT(d.id) > 0 THEN true ELSE false END as is_classified,
-          -- Batch and reference information
-          MAX(pp.batch_id) as batch_id,
-          MAX(pp.reference_version) as reference_version
+          p.updated_at
         FROM pdb_analysis.protein p
-        LEFT JOIN pdb_analysis.domain d ON p.id = d.protein_id
-        LEFT JOIN pdb_analysis.domain_evidence de ON d.id = de.domain_id
-        LEFT JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
         WHERE p.id = $1
-        GROUP BY
-          p.id, p.pdb_id, p.chain_id, p.source_id, p.unp_acc,
-          p.name, p.type, p.tax_id, p.length, p.created_at, p.updated_at
       `
       queryParams = [proteinId]
 
@@ -122,25 +101,135 @@ export async function GET(
       )
     }
 
-    const result = await prisma.$queryRawUnsafe(proteinQuery, ...queryParams)
+    const proteinResult = await prisma.$queryRawUnsafe(proteinQuery, ...queryParams)
 
-    if (!result || (result as any[]).length === 0) {
+    if (!proteinResult || (proteinResult as any[]).length === 0) {
       return NextResponse.json(
         { error: `Protein not found: ${id}` },
         { status: 404 }
       )
     }
 
-    // Get the protein data and ensure source_id is set
-    const protein = (result as any[])[0]
+    const protein = (proteinResult as any[])[0]
 
     // Ensure source_id is always available for consistency
     if (!protein.source_id) {
       protein.source_id = `${protein.pdb_id}_${protein.chain_id}`
     }
 
+    // Now fetch putative domains for this protein from partition_domain_summary
+    // But only use the range field, not start_pos/end_pos
+    const putativeDomainsQuery = `
+      SELECT
+        pds.id,
+        pds.protein_id,
+        pds.pdb_id,
+        pds.chain_id,
+        pds.batch_id,
+        pds.reference_version,
+        pds.timestamp,
+        pds.domain_number,
+        pds.domain_id,
+        pds.range,
+        pds.source,
+        pds.source_id,
+        pds.confidence,
+        pds.t_group,
+        pds.h_group,
+        pds.x_group,
+        pds.a_group,
+        pds.evidence_count,
+        pds.evidence_types
+      FROM pdb_analysis.partition_domain_summary pds
+      WHERE pds.pdb_id = $1 AND pds.chain_id = $2
+      ORDER BY pds.domain_number
+    `
+
+    const putativeDomains = await prisma.$queryRawUnsafe(
+      putativeDomainsQuery,
+      protein.pdb_id,
+      protein.chain_id
+    )
+
+    // Fetch reference domains used as evidence
+    // These come from domain_evidence table pointing to pdb_analysis.domains
+    const referenceDomainsQuery = `
+      SELECT DISTINCT
+        d.id,
+        d.ecod_uid,
+        d.domain_id,
+        d.ecod_domain_id,
+        d.range,
+        d.t_group,
+        d.h_group,
+        d.x_group,
+        d.a_group,
+        de.evidence_type,
+        de.confidence,
+        de.evalue,
+        de.probability
+      FROM pdb_analysis.domain_evidence de
+      JOIN pdb_analysis.partition_domain_summary pds ON de.domain_id = pds.id
+      JOIN pdb_analysis.domains d ON de.source_id = d.ecod_domain_id
+        OR de.hit_id = d.ecod_domain_id
+        OR de.domain_ref_id = d.ecod_domain_id
+      WHERE pds.pdb_id = $1 AND pds.chain_id = $2
+    `
+
+    const referenceDomains = await prisma.$queryRawUnsafe(
+      referenceDomainsQuery,
+      protein.pdb_id,
+      protein.chain_id
+    )
+
+    // Calculate domain statistics by parsing ranges
+    const putativeDomainsArray = putativeDomains as any[]
+    let totalCoverage = 0
+    let classifiedDomains = 0
+    let domainsWithEvidence = 0
+
+    for (const domain of putativeDomainsArray) {
+      // Parse range to calculate coverage
+      totalCoverage += parseRangeCoverage(domain.range)
+
+      // Count classified domains
+      if (domain.t_group) {
+        classifiedDomains++
+      }
+
+      // Count domains with evidence
+      if (domain.evidence_count > 0) {
+        domainsWithEvidence++
+      }
+    }
+
+    // Calculate coverage percentage
+    const coverage = protein.sequence_length > 0 ? totalCoverage / protein.sequence_length : 0
+
+    // Get batch and reference information
+    const batchId = putativeDomainsArray.length > 0 ? putativeDomainsArray[0].batch_id : null
+    const referenceVersion = putativeDomainsArray.length > 0 ? putativeDomainsArray[0].reference_version : null
+
+    // Construct the enriched protein response
+    const enrichedProtein = {
+      ...protein,
+      // Domain statistics
+      domain_count: putativeDomainsArray.length,
+      fully_classified_domains: classifiedDomains,
+      domains_with_evidence: domainsWithEvidence,
+      coverage,
+      residues_assigned: totalCoverage,
+      is_classified: putativeDomainsArray.length > 0,
+      // Batch and reference information
+      batch_id: batchId,
+      reference_version: referenceVersion,
+      // Include both putative and reference domains for detailed analysis
+      putative_domains: putativeDomainsArray,
+      reference_domains: referenceDomains
+    }
+
     // Serialize the result to handle BigInt values
-    const serializedProtein = serializeBigInt(protein)
+    const serializedProtein = serializeBigInt(enrichedProtein)
 
     return NextResponse.json(serializedProtein)
 

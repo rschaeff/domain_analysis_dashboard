@@ -38,6 +38,10 @@ export async function GET(request: NextRequest) {
       filters.h_group = searchParams.get('h_groups')!.split(',')
     }
 
+    if (searchParams.get('x_groups')) {
+      filters.x_group = searchParams.get('x_groups')!.split(',')
+    }
+
     if (searchParams.get('min_confidence')) {
       filters.min_confidence = parseFloat(searchParams.get('min_confidence')!)
     }
@@ -102,6 +106,12 @@ export async function GET(request: NextRequest) {
     if (filters.h_group && filters.h_group.length > 0) {
       whereConditions.push(`h_group = ANY($${paramIndex})`)
       queryParams.push(filters.h_group)
+      paramIndex++
+    }
+
+    if (filters.x_group && filters.x_group.length > 0) {
+      whereConditions.push(`x_group = ANY($${paramIndex})`)
+      queryParams.push(filters.x_group)
       paramIndex++
     }
 

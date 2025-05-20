@@ -66,12 +66,16 @@ export default function DashboardPage() {
         size: '50'
       })
 
-      // Add filters to URL params with debugging
+      // Add filters to URL params with proper mapping
       Object.entries(filtersToUse).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') {
           if (Array.isArray(value) && value.length > 0) {
             // Map frontend filter names to API parameter names
-            const paramKey = key === 't_group' ? 't_groups' : key === 'h_group' ? 'h_groups' : key
+            let paramKey = key
+            if (key === 't_group') paramKey = 't_groups'
+            else if (key === 'h_group') paramKey = 'h_groups'
+            else if (key === 'x_group') paramKey = 'x_groups'  // Add this line
+
             params.set(paramKey, value.join(','))
           } else if (!Array.isArray(value)) {
             params.set(key, value.toString())

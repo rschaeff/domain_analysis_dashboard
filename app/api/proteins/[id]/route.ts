@@ -1,24 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/database'
-
-// Custom JSON serializer to handle BigInt
-function serializeBigInt(obj: any): any {
-  return JSON.parse(JSON.stringify(obj, (key, value) =>
-    typeof value === 'bigint' ? Number(value) : value
-  ))
-}
-
-// Parse range string to get total residues covered
+// Parse range string that may include chain prefixes like "A:1-100,A:150-200" or "B:539-716"
 function parseRangeCoverage(range: string): number {
   if (!range) return 0
 
-  // Handle multiple ranges like "1-100,150-200"
+  // Handle multiple ranges like "A:1-129,A:157-514" or simple ranges like "A:25-111"
   const segments = range.split(',')
   let totalCoverage = 0
 
   for (const segment of segments) {
     const trimmed = segment.trim()
-    const parts = trimmed.split('-')
+
+    // Remove chain prefix if present (e.g., "A:1-100" -> "1-100")
+    const withoutChain = trimmed.includes(':') ? trimmed.split(':')[1] : trimmed
+
+    const parts = withoutChain.split('-')
     if (parts.length === 2) {
       const start = parseInt(parts[0])
       const end = parseInt(parts[1])
@@ -31,12 +25,60 @@ function parseRangeCoverage(range: string): number {
   return totalCoverage
 }
 
+// Parse range string to get start and end positions (for display purposes)
+function parseRange(range: string): { start: number; end: number; segments: Array<{start: number; end: number}> } | null {
+  if (!range) return null
+
+  const segments: Array<{start: number; end: number}> = []
+  let minStart = Infinity
+  let maxEnd = -Infinity
+
+  // Handle multiple ranges like "A:1-129,A:157-514"
+  const rangeParts = range.split(',')
+
+  for (const segment of rangeParts) {
+    const trimmed = segment.trim()
+
+    // Remove chain prefix if present (e.g., "A:1-100" -> "1-100")
+    const withoutChain = trimmed.includes(':') ? trimmed.split(':')[1] : trimmed
+
+    const parts = withoutChain.split('-')
+    if (parts.length === 2) {
+      const start = parseInt(parts[0])
+      const end = parseInt(parts[1])
+      if (!isNaN(start) && !isNaN(end) && start <= end) {
+        segments.push({ start, end })
+        minStart = Math.min(minStart, start)
+        maxEnd = Math.max(maxEnd, end)
+      }
+    }
+  }
+
+  if (segments.length === 0) return null
+
+  return {
+    start: minStart,
+    end: maxEnd,
+    segments
+  }
+}
+
+// Updated protein API with proper range parsing
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/database'
+
+// Custom JSON serializer to handle BigInt
+function serializeBigInt(obj: any): any {
+  return JSON.parse(JSON.stringify(obj, (key, value) =>
+    typeof value === 'bigint' ? Number(value) : value
+  ))
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    // Await params before accessing properties (Next.js 15 requirement)
     const { id } = await params
 
     let proteinQuery: string
@@ -53,7 +95,6 @@ export async function GET(
         )
       }
 
-      // Query by pdb_id and chain_id
       proteinQuery = `
         SELECT
           p.id,
@@ -73,7 +114,6 @@ export async function GET(
       queryParams = [pdbId, chainId]
 
     } else if (/^\d+$/.test(id)) {
-      // Fallback: handle numeric database ID for backward compatibility
       const proteinId = parseInt(id)
 
       proteinQuery = `
@@ -112,13 +152,12 @@ export async function GET(
 
     const protein = (proteinResult as any[])[0]
 
-    // Ensure source_id is always available for consistency
+    // Ensure source_id is always available
     if (!protein.source_id) {
       protein.source_id = `${protein.pdb_id}_${protein.chain_id}`
     }
 
-    // Now fetch putative domains for this protein from partition_domain_summary
-    // But only use the range field, not start_pos/end_pos
+    // Fetch putative domains from partition_domain_summary
     const putativeDomainsQuery = `
       SELECT
         pds.id,
@@ -139,7 +178,8 @@ export async function GET(
         pds.x_group,
         pds.a_group,
         pds.evidence_count,
-        pds.evidence_types
+        pds.evidence_types,
+        'putative' as domain_type
       FROM pdb_analysis.partition_domain_summary pds
       WHERE pds.pdb_id = $1 AND pds.chain_id = $2
       ORDER BY pds.domain_number
@@ -152,7 +192,7 @@ export async function GET(
     )
 
     // Fetch reference domains used as evidence
-    // These come from domain_evidence table pointing to pdb_analysis.domains
+    // These come from the pdb_analysis.domain table (ECOD reference domains)
     const referenceDomainsQuery = `
       SELECT DISTINCT
         d.id,
@@ -164,16 +204,27 @@ export async function GET(
         d.h_group,
         d.x_group,
         d.a_group,
+        d.is_manual_rep,
+        d.is_f70,
+        d.is_f40,
+        d.is_f99,
+        d.length,
         de.evidence_type,
-        de.confidence,
+        de.confidence as evidence_confidence,
         de.evalue,
-        de.probability
+        de.probability,
+        de.query_range,
+        de.hit_range,
+        'reference' as domain_type
       FROM pdb_analysis.domain_evidence de
       JOIN pdb_analysis.partition_domain_summary pds ON de.domain_id = pds.id
-      JOIN pdb_analysis.domains d ON de.source_id = d.ecod_domain_id
-        OR de.hit_id = d.ecod_domain_id
-        OR de.domain_ref_id = d.ecod_domain_id
+      JOIN pdb_analysis.domain d ON (
+        de.source_id = d.ecod_domain_id OR
+        de.hit_id = d.ecod_domain_id OR
+        de.domain_ref_id = d.ecod_domain_id
+      )
       WHERE pds.pdb_id = $1 AND pds.chain_id = $2
+      ORDER BY de.confidence DESC, d.ecod_domain_id
     `
 
     const referenceDomains = await prisma.$queryRawUnsafe(
@@ -182,14 +233,14 @@ export async function GET(
       protein.chain_id
     )
 
-    // Calculate domain statistics by parsing ranges
+    // Calculate domain statistics by parsing ranges (handling chain prefixes)
     const putativeDomainsArray = putativeDomains as any[]
     let totalCoverage = 0
     let classifiedDomains = 0
     let domainsWithEvidence = 0
 
     for (const domain of putativeDomainsArray) {
-      // Parse range to calculate coverage
+      // Parse range to calculate coverage (handles chain prefixes)
       totalCoverage += parseRangeCoverage(domain.range)
 
       // Count classified domains
@@ -210,6 +261,27 @@ export async function GET(
     const batchId = putativeDomainsArray.length > 0 ? putativeDomainsArray[0].batch_id : null
     const referenceVersion = putativeDomainsArray.length > 0 ? putativeDomainsArray[0].reference_version : null
 
+    // Process domains to add parsed range information
+    const processedPutativeDomains = putativeDomainsArray.map(domain => {
+      const parsedRange = parseRange(domain.range)
+      return {
+        ...domain,
+        start_pos: parsedRange?.start || null,
+        end_pos: parsedRange?.end || null,
+        segments: parsedRange?.segments || []
+      }
+    })
+
+    const processedReferenceDomains = (referenceDomains as any[]).map(domain => {
+      const parsedRange = parseRange(domain.range)
+      return {
+        ...domain,
+        start_pos: parsedRange?.start || null,
+        end_pos: parsedRange?.end || null,
+        segments: parsedRange?.segments || []
+      }
+    })
+
     // Construct the enriched protein response
     const enrichedProtein = {
       ...protein,
@@ -223,9 +295,14 @@ export async function GET(
       // Batch and reference information
       batch_id: batchId,
       reference_version: referenceVersion,
-      // Include both putative and reference domains for detailed analysis
-      putative_domains: putativeDomainsArray,
-      reference_domains: referenceDomains
+      // Include both putative and reference domains
+      putative_domains: processedPutativeDomains,
+      reference_domains: processedReferenceDomains,
+      // Combined domains for easier frontend processing
+      all_domains: [
+        ...processedPutativeDomains,
+        ...processedReferenceDomains
+      ]
     }
 
     // Serialize the result to handle BigInt values

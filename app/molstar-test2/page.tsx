@@ -1,5 +1,5 @@
 import React from 'react';
-import { DomainVisualizer } from '../components/visualization/DomainVisualizer';
+import { DomainVisualizer } from '@/components/visualization/DomainVisualizer';
 
 // Example domains
 const exampleDomains = [

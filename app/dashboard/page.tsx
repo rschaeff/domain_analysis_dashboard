@@ -334,8 +334,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Enhanced Summary Cards with Loading States */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      {/* Simplified Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           title="Total Domains"
           value={statistics.totalDomains}
@@ -343,8 +343,8 @@ export default function DashboardPage() {
           loading={statsLoading}
         />
         <StatCard
-          title="Classified Domains"
-          value={statistics.classifiedDomains}
+          title="Classified"
+          value={`${statistics.classifiedDomains} (${statistics.totalDomains > 0 ? Math.round((statistics.classifiedDomains / statistics.totalDomains) * 100) : 0}%)`}
           color="text-green-600"
           loading={statsLoading}
         />
@@ -355,15 +355,9 @@ export default function DashboardPage() {
           loading={statsLoading}
         />
         <StatCard
-          title="With Evidence"
-          value={statistics.domainsWithEvidence}
-          color="text-orange-600"
-          loading={statsLoading}
-        />
-        <StatCard
           title="Average Confidence"
           value={statistics.avgConfidence ? statistics.avgConfidence.toFixed(3) : 'N/A'}
-          color="text-teal-600"
+          color="text-orange-600"
           loading={statsLoading}
         />
       </div>

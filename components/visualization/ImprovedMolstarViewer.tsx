@@ -34,6 +34,14 @@ export function ImprovedMolstarViewer({
     setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
   }, []);
 
+  // Report errors consistently
+  const reportError = useCallback((errorMessage: string) => {
+    console.error(`[MolstarViewer Error] ${errorMessage}`);
+    setError(errorMessage);
+    setIsLoading(false);
+    isLoadingRef.current = false;
+    if (onError) onError(errorMessage);
+  }, [onError]);
 
 // Add debug button to display in dev environment
   const debugStructure = useCallback(() => {
@@ -122,14 +130,7 @@ export function ImprovedMolstarViewer({
     }
   }, [isLoading, addLog, reportError]);
 
-  // Report errors consistently
-  const reportError = useCallback((errorMessage: string) => {
-    console.error(`[MolstarViewer Error] ${errorMessage}`);
-    setError(errorMessage);
-    setIsLoading(false);
-    isLoadingRef.current = false;
-    if (onError) onError(errorMessage);
-  }, [onError]);
+
 
   // Initialize CSS once
   useEffect(() => {

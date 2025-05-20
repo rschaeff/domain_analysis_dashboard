@@ -1,4 +1,89 @@
-'use client'
+// Add debug button to display in dev environment
+  const debugStructure = useCallback(() => {
+    if (!pluginRef.current) {
+      addLog("Plugin not initialized, cannot debug");
+      return;
+    }
+
+    try {
+      // Try to log state of the viewer
+      const plugin = pluginRef.current;
+
+      addLog("------------- DEBUG INFO -------------");
+      addLog(`Plugin initialized: ${isInitializedRef.current}`);
+      addLog(`Loading ref: ${isLoadingRef.current}`);
+      addLog(`Loading state: ${isLoading}`);
+      addLog(`Canvas: ${!!canvasRef.current}`);
+      addLog(`Container: ${!!containerRef.current}`);
+
+      // Log state of plugin components
+      addLog(`Canvas3D: ${!!plugin.canvas3d}`);
+      addLog(`Plugin state: ${plugin.state.isAnimating ? 'Animating' : 'Static'}`);
+
+      if (plugin.canvas3d) {
+        // Get camera state
+        const cameraState = plugin.canvas3d.camera.state;
+        addLog(`Camera position: ${JSON.stringify(cameraState.position)}`);
+        addLog(`Camera target: ${JSON.stringify(cameraState.target)}`);
+      }
+
+      // Check if we have any structures
+      const structures = plugin.managers?.structure?.hierarchy?.current?.structures || [];
+      addLog(`Number of structures: ${structures.length}`);
+
+      if (structures.length > 0) {
+        addLog("Structure details:");
+        structures.forEach((s, i) => {
+          addLog(`Structure ${i+1}: ${s.obj?.data?.label || 'Unnamed'}`);
+          addLog(`- Atoms: ${s.obj?.data?.models?.[0]?.atomCount || 'unknown'}`);
+          addLog(`- Chains: ${s.obj?.data?.models?.[0]?.chains.length || 'unknown'}`);
+        });
+      }
+
+      // Try to manually reset camera
+      if (plugin.canvas3d) {
+        addLog("Attempting to reset camera");
+        plugin.canvas3d.resetCamera();
+        plugin.canvas3d.commit();
+      }
+
+      addLog("-----------------------------------");
+
+    } catch (error) {
+      addLog(`Debug error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [addLog, isInitializedRef, isLoadingRef, isLoading]);
+
+  // Debug timer - automatically run debug after 10 seconds if still loading
+  useEffect(() => {
+    if (isLoading && isLoadingRef.current) {
+      const debugTimerId = setTimeout(() => {
+        // Only debug if we're still loading
+        if (isLoadingRef.current) {
+          addLog("Auto-running debug after 10 seconds of loading");
+          debugStructure();
+        }
+      }, 10000); // 10 second timeout
+
+      return () => clearTimeout(debugTimerId);
+    }
+  }, [isLoading, addLog, debugStructure]);  // Add a timeout for the loading process
+  useEffect(() => {
+    if (isLoading && isLoadingRef.current) {
+      // Set a timeout to prevent infinite loading
+      const timeoutId = setTimeout(() => {
+        // Only update if we're still loading
+        if (isLoadingRef.current) {
+          addLog("Loading timeout reached (20 seconds) - forcing reset");
+          setIsLoading(false);
+          isLoadingRef.current = false;
+          reportError("Structure loading timed out after 20 seconds. Try a different structure or check network connectivity.");
+        }
+      }, 20000); // 20 second timeout
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isLoading, addLog, reportError]);'use client'
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 
@@ -153,13 +238,17 @@ export function ImprovedMolstarViewer({
   const loadStructure = useCallback(async () => {
     // Skip if plugin isn't initialized
     if (!isInitializedRef.current || !pluginRef.current) {
+      addLog("Plugin not initialized yet, cannot load structure");
       return;
     }
 
     // Prevent concurrent loading
-    if (isLoadingRef.current) return;
-    isLoadingRef.current = true;
+    if (isLoadingRef.current) {
+      addLog("Already loading, skipping duplicate request");
+      return;
+    }
 
+    isLoadingRef.current = true;
     setIsLoading(true);
     setError(null);
 
@@ -175,35 +264,75 @@ export function ImprovedMolstarViewer({
       // Try to detect format with HEAD request
       let formatName = 'mmcif'; // Default format
       try {
+        addLog("Making HEAD request to determine format");
         const headResponse = await fetch(url, { method: 'HEAD' });
         if (headResponse.ok) {
           const format = headResponse.headers.get('X-PDB-Format');
           if (format === 'pdb' || format === 'mmcif') {
             formatName = format;
             addLog(`Detected format from API: ${format}`);
+          } else {
+            addLog(`No format detected from header, using default: ${formatName}`);
           }
+        } else {
+          addLog(`HEAD request failed with status: ${headResponse.status}, using default format`);
         }
       } catch (headError) {
-        addLog(`HEAD request failed, using default format: ${formatName}`);
+        addLog(`HEAD request failed with error: ${headError instanceof Error ? headError.message : String(headError)}`);
+        addLog(`Using default format: ${formatName}`);
       }
 
       // Fetch the actual structure
+      addLog("Fetching structure data");
       const response = await fetch(url);
+
       if (!response.ok) {
         throw new Error(`Failed to fetch structure: ${response.status} ${response.statusText}`);
       }
 
+      // Check content type header
+      const contentType = response.headers.get('Content-Type');
+      addLog(`Response content type: ${contentType || 'unknown'}`);
+
+      // Get the data as ArrayBuffer
       const buffer = await response.arrayBuffer();
+
+      if (!buffer || buffer.byteLength === 0) {
+        throw new Error('Empty response received from API');
+      }
+
       if (buffer.byteLength < 100) {
-        throw new Error(`Data is too small (${buffer.byteLength} bytes)`);
+        addLog(`Warning: Data is very small (${buffer.byteLength} bytes), might not be a valid structure`);
       }
 
       addLog(`Downloaded data: ${buffer.byteLength} bytes`);
 
-      // Create data object for Molstar
-      const data = await plugin.builders.data.rawData({ data: new Uint8Array(buffer) });
+      // Debug the first few bytes to see what kind of data we're getting
+      const dataView = new DataView(buffer);
+      let firstBytes = '';
+      const bytesToShow = Math.min(20, buffer.byteLength);
+      for (let i = 0; i < bytesToShow; i++) {
+        firstBytes += String.fromCharCode(dataView.getUint8(i));
+      }
+      addLog(`First ${bytesToShow} bytes: ${firstBytes}`);
 
-      // Try primary format
+      // Adjust format based on content if needed
+      if (firstBytes.includes('HEADER') || firstBytes.includes('ATOM')) {
+        addLog('Data appears to be in PDB format based on content');
+        formatName = 'pdb';
+      } else if (firstBytes.includes('data_') || firstBytes.includes('loop_')) {
+        addLog('Data appears to be in mmCIF format based on content');
+        formatName = 'mmcif';
+      }
+
+      // Create data object for Molstar
+      addLog(`Creating data object for Molstar`);
+      const data = await plugin.builders.data.rawData({
+        data: new Uint8Array(buffer),
+        label: `${pdbId}.${formatName === 'mmcif' ? 'cif' : 'pdb'}`
+      });
+
+      // Try primary format with detailed error logging
       addLog(`Parsing trajectory as ${formatName}`);
       try {
         // Parse trajectory with primary format
@@ -211,6 +340,7 @@ export function ImprovedMolstarViewer({
         addLog(`${formatName.toUpperCase()} trajectory parsed successfully`);
 
         // Apply representation
+        addLog('Applying cartoon representation');
         await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
           id: 'preset-structure-representation-cartoon',
           params: {}
@@ -219,34 +349,45 @@ export function ImprovedMolstarViewer({
         // Handle chain selection
         if (chainId) {
           try {
+            addLog(`Focusing on chain ${chainId}`);
             plugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
             plugin.managers.camera.focusSelection();
             addLog(`Focused on chain ${chainId}`);
           } catch (chainErr) {
-            addLog(`Could not focus on chain ${chainId}`);
+            addLog(`Could not focus on chain ${chainId}: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}`);
             plugin.canvas3d?.resetCamera();
           }
         } else {
+          addLog('Resetting camera to show full structure');
           plugin.canvas3d?.resetCamera();
         }
       } catch (primaryError) {
-        // Try fallback format if primary format fails
-        addLog(`${formatName} parsing failed: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`);
+        // Log detailed error
+        addLog(`${formatName} parsing failed with error: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`);
+        if (primaryError instanceof Error && primaryError.stack) {
+          addLog(`Error stack: ${primaryError.stack}`);
+        }
 
+        // Try fallback format if primary format fails
         const fallbackFormat = formatName === 'mmcif' ? 'pdb' : 'mmcif';
         addLog(`Trying fallback format: ${fallbackFormat}`);
 
-        const trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat);
-        addLog(`${fallbackFormat.toUpperCase()} trajectory parsed successfully`);
+        try {
+          const trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat);
+          addLog(`${fallbackFormat.toUpperCase()} trajectory parsed successfully with fallback`);
 
-        // Apply representation
-        await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
-          id: 'preset-structure-representation-cartoon',
-          params: {}
-        });
+          // Apply representation
+          await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
+            id: 'preset-structure-representation-cartoon',
+            params: {}
+          });
 
-        // Reset camera
-        plugin.canvas3d?.resetCamera();
+          // Reset camera
+          plugin.canvas3d?.resetCamera();
+        } catch (fallbackError) {
+          addLog(`Fallback ${fallbackFormat} parsing also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+          throw new Error(`Failed to parse structure in both ${formatName} and ${fallbackFormat} formats. Original error: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`);
+        }
       }
 
       // Structure loaded successfully
@@ -257,6 +398,10 @@ export function ImprovedMolstarViewer({
     } catch (error) {
       // Handle any errors during loading
       const errorMessage = error instanceof Error ? error.message : String(error);
+      addLog(`Loading error: ${errorMessage}`);
+      if (error instanceof Error && error.stack) {
+        addLog(`Error stack: ${error.stack}`);
+      }
       reportError(errorMessage);
     }
   }, [pdbId, chainId, addLog, reportError, onReady]);

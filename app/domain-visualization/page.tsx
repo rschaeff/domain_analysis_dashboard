@@ -9,6 +9,32 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs'
 import { DomainStructureViewer } from '@/components/visualization/DomainStructureViewer'
 import { CanvasMolstarViewer } from '@/components/visualization/CanvasMolstarViewer'
 
+// Mapping of t_groups to colors for consistent coloring
+const T_GROUP_COLORS: Record<string, string> = {
+  // Alpha proteins
+  '1.10.8': '#FF5733', // Alpha-horseshoe
+  '1.20.5': '#FFC300', // Alpha-solenoid
+  '1.10.10': '#DAF7A6', // Orthogonal Bundle
+  '1.20.120': '#C70039', // Up-down Bundle
+
+  // Beta proteins
+  '2.40.50': '#900C3F', // Beta-barrel
+  '2.60.40': '#581845', // Beta-sandwich
+  '2.30.30': '#2471A3', // Beta-trefoil
+
+  // Alpha/Beta proteins
+  '3.40.50': '#1ABC9C', // Rossmann fold
+  '3.30.70': '#2E86C1', // TIM barrel
+  '3.90.1580': '#8E44AD', // ATP-binding domain
+
+  // Other groups
+  '4.10.220': '#7D3C98', // Immunoglobulin-like
+  '4.10.520': '#138D75', // SH3-like
+
+  // Default colors for other groups
+  'default': '#3498DB' // Default blue
+};
+
 // Sample domain data for testing
 const EXAMPLE_DOMAINS = {
   '1cbs_A': [

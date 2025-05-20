@@ -30,8 +30,8 @@ interface DomainsResponse {
 export default function DashboardPage() {
   const router = useRouter()
   const [domains, setDomains] = useState<DomainSummary[]>([])
-  const [loading, setLoading] = useState(false)
-  const [statsLoading, setStatsLoading] = useState(false)
+  const [loading, setLoading] = useState(true) // Start with loading true
+  const [statsLoading, setStatsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState<DomainFilters>({})
   const [pagination, setPagination] = useState<PaginationParams>({
@@ -80,20 +80,45 @@ export default function DashboardPage() {
         throw new Error('Failed to fetch domains')
       }
 
-      const data: DomainsResponse = await response.json()
-      setDomains(data.data)
-      setPagination(data.pagination)
-      setStatistics(data.statistics)
+      const data = await response.json()
+
+      // Check if response includes statistics (new format) or use fallback
+      if (data.statistics) {
+        setDomains(data.data)
+        setPagination(data.pagination)
+        setStatistics(data.statistics)
+      } else {
+        // Fallback for API that doesn't return statistics yet
+        setDomains(data.data)
+        setPagination(data.pagination)
+
+        // Calculate basic statistics from current data as fallback
+        const domains = data.data
+        setStatistics({
+          totalDomains: data.pagination.total || 0,
+          classifiedDomains: domains.filter((d: DomainSummary) => d.t_group).length,
+          highConfidenceDomains: domains.filter((d: DomainSummary) => d.confidence && d.confidence >= 0.8).length,
+          avgConfidence: domains.length > 0 ? domains.reduce((sum: number, d: DomainSummary) => sum + (d.confidence || 0), 0) / domains.length : 0,
+          domainsWithEvidence: domains.filter((d: DomainSummary) => d.evidence_count > 0).length
+        })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
+      console.error('Fetch error:', err)
     } finally {
       setLoading(false)
       setStatsLoading(false)
     }
   }
 
-  // Initial fetch and filter changes
+  // Initial fetch on mount
   useEffect(() => {
+    fetchDomains(1)
+  }, [])
+
+  // Filter changes (skip initial if already loading)
+  useEffect(() => {
+    if (loading) return // Skip if already loading from initial mount
     fetchDomains(1, filters)
   }, [filters])
 

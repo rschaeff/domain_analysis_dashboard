@@ -106,114 +106,94 @@ const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
         const viewer = $3Dmol.createViewer(containerRef.current, config);
         viewerRef.current = viewer;
 
-        // Load structure from PDB
-        $3Dmol.download(`pdb:${pdbId}`, viewer, {})
-          .then(function(model) {
-            try {
-              if (!model) {
-                throw new Error('Failed to load model');
+        // Load structure from PDB using Promise pattern
+        try {
+          const model = await $3Dmol.download(`pdb:${pdbId}`, viewer, {});
+
+          if (!model) {
+            throw new Error('Failed to load model');
+          }
+
+          // Set base style for all atoms
+          viewer.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });
+
+          // Focus on specific chain if requested
+          if (chainId) {
+            viewer.setStyle({chain: chainId}, {
+              cartoon: {
+                color: 'gray',
+                opacity: 0.8
               }
+            });
+          }
 
-              // Set base style for all atoms
-              viewer.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });
+          // Add domain representations - OUTSIDE the chainId condition
+          if (domains.length > 0) {
+            for (const domain of domains) {
+              try {
+                // Check that the domain range is valid
+                if (domain.start > domain.end) {
+                  console.log(`Invalid domain range: ${domain.start}-${domain.end}`);
+                  continue;
+                }
 
-              // Focus on specific chain if requested
-              if (chainId) {
-                viewer.setStyle({chain: chainId}, {
+                // Create a safe selection object for this domain
+                const selection = {
+                  chain: domain.chainId,
+                  resi: domain.start.toString() + "-" + domain.end.toString()
+                };
+
+                // Set the style for this domain
+                viewer.setStyle(selection, {
                   cartoon: {
-                    color: 'gray',
-                    opacity: 0.8
+                    color: domain.color,
+                    opacity: 1.0
                   }
                 });
 
-                          // Add domain representations
-            if (domains.length > 0) {
-              domains.forEach(domain => {
-                try {
-                  // Check that the domain range is valid
-                  if (domain.start > domain.end) {
-                    console.log(`Invalid domain range: ${domain.start}-${domain.end}`);
-                    return;
+                // Add label if present and controls are shown
+                if (showControls && domain.label) {
+                  try {
+                    viewer.addLabel(domain.label, {
+                      position: "centered",
+                      backgroundColor: domain.color,
+                      fontColor: "#ffffff",
+                      fontSize: 12,
+                      alignment: "center",
+                      inFront: true,
+                      sel: selection
+                    });
+                  } catch (labelError) {
+                    console.log('Label creation error:', labelError);
                   }
-
-                  // Create a safe selection object for this domain
-                  const selection = {
-                    chain: domain.chainId,
-                    resi: domain.start.toString() + "-" + domain.end.toString()
-                  };
-
-                  // Set the style for this domain (using string range format instead of gte/lte object)
-                  viewer.setStyle(selection, {
-                    cartoon: {
-                      color: domain.color,
-                      opacity: 1.0
-                    }
-                  });
-
-                  // Add label if present and controls are shown
-                  if (showControls && domain.label) {
-                    // Try to find the center residue of the domain for label placement
-                    const midPoint = Math.floor((domain.start + domain.end) / 2);
-
-                    // Wait to ensure the model is fully loaded
-                    setTimeout(() => {
-                      try {
-                        // Safely access the model (check it exists)
-                        const model = viewer.getModel();
-                        if (!model) {
-                          console.log('Model not available for labeling');
-                          return;
-                        }
-
-                        // Try adding a label at the centroid of the domain
-                        // Rather than selecting a specific atom, add the label at domain center
-                        viewer.addLabel(domain.label, {
-                          position: "centered",
-                          backgroundColor: domain.color,
-                          fontColor: "#ffffff",
-                          fontSize: 12,
-                          alignment: "center",
-                          inFront: true,
-                          // Use the selection to determine label position
-                          sel: selection
-                        });
-                      } catch (labelError) {
-                        console.log('Label creation error:', labelError);
-                      }
-                    }, 100); // Short delay to ensure model is processed
-                  }
-                } catch (domainError) {
-                  console.log(`Error applying domain ${domain.id}:`, domainError);
                 }
-              });
-            }
-
-            // Zoom to fit the model
-            viewer.zoomTo();
-            // Render the model
-            viewer.render();
-
-            // Finished loading
-            setIsLoading(false);
-
-            // Call onStructureLoaded callback
-            if (onStructureLoaded) {
-              try {
-                onStructureLoaded();
-              } catch (callbackError) {
-                console.log('Error in onStructureLoaded callback:', callbackError);
+              } catch (domainError) {
+                console.log(`Error applying domain ${domain.id}:`, domainError);
               }
             }
-          } catch (renderError) {
-            handleError(`Error rendering structure: ${renderError instanceof Error ? renderError.message : String(renderError)}`);
           }
-        }, (error: any) => {
-          // Handle download error
-          handleError(`Error loading structure: ${error instanceof Error ? error.message : String(error)}`);
-        });
 
+          // Zoom to fit the model
+          viewer.zoomTo();
+          // Render the model
+          viewer.render();
+
+          // Finished loading
+          setIsLoading(false);
+
+          // Call onStructureLoaded callback
+          if (onStructureLoaded) {
+            try {
+              onStructureLoaded();
+            } catch (callbackError) {
+              console.log('Error in onStructureLoaded callback:', callbackError);
+            }
+          }
+        } catch (loadError) {
+          handleError(`Error loading or rendering structure: ${loadError instanceof Error ? loadError.message : String(loadError)}`);
+        }
       } catch (error) {
-        handleError(`Error initializing or loading 3DMol.js: ${error instanceof Error ? error.message : String(error)}`);
+        handleError(`Error initializing 3DMol.js: ${error instanceof Error ? error.message : String(error)}`);
       }
     };
 

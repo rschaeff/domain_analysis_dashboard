@@ -1,18 +1,20 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs'
 import MinimalMolstarDebug from '@/components/visualization/MinimalMolstarDebug'
 import FixedMolstarDebug from '@/components/visualization/FixedMolstarDebug'
 
 export default function MolstarDebugPage() {
+  const [activeTab, setActiveTab] = useState('fixed')
+
   return (
     <div className="container mx-auto p-6">
       <h1 className="text-2xl font-bold mb-6">Molstar Canvas Debugging</h1>
 
       <Card className="p-6 mb-6">
-        <Tabs defaultValue="fixed">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="standard">Standard Approach</TabsTrigger>
             <TabsTrigger value="fixed">Fixed Approach</TabsTrigger>

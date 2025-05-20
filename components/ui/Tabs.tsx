@@ -4,28 +4,43 @@ import React, { useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface TabsProps {
-  value: string
-  onValueChange: (value: string) => void
+  value?: string
+  defaultValue?: string
+  onValueChange?: (value: string) => void
   children: React.ReactNode
   className?: string
 }
 
 export function Tabs({
   value,
+  defaultValue,
   onValueChange,
   children,
   className
 }: TabsProps) {
-  // Creating a new context provider for each Tabs component instance
-  const [contextValue] = useState({
-    value,
-    onValueChange
-  })
+  // Handle both controlled and uncontrolled modes
+  const [internalValue, setInternalValue] = useState(defaultValue || value || '')
 
-  // Update the context value when props change
-  React.useEffect(() => {
-    contextValue.value = value
-  }, [contextValue, value])
+  // If value is provided, component is controlled
+  const isControlled = value !== undefined
+  const currentValue = isControlled ? value : internalValue
+
+  const handleValueChange = (newValue: string) => {
+    // For uncontrolled mode, update internal state
+    if (!isControlled) {
+      setInternalValue(newValue)
+    }
+    // Call external handler if provided
+    if (onValueChange) {
+      onValueChange(newValue)
+    }
+  }
+
+  // Creating a context for each Tabs component instance
+  const contextValue = React.useMemo(() => ({
+    value: currentValue,
+    onValueChange: handleValueChange
+  }), [currentValue, handleValueChange])
 
   return (
     <TabsContext.Provider value={contextValue}>
@@ -67,12 +82,17 @@ export function TabsTrigger({
 }: TabsTriggerProps) {
   const context = React.useContext(TabsContext)
 
+  if (!context) {
+    console.error('TabsTrigger must be used within a Tabs component')
+    return null
+  }
+
   const handleClick = () => {
-    context?.onValueChange(value)
+    context.onValueChange(value)
     if (onClick) onClick()
   }
 
-  const isActive = context?.value === value
+  const isActive = context.value === value
 
   return (
     <button
@@ -103,7 +123,12 @@ export function TabsContent({
 }: TabsContentProps) {
   const context = React.useContext(TabsContext)
 
-  if (context?.value !== value) {
+  if (!context) {
+    console.error('TabsContent must be used within a Tabs component')
+    return null
+  }
+
+  if (context.value !== value) {
     return null
   }
 

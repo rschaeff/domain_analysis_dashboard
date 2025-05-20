@@ -35,6 +35,14 @@ export function DataTable<T extends Record<string, any>>({
   const [sortField, setSortField] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
+  // DEBUG: Log data received by DataTable
+  console.log('📊 DataTable received:', {
+    dataCount: data?.length,
+    firstItem: data?.[0],
+    columns: columns.map(c => c.key),
+    loading
+  })
+
   // Handle sorting
   const handleSort = (columnKey: string) => {
     if (sortField === columnKey) {
@@ -68,6 +76,14 @@ export function DataTable<T extends Record<string, any>>({
       return sortDirection === 'asc' ? comparison : -comparison
     })
   }, [data, sortField, sortDirection])
+
+  // DEBUG: Log sorted data
+  console.log('📊 DataTable sorted data:', {
+    originalLength: data.length,
+    sortedLength: sortedData.length,
+    sortField,
+    sortDirection
+  })
 
   // Pagination calculations
   const currentPage = pagination?.page || 1
@@ -114,6 +130,14 @@ export function DataTable<T extends Record<string, any>>({
 
   return (
     <div className={`border rounded-lg bg-white ${className}`}>
+      {/* Debug info at the top of table */}
+      <div className="p-2 bg-gray-100 border-b text-xs text-gray-600">
+        🐛 DataTable Debug: {data.length} items received, {sortedData.length} after sorting
+        {sortedData.length === 0 && data.length > 0 && (
+          <span className="text-red-600 ml-2">⚠️ Sorting issue detected!</span>
+        )}
+      </div>
+
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full min-w-full table-auto">
@@ -154,25 +178,41 @@ export function DataTable<T extends Record<string, any>>({
             {sortedData.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className="px-6 py-8 text-center text-gray-500">
-                  No data available
+                  No data available (Debug: received {data.length} items, sorted {sortedData.length} items)
                 </td>
               </tr>
             ) : (
-              sortedData.map((item, index) => (
-                <tr
-                  key={item.id || index}
-                  className={`hover:bg-gray-50 ${onRowClick ? 'cursor-pointer' : ''}`}
-                  onClick={() => onRowClick?.(item)}
-                >
-                  {columns.map((column) => (
-                    <td key={column.key} className="px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
-                      {column.render
-                        ? column.render(item[column.key], item)
-                        : item[column.key] || '-'}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              sortedData.map((item, index) => {
+                // DEBUG: Log each item being rendered
+                if (index === 0) {
+                  console.log('📋 Rendering first table row:', item)
+                }
+                return (
+                  <tr
+                    key={item.id || index}
+                    className={`hover:bg-gray-50 ${onRowClick ? 'cursor-pointer' : ''}`}
+                    onClick={() => onRowClick?.(item)}
+                  >
+                    {columns.map((column) => {
+                      const value = item[column.key]
+                      const rendered = column.render
+                        ? column.render(value, item)
+                        : value || '-'
+
+                      // DEBUG: Log rendering issues
+                      if (index === 0 && column.key === 'pdb_id') {
+                        console.log(`📋 Rendering column ${column.key}:`, { value, rendered })
+                      }
+
+                      return (
+                        <td key={column.key} className="px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
+                          {rendered}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>

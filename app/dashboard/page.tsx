@@ -332,6 +332,41 @@ export default function DashboardPage() {
             </Card>
           ) : viewMode === 'table' ? (
             <div className="w-full min-w-0">
+              {/* Temporary: Simple table for debugging */}
+              <div className="border rounded-lg bg-white overflow-hidden mb-4">
+                <div className="p-4 bg-gray-50 border-b">
+                  <h3 className="text-sm font-medium">🐛 Simple Debug Table (Domains: {domains.length})</h3>
+                </div>
+                <div className="max-h-96 overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-2 text-left">PDB ID</th>
+                        <th className="px-4 py-2 text-left">Chain</th>
+                        <th className="px-4 py-2 text-left">Domain</th>
+                        <th className="px-4 py-2 text-left">Range</th>
+                        <th className="px-4 py-2 text-left">Confidence</th>
+                        <th className="px-4 py-2 text-left">T-Group</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {domains.slice(0, 10).map((domain, index) => (
+                        <tr key={domain.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2">{domain.pdb_id}</td>
+                          <td className="px-4 py-2">{domain.chain_id}</td>
+                          <td className="px-4 py-2">{domain.domain_number}</td>
+                          <td className="px-4 py-2 font-mono">{domain.range}</td>
+                          <td className="px-4 py-2">
+                            {domain.confidence ? domain.confidence.toFixed(3) : 'N/A'}
+                          </td>
+                          <td className="px-4 py-2">{domain.t_group || 'None'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               <DataTable
                 data={domains}
                 columns={columns}

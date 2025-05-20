@@ -785,6 +785,10 @@ const handleViewProtein = (domain: DomainSummary) => {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
 // Utility function for CSV export
 function downloadAsCSV(data: any[], filename: string) {
   const headers = Object.keys(data[0])

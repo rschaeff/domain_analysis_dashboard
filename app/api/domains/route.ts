@@ -49,28 +49,31 @@ export async function GET(request: NextRequest) {
     // Build the query using the updated view
     let baseQuery = `
       SELECT
-        id,
-        protein_id,
-        pdb_id,
-        chain_id,
-        batch_id,
-        reference_version,
-        timestamp,
-        domain_number,
-        domain_id,
-        start_pos,
-        end_pos,
-        range,
-        source,
-        source_id,
-        confidence,
-        t_group,
-        h_group,
-        x_group,
-        a_group,
-        evidence_count,
-        evidence_types
-      FROM pdb_analysis.partition_domain_summary
+        pds.id,
+        pds.protein_id,
+        pds.pdb_id,
+        pds.chain_id,
+        pds.batch_id,
+        pds.reference_version,
+        pds.timestamp,
+        pds.domain_number,
+        pds.domain_id,
+        pds.start_pos,
+        pds.end_pos,
+        pds.range,
+        pds.source,
+        pds.source_id,
+        pds.confidence,
+        pds.t_group,
+        pds.h_group,
+        pds.x_group,
+        pds.a_group,
+        pds.evidence_count,
+        pds.evidence_types,
+        -- Add protein sequence length
+        p.length as protein_sequence_length
+      FROM pdb_analysis.partition_domain_summary pds
+      LEFT JOIN pdb_analysis.protein p ON pds.pdb_id = p.pdb_id AND pds.chain_id = p.chain_id
     `
 
     // Build WHERE clause

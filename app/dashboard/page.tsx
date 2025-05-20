@@ -441,7 +441,7 @@ const handleViewProtein = (domain: DomainSummary) => {
         )}
       </div>
 
-      {/* Main Content */}
+{/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           {loading ? (
@@ -491,18 +491,155 @@ const handleViewProtein = (domain: DomainSummary) => {
                 }, {} as Record<string, DomainSummary[]>)
               ).map(([proteinKey, proteinDomains]) => {
                 const firstDomain = proteinDomains[0]
+
+                // Use actual sequence length from domain data, or estimate from ranges if not available
+                let sequenceLength = firstDomain.protein_sequence_length
+
+                if (!sequenceLength) {
+                  // Fallback: estimate from maximum domain range
+                  sequenceLength = Math.max(
+                    ...proteinDomains.map(d => {
+                      // Parse range to get maximum position
+                      const rangeParts = d.range?.split(',') || []
+                      let maxPos = 0
+                      for (const part of rangeParts) {
+                        // Handle ranges with chain prefixes like "A:1-100"
+                        const withoutChain = part.includes(':') ? part.split(':')[1] : part
+                        const endPos = parseInt(withoutChain.split('-')[1] || '0')
+                        if (!isNaN(endPos)) {
+                          maxPos = Math.max(maxPos, endPos)
+                        }
+                      }
+                      return maxPos
+                    })
+                  )
+
+                  // Add some padding to the estimated length
+                  if (sequenceLength > 0) {
+                    sequenceLength = Math.ceil(sequenceLength * 1.1) // Add 10% padding
+                  }
+
+                  // If we still don't have a length, use a default
+                  if (!sequenceLength || sequenceLength <= 0) {
+                    sequenceLength = 500
+                  }
+                }
+
                 return (
-                  <BoundaryVisualization
-                    key={proteinKey}
-                    protein={{
-                      id: firstDomain.protein_id,
-                      pdb_id: firstDomain.pdb_id,
-                      chain_id: firstDomain.chain_id,
-                      sequence_length: 500 // This would come from the actual data
-                    }}
-                    domains={proteinDomains}
-                    onDomainClick={handleDomainClick}
-                  />
+                  <Card key={proteinKey} className="p-4">
+                    {/* Protein header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-4">
+                        <h3 className="text-lg font-semibold">
+                          Protein: {firstDomain.pdb_id}_{firstDomain.chain_id}
+                        </h3>
+                        <div className="text-sm text-gray-600">
+                          {proteinDomains.length} domain{proteinDomains.length !== 1 ? 's' : ''} | {sequenceLength} residues
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleViewProtein(firstDomain)}
+                      >
+                        <Eye className="w-4 h-4 mr-1" />
+                        View Details
+                      </Button>
+                    </div>
+
+                    {/* Domain stats for this protein */}
+                    <div className="grid grid-cols-4 gap-4 mb-4 text-sm">
+                      <div className="bg-blue-50 p-3 rounded">
+                        <div className="font-medium text-blue-900">Total Domains</div>
+                        <div className="text-xl font-bold text-blue-600">{proteinDomains.length}</div>
+                      </div>
+                      <div className="bg-green-50 p-3 rounded">
+                        <div className="font-medium text-green-900">Classified</div>
+                        <div className="text-xl font-bold text-green-600">
+                          {proteinDomains.filter(d => d.t_group).length}
+                        </div>
+                      </div>
+                      <div className="bg-purple-50 p-3 rounded">
+                        <div className="font-medium text-purple-900">With Evidence</div>
+                        <div className="text-xl font-bold text-purple-600">
+                          {proteinDomains.filter(d => d.evidence_count > 0).length}
+                        </div>
+                      </div>
+                      <div className="bg-orange-50 p-3 rounded">
+                        <div className="font-medium text-orange-900">Avg Confidence</div>
+                        <div className="text-xl font-bold text-orange-600">
+                          {proteinDomains.filter(d => d.confidence !== null).length > 0
+                            ? (proteinDomains
+                                .filter(d => d.confidence !== null)
+                                .reduce((sum, d) => sum + (d.confidence || 0), 0) /
+                              proteinDomains.filter(d => d.confidence !== null).length).toFixed(2)
+                            : 'N/A'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Boundary visualization */}
+                    <BoundaryVisualization
+                      protein={{
+                        id: firstDomain.protein_id,
+                        pdb_id: firstDomain.pdb_id,
+                        chain_id: firstDomain.chain_id,
+                        sequence_length: sequenceLength
+                      }}
+                      domains={proteinDomains}
+                      onDomainClick={handleDomainClick}
+                    />
+
+                    {/* Domain details list */}
+                    <div className="mt-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Domain Details</h4>
+                      <div className="space-y-2">
+                        {proteinDomains.map((domain, index) => (
+                          <div
+                            key={domain.id}
+                            className="flex items-center justify-between p-2 bg-gray-50 rounded border hover:bg-gray-100 cursor-pointer transition-colors"
+                            onClick={() => handleDomainClick(domain)}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="w-4 h-4 rounded border-2 opacity-80"
+                                style={{
+                                  backgroundColor: `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+                                  borderColor: `hsl(${index * 137.5 % 360}, 70%, 40%)`
+                                }}
+                              />
+                              <div>
+                                <div className="font-medium text-sm">
+                                  Domain {domain.domain_number}
+                                </div>
+                                <div className="text-xs text-gray-600 font-mono">
+                                  {domain.range}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 text-sm">
+                              {domain.t_group && (
+                                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                                  {domain.t_group}
+                                </span>
+                              )}
+                              {domain.confidence && (
+                                <span className={`font-medium ${
+                                  domain.confidence >= 0.8 ? 'text-green-600' :
+                                  domain.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'
+                                }`}>
+                                  {domain.confidence.toFixed(2)}
+                                </span>
+                              )}
+                              <span className="text-gray-500">
+                                {domain.evidence_count} evidence
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </Card>
                 )
               })}
             </div>
@@ -512,49 +649,135 @@ const handleViewProtein = (domain: DomainSummary) => {
         {/* Side Panel - Domain Details */}
         {selectedDomain && (
           <div className="lg:col-span-1">
-            <Card className="p-6">
-              <h3 className="text-lg font-semibold mb-4">Domain Details</h3>
-              <div className="space-y-3">
+            <Card className="p-6 sticky top-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">Domain Details</h3>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelectedDomain(null)}
+                >
+                  ✕
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Basic Information */}
                 <div>
                   <label className="text-sm font-medium text-gray-700">Protein</label>
-                  <div className="text-sm">{selectedDomain.pdb_id}_{selectedDomain.chain_id}</div>
+                  <div className="text-sm font-mono">{selectedDomain.pdb_id}_{selectedDomain.chain_id}</div>
                 </div>
+
                 <div>
                   <label className="text-sm font-medium text-gray-700">Domain Number</label>
                   <div className="text-sm">{selectedDomain.domain_number}</div>
                 </div>
+
                 <div>
                   <label className="text-sm font-medium text-gray-700">Range</label>
                   <div className="text-sm font-mono">{selectedDomain.range}</div>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Confidence</label>
-                  <div className="text-sm">
-                    {selectedDomain.confidence ? selectedDomain.confidence.toFixed(3) : 'N/A'}
+
+                {/* Quality Metrics */}
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Quality Metrics</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">Confidence:</span>
+                      <span className={`text-sm font-medium ${
+                        selectedDomain.confidence && selectedDomain.confidence >= 0.8 ? 'text-green-600' :
+                        selectedDomain.confidence && selectedDomain.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'
+                      }`}>
+                        {selectedDomain.confidence ? selectedDomain.confidence.toFixed(3) : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">Evidence Count:</span>
+                      <span className="text-sm font-medium">{selectedDomain.evidence_count}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">Evidence Types:</span>
+                      <span className="text-sm">{selectedDomain.evidence_types}</span>
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Classification</label>
-                  <div className="text-sm space-y-1">
-                    <div>T: {selectedDomain.t_group || 'Not assigned'}</div>
-                    <div>H: {selectedDomain.h_group || 'Not assigned'}</div>
-                    <div>X: {selectedDomain.x_group || 'Not assigned'}</div>
-                    <div>A: {selectedDomain.a_group || 'Not assigned'}</div>
+
+                {/* Classification */}
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Classification</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">T-Group:</span>
+                      <span className={`text-sm px-2 py-1 rounded ${
+                        selectedDomain.t_group ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {selectedDomain.t_group || 'Not assigned'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">H-Group:</span>
+                      <span className={`text-sm px-2 py-1 rounded ${
+                        selectedDomain.h_group ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {selectedDomain.h_group || 'Not assigned'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">X-Group:</span>
+                      <span className={`text-sm px-2 py-1 rounded ${
+                        selectedDomain.x_group ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {selectedDomain.x_group || 'Not assigned'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">A-Group:</span>
+                      <span className={`text-sm px-2 py-1 rounded ${
+                        selectedDomain.a_group ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {selectedDomain.a_group || 'Not assigned'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Evidence</label>
-                  <div className="text-sm">
-                    <div>Count: {selectedDomain.evidence_count}</div>
-                    <div>Types: {selectedDomain.evidence_types}</div>
+
+                {/* Processing Information */}
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Processing Info</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">Batch:</span>
+                      <span className="text-sm">{selectedDomain.batch_id || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">Reference:</span>
+                      <span className="text-sm">{selectedDomain.reference_version || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-gray-600">Timestamp:</span>
+                      <span className="text-sm">
+                        {selectedDomain.timestamp ? new Date(selectedDomain.timestamp).toLocaleDateString() : 'N/A'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <div className="pt-4 border-t">
+
+                {/* Actions */}
+                <div className="border-t pt-4 space-y-2">
                   <Button
                     className="w-full"
                     onClick={() => handleViewDomain(selectedDomain)}
                   >
+                    <Eye className="w-4 h-4 mr-2" />
                     View Full Details
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => handleViewProtein(selectedDomain)}
+                  >
+                    <BarChart3 className="w-4 h-4 mr-2" />
+                    View Protein
                   </Button>
                 </div>
               </div>
@@ -562,10 +785,6 @@ const handleViewProtein = (domain: DomainSummary) => {
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
 // Utility function for CSV export
 function downloadAsCSV(data: any[], filename: string) {
   const headers = Object.keys(data[0])

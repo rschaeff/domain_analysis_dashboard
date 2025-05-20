@@ -1,4 +1,30 @@
-'use client'
+// Debug function to show structure info
+  const showStructureInfo = useCallback((plugin: any) => {
+    try {
+      if (!plugin.managers?.structure?.hierarchy?.current?.structures) {
+        log('No structures available');
+        return;
+      }
+
+      const structures = plugin.managers.structure.hierarchy.current.structures;
+      log(`Structure count: ${structures.length}`);
+
+      structures.forEach((struct: any, i: number) => {
+        const label = struct.cell?.obj?.label || 'Unnamed';
+        const atoms = struct.cell?.obj?.data?.model?.atomCount || 0;
+        log(`Structure ${i+1}: ${label} (${atoms} atoms)`);
+
+        if (struct.components?.length) {
+          log(`  Components: ${struct.components.length}`);
+          struct.components.forEach((comp: any, j: number) => {
+            log(`  - Component ${j+1}: ${comp.cell?.obj?.label || 'Unnamed'}`);
+          });
+        }
+      });
+    } catch (error) {
+      log(`Error in structure info: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [log]);'use client'
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 
@@ -24,18 +50,18 @@ export function SafeModeViewer({
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [canLoad, setCanLoad] = useState(false);
-  
+
   // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const pluginRef = useRef<any>(null);
-  
+
   // Add log entry
   const log = useCallback((message: string) => {
     console.log(`[SafeViewer] ${message}`);
     setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} - ${message}`]);
   }, []);
-  
+
   // Handle errors
   const handleError = useCallback((message: string) => {
     console.error(`[SafeViewer] ${message}`);
@@ -43,52 +69,56 @@ export function SafeModeViewer({
     setStatus('error');
     if (onError) onError(message);
   }, [onError]);
-  
+
   // Initialize plugin only - no structure loading
   const initializePlugin = useCallback(async () => {
     if (status !== 'idle' && status !== 'error') return;
-    
+
     if (!canvasRef.current || !containerRef.current) {
       return handleError("Canvas or container ref not available");
     }
-    
+
     setStatus('initializing');
     log('Starting initialization...');
-    
+
     try {
       // Import Molstar libraries
       log('Importing modules');
       const { DefaultPluginSpec } = await import('molstar/lib/mol-plugin/spec');
       const { PluginContext } = await import('molstar/lib/mol-plugin/context');
-      
+
       // Create plugin with minimal options
       log('Creating plugin instance');
       const plugin = new PluginContext(DefaultPluginSpec({
-        // Specify minimal features to avoid memory issues
-        myChemicalLibrary: { useMolj: false },
-        extensions: []
+        // Use default settings but with explicit renderer settings for visibility
+        renderer: {
+          ...DefaultPluginSpec().renderer,
+          backgroundColor: 0xFFFFFF,
+          selectColor: 0xFF9999,
+          highlightColor: 0x9999FF,
+        }
       }));
-      
+
       // Initialize
       log('Initializing plugin');
       await plugin.init();
-      
+
       // Setup viewer with explicit canvas sizing
       log('Setting up viewer');
       const viewerInitialized = plugin.initViewer(canvasRef.current, containerRef.current);
-      
+
       if (!viewerInitialized) {
         return handleError('Failed to initialize viewer');
       }
-      
+
       // Set simple white background
       plugin.canvas3d?.setProps({
         backgroundColor: { color: 0xFFFFFF }
       });
-      
+
       // Store reference
       pluginRef.current = plugin;
-      
+
       // Mark as initialized
       log('Initialization complete - ready for manual loading');
       setStatus('ready');
@@ -98,72 +128,72 @@ export function SafeModeViewer({
       handleError(`Initialization error: ${errorMessage}`);
     }
   }, [status, handleError, log]);
-  
+
   // Load PDB minimal data
   const loadStructure = useCallback(async () => {
     if (status !== 'ready' || !canLoad || !pluginRef.current) {
       return handleError("Cannot load: plugin not ready");
     }
-    
+
     setStatus('loading');
     log(`Loading structure: ${pdbId}${chainId ? ` chain ${chainId}` : ''}`);
-    
+
     try {
       const plugin = pluginRef.current;
-      
+
       // Use the API to load structure
       const url = `/api/pdb/${pdbId.toLowerCase()}`;
       log(`Fetching from: ${url}`);
-      
+
       try {
         // Explicit fetching with timeout
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30000);
-        
-        const response = await fetch(url, { 
+
+        const response = await fetch(url, {
           signal: controller.signal,
           headers: { 'Accept': 'chemical/x-pdb, chemical/x-mmcif, */*' }
         });
         clearTimeout(timeout);
-        
+
         if (!response.ok) {
           return handleError(`HTTP error: ${response.status} ${response.statusText}`);
         }
-        
+
         // Check the size before processing
         const contentLength = response.headers.get('Content-Length');
         if (contentLength && parseInt(contentLength) > 10000000) {
           return handleError(`Structure too large (${Math.round(parseInt(contentLength)/1024/1024)}MB) - try a smaller structure`);
         }
-        
+
         // Get data format from header or extension
         const contentType = response.headers.get('Content-Type') || '';
         const format = response.headers.get('X-PDB-Format') || '';
         let dataFormat = 'mmcif';
-        
+
         if (format === 'pdb' || contentType.includes('pdb')) {
           dataFormat = 'pdb';
         }
-        
+
         log(`Using format: ${dataFormat}`);
-        
+
         // Get binary data with size limit
         const blob = await response.blob();
         if (blob.size === 0) {
           return handleError('Received empty response from server');
         }
-        
+
         log(`Downloaded ${Math.round(blob.size / 1024)}KB of data`);
-        
+
         // Convert blob to array buffer
         const arrayBuffer = await blob.arrayBuffer();
-        const data = await plugin.builders.data.rawData({ 
+        const data = await plugin.builders.data.rawData({
           data: new Uint8Array(arrayBuffer),
           label: `${pdbId.toLowerCase()}.${dataFormat}`
         });
-        
+
         log('Parsing structure...');
-        
+
         // Try parsing with determined format
         let trajectory;
         try {
@@ -173,33 +203,60 @@ export function SafeModeViewer({
           // Try fallback format
           log(`Error parsing as ${dataFormat}, trying alternative format`);
           const fallbackFormat = dataFormat === 'mmcif' ? 'pdb' : 'mmcif';
-          
+
           trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat);
           log(`${fallbackFormat.toUpperCase()} format parsed successfully`);
         }
-        
+
         // Use simplified representation to reduce memory usage
-        log('Applying minimal representation');
+        log('Applying representation');
         await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
-          id: 'preset-structure-representation-backbone',
+          id: 'preset-structure-representation-cartoon',
           params: {}
         });
-        
+
+        log('Updating rendering');
+
+        // Explicit update to rendering
+        if (plugin.canvas3d) {
+          plugin.canvas3d.commit();
+          log('Canvas committed');
+        }
+
         // Handle chain selection or reset camera
         if (chainId) {
           try {
             log(`Focusing on chain ${chainId}`);
             plugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
-            plugin.managers.camera.focusLoci(plugin.managers.structure.selection.getLoci());
+            const loci = plugin.managers.structure.selection.getLoci();
+            plugin.managers.camera.focusLoci(loci);
+            log('Camera focused on selection');
           } catch (chainErr) {
             log(`Chain selection failed, focusing on whole structure`);
             plugin.managers.camera.reset();
+            log('Camera reset');
           }
         } else {
+          log('Resetting camera to show full structure');
           plugin.managers.camera.reset();
+
+          // Extra steps to ensure structure is visible
+          setTimeout(() => {
+            if (plugin.canvas3d) {
+              log('Forcing camera reset after delay');
+              plugin.canvas3d.commit();
+              plugin.managers.camera.reset();
+              plugin.canvas3d.commit();
+            }
+          }, 100);
         }
 
+        // Structure loaded successfully
         log('Structure loaded successfully');
+
+        // Show structure info for debugging
+        showStructureInfo(plugin);
+
         setStatus('ready');
         if (onReady) onReady(plugin);
       } catch (fetchError) {
@@ -212,34 +269,47 @@ export function SafeModeViewer({
 
   // CSS styling effect
   useEffect(() => {
-    // Add minimal CSS directly
-    const style = document.createElement('style');
-    style.textContent = `
-      .msp-plugin {
-        position: relative;
-        width: 100%;
-        height: 100%;
-      }
-      .msp-canvas3d {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-      }
-      .msp-viewport-controls {
-        position: absolute;
-        right: 10px;
-        top: 10px;
-      }
-      .msp-layout-standard {
-        left: 0;
-        right: 0;
-        top: 0;
-        bottom: 0;
-      }
-    `;
-    document.head.appendChild(style);
+    try {
+      // Add minimal CSS directly
+      log('Adding required CSS styles');
+      const style = document.createElement('style');
+      style.textContent = `
+        .msp-plugin {
+          position: relative;
+          width: 100%;
+          height: 100%;
+        }
+        .msp-canvas3d {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+        }
+        .msp-viewport-controls {
+          position: absolute;
+          right: 10px;
+          top: 10px;
+        }
+        .msp-layout-standard {
+          left: 0;
+          right: 0;
+          top: 0;
+          bottom: 0;
+        }
+      `;
+      document.head.appendChild(style);
+
+      // Try to load the external CSS as well
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/css/molstar.css';
+      document.head.appendChild(link);
+
+      log('CSS added to document');
+    } catch (cssError) {
+      log(`Error adding CSS: ${cssError instanceof Error ? cssError.message : String(cssError)}`);
+    }
   }, []);
 
   // Cleanup effect
@@ -329,7 +399,7 @@ export function SafeModeViewer({
       {/* Main viewer */}
       <div
         ref={containerRef}
-        className="w-full h-full"
+        className="w-full h-full border border-gray-300"
         style={{ position: 'relative' }}
       >
         <canvas
@@ -339,7 +409,8 @@ export function SafeModeViewer({
             height: '100%',
             position: 'absolute',
             top: 0,
-            left: 0
+            left: 0,
+            background: '#f0f0f0'
           }}
         />
       </div>

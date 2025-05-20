@@ -25,10 +25,16 @@ export default function DashboardPage() {
   const [selectedDomain, setSelectedDomain] = useState<DomainSummary | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'visualization'>('table')
 
-  // Fetch domains data
+  // Add debugging state
+  const [debugInfo, setDebugInfo] = useState<string>('')
+
+  // Fetch domains data with enhanced debugging
   const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {
+    console.log('🔍 fetchDomains called:', { page, newFilters, currentFilters: filters })
+
     setLoading(true)
     setError(null)
+    setDebugInfo('Starting fetch...')
 
     try {
       const params = new URLSearchParams({
@@ -49,17 +55,39 @@ export default function DashboardPage() {
         }
       })
 
-      const response = await fetch(`/api/domains?${params}`)
-      
+      const apiUrl = `/api/domains?${params}`
+      console.log('🌐 API URL:', apiUrl)
+      setDebugInfo(`Making request to: ${apiUrl}`)
+
+      const response = await fetch(apiUrl)
+      console.log('📡 Response status:', response.status)
+      console.log('📡 Response ok:', response.ok)
+
       if (!response.ok) {
-        throw new Error('Failed to fetch domains')
+        const errorText = await response.text()
+        console.error('❌ API Error:', response.status, errorText)
+        throw new Error(`API Error: ${response.status} - ${errorText}`)
       }
 
       const data = await response.json()
-      setDomains(data.data)
-      setPagination(data.pagination)
+      console.log('✅ API Response received:', {
+        dataCount: data.data?.length,
+        pagination: data.pagination,
+        firstDomain: data.data?.[0]
+      })
+
+      setDebugInfo(`Received ${data.data?.length || 0} domains`)
+      setDomains(data.data || [])
+      setPagination(data.pagination || { page: 1, size: 50, total: 0 })
+
+      if (data.data && data.data.length > 0) {
+        console.log('🔍 Sample domain structure:', Object.keys(data.data[0]))
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
+      console.error('💥 Fetch error:', err)
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred'
+      setError(errorMessage)
+      setDebugInfo(`Error: ${errorMessage}`)
     } finally {
       setLoading(false)
     }
@@ -67,47 +95,47 @@ export default function DashboardPage() {
 
   // Initial fetch and filter changes
   useEffect(() => {
+    console.log('🚀 useEffect triggered - calling fetchDomains')
     fetchDomains(1, filters)
   }, [filters])
 
   // Handle filter changes
   const handleFiltersChange = (newFilters: DomainFilters) => {
+    console.log('🔧 Filters changed:', newFilters)
     setFilters(newFilters)
   }
 
   const handleResetFilters = () => {
+    console.log('🔄 Resetting filters')
     setFilters({})
   }
 
   // Handle pagination
   const handlePageChange = (page: number) => {
+    console.log('📄 Page changed to:', page)
     setPagination(prev => ({ ...prev, page }))
     fetchDomains(page)
   }
 
   // Handle domain selection
   const handleDomainClick = (domain: DomainSummary) => {
+    console.log('👆 Domain clicked:', domain)
     setSelectedDomain(domain)
   }
 
-
   const handleViewDomain = (domain: DomainSummary) => {
-    console.log('Clicking domain with ID:', domain.id)
-    console.log('Full domain object:', domain)
-    console.log('Available keys:', Object.keys(domain))
+    console.log('🔍 View domain:', domain.id, domain)
     router.push(`/domains/${domain.id}`)
   }
 
-const handleViewProtein = (domain: DomainSummary) => {
-    // Use the protein_id field that should now be available from the API
-    const proteinId = domain.protein_id
+  const handleViewProtein = (domain: DomainSummary) => {
+    console.log('🧬 View protein:', { protein_id: domain.protein_id, domain })
 
-    if (proteinId) {
-      router.push(`/protein/${proteinId}`)
+    if (domain.protein_id) {
+      router.push(`/protein/${domain.protein_id}`)
     } else {
-      console.error('No protein ID found for domain:', domain)
-      // Fallback: construct from pdb_id and chain_id if needed
-      // You might need to fetch protein ID from a separate endpoint
+      console.error('❌ No protein_id found for domain:', domain)
+      alert('Protein ID not available for this domain')
     }
   }
 
@@ -156,7 +184,7 @@ const handleViewProtein = (domain: DomainSummary) => {
       label: 'T-Group',
       render: (value: string | null) => (
         <span className={`px-2 py-1 rounded text-xs font-medium ${
-          value ? 'bg-classification-t-group text-white' : 'bg-gray-100 text-gray-500'
+          value ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'
         }`}>
           {value || 'Unclassified'}
         </span>
@@ -201,10 +229,37 @@ const handleViewProtein = (domain: DomainSummary) => {
   const totalDomains = pagination.total || 0
   const classifiedDomains = domains.filter(d => d.t_group).length
   const highConfidenceDomains = domains.filter(d => d.confidence && d.confidence >= 0.8).length
-  const avgConfidence = domains.reduce((sum, d) => sum + (d.confidence || 0), 0) / domains.length
+  const avgConfidence = domains.length > 0 ? domains.reduce((sum, d) => sum + (d.confidence || 0), 0) / domains.length : 0
+
+  console.log('🎯 Render stats:', {
+    totalDomains,
+    domainsInState: domains.length,
+    loading,
+    error,
+    debugInfo
+  })
 
   return (
     <div className="space-y-6">
+      {/* Debug Panel - Remove this in production */}
+      <Card className="p-4 bg-yellow-50 border-yellow-200">
+        <h3 className="font-semibold mb-2">🐛 Debug Info</h3>
+        <div className="text-sm space-y-1">
+          <div>Status: {loading ? 'Loading...' : error ? 'Error' : 'Ready'}</div>
+          <div>Domains in state: {domains.length}</div>
+          <div>Total from API: {totalDomains}</div>
+          <div>Debug: {debugInfo}</div>
+          {error && <div className="text-red-600">Error: {error}</div>}
+        </div>
+        <Button
+          size="sm"
+          onClick={() => fetchDomains(1)}
+          className="mt-2"
+        >
+          Manual Refresh
+        </Button>
+      </Card>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -356,7 +411,7 @@ const handleViewProtein = (domain: DomainSummary) => {
                   </div>
                 </div>
                 <div className="pt-4 border-t">
-                  <Button 
+                  <Button
                     className="w-full"
                     onClick={() => handleViewDomain(selectedDomain)}
                   >

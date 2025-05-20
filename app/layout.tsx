@@ -1,4 +1,3 @@
-import 'molstar/build/viewer/molstar.css'
 import './globals.css'
 import { inter } from '@/lib/fonts' // Assuming you have this import
 
@@ -10,11 +9,45 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* Add explicit link to Molstar CSS as a fallback */}
+        {/* Explicit meta tags */}
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        {/* Multiple fallback approaches for Molstar CSS */}
+        <link
+          rel="stylesheet"
+          href="/molstar.css"
+          precedence="default"
+        />
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/molstar@3.44.0/build/viewer/molstar.css"
+          precedence="default"
+        />
         <link
           rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/molstar@3.44.0/build/viewer/molstar.css"
+          precedence="default"
         />
+        {/* Inline critical Molstar CSS as a last resort */}
+        <style dangerouslySetInnerHTML={{ __html: `
+          .msp-plugin {
+            position: relative;
+            width: 100%;
+            height: 100%;
+          }
+          .msp-canvas3d {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+          }
+          .msp-viewport-controls {
+            position: absolute;
+            right: 10px;
+            top: 10px;
+          }
+        `}} />
       </head>
       <body className={inter.className} suppressHydrationWarning={true}>
         <div className="min-h-screen bg-gray-50">

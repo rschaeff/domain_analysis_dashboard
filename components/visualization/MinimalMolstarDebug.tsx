@@ -38,7 +38,9 @@ export default function MinimalMolstarDebug() {
     addLog("Loading Molstar CSS");
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = 'https://cdn.jsdelivr.net/npm/molstar@3.44.0/build/viewer/molstar.css';
+    //link.href = 'https://cdn.jsdelivr.net/npm/molstar@3.44.0/build/viewer/molstar.css';
+    //link.href = 'https://unpkg.com/molstar@3.44.0/build/viewer/molstar.css';
+    link.href = '/css/molstar.css';
     link.onload = () => {
       addLog("✅ Molstar CSS loaded");
       setCssLoaded(true);

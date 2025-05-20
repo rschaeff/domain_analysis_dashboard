@@ -1,3 +1,5 @@
+'use client'
+
 import React, { useEffect, useState } from 'react';
 import { MolstarCanvas } from './molstar/components/MolstarCanvas';
 import { DomainProvider } from './molstar/context/DomainContext';

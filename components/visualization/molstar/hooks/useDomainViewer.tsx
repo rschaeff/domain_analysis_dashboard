@@ -4,6 +4,8 @@
  * This hook provides functions for highlighting and coloring protein domains,
  * which is particularly useful for ECOD domain visualization.
  */
+'use client'
+
 import { useState, useCallback } from 'react';
 import { useMolstar } from '../context/MolstarContext';
 import { useStructureLoader } from './useStructureLoader';

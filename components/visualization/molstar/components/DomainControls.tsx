@@ -1,3 +1,5 @@
+'use client'
+
 import React, { useState } from 'react';
 import { useDomainContext } from '../context/DomainContext';
 import { useDomainVisualization } from '../hooks/useDomainVisualization';

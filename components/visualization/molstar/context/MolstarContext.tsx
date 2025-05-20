@@ -5,6 +5,8 @@
  * access to its functionality through React's context API. It properly
  * manages the plugin lifecycle and synchronizes Molstar's state with React.
  */
+'use client'
+
 import React, { createContext, useContext, useRef, useState, useEffect, useCallback } from 'react';
 import { PluginContext } from 'molstar/lib/mol-plugin/context';
 import { createPluginUI } from 'molstar/lib/mol-plugin-ui';

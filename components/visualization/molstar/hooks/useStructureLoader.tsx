@@ -4,6 +4,8 @@
  * This hook provides a clean API for loading structures and handling the loading
  * process state (loading, error, success).
  */
+'use client'
+
 import { useState, useCallback, useEffect } from 'react';
 import { useMolstar } from '../context/MolstarContext';
 import { StructureRepresentationPresetProvider } from 'molstar/lib/mol-plugin-state/builder/structure/representation-preset';

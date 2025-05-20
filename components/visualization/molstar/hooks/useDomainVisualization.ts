@@ -1,3 +1,5 @@
+'use client'
+
 import { useCallback, useEffect, useState } from 'react';
 import { useDomainContext } from '../context/DomainContext';
 import { MolScriptBuilder } from 'molstar/lib/mol-script/language/builder';

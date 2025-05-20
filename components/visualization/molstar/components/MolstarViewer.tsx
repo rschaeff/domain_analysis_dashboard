@@ -5,6 +5,8 @@
  * controls, and error handling. It's a high-level component that combines
  * the context provider, hooks, and canvas.
  */
+'use client'
+
 import React, { useState, useEffect, useRef } from 'react';
 import { MolstarProvider } from '../context/MolstarContext';
 import { useMolstar } from '../context/MolstarContext';

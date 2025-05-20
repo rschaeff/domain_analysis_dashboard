@@ -1,3 +1,5 @@
+'use client'
+
 import React, { createContext, useState, useContext, useCallback, useMemo } from 'react';
 import { Domain, createDomain } from '../types/domain';
 import { PluginContext } from 'molstar/lib/mol-plugin/context';

@@ -4,6 +4,8 @@
  * This component handles the canvas element and integration with the Molstar plugin.
  * It provides a clean React wrapper for Molstar's canvas rendering.
  */
+'use client'
+
 import React, { useRef, useEffect } from 'react';
 import { useMolstar } from '../context/MolstarContext';
 import { useDomainContext } from '../context/DomainContext';

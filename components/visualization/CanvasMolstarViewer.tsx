@@ -4,11 +4,37 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 
-import { DefaultPluginSpec } from 'molstar/lib/mol-plugin/spec'
-import { PluginContext } from 'molstar/lib/mol-plugin/context'
-import { ColorNames } from 'molstar/lib/mol-util/color/names'
-import { Structure } from 'molstar/lib/mol-model/structure'
-import 'molstar/build/viewer/molstar.css'
+// Lazy import Mol* to ensure it only loads on the client
+const molstarImports = {
+  DefaultPluginSpec: null as any,
+  PluginContext: null as any,
+  ColorNames: null as any,
+  Structure: null as any,
+};
+
+// Load Mol* dynamically only on the client side
+let isMolstarLoaded = false;
+async function loadMolstar() {
+  if (typeof window === 'undefined') return false;
+  if (isMolstarLoaded) return true;
+
+  try {
+    // Dynamically import on client only
+    molstarImports.DefaultPluginSpec = (await import('molstar/lib/mol-plugin/spec')).DefaultPluginSpec;
+    molstarImports.PluginContext = (await import('molstar/lib/mol-plugin/context')).PluginContext;
+    molstarImports.ColorNames = (await import('molstar/lib/mol-util/color/names')).ColorNames;
+    molstarImports.Structure = (await import('molstar/lib/mol-model/structure')).Structure;
+
+    // Load CSS
+    await import('molstar/build/viewer/molstar.css');
+
+    isMolstarLoaded = true;
+    return true;
+  } catch (error) {
+    console.error('Failed to load Mol* dependencies:', error);
+    return false;
+  }
+}
 
 export type FormatType = 'auto' | 'pdb' | 'mmcif' | 'mmtf';
 
@@ -33,7 +59,7 @@ interface CanvasMolstarViewerProps {
   height?: string | number;
   width?: string | number;
   className?: string;
-  onReady?: (plugin: PluginContext) => void;
+  onReady?: (plugin: any) => void;
   onError?: (error: string) => void;
   useLocalRepository?: boolean;
   format?: FormatType;
@@ -58,13 +84,59 @@ export function CanvasMolstarViewer({
 }: CanvasMolstarViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const parentRef = useRef<HTMLDivElement>(null);
-  const pluginRef = useRef<PluginContext | null>(null);
+  const pluginRef = useRef<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detectedFormat, setDetectedFormat] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [structure, setStructure] = useState<Structure | null>(null);
+  const [structure, setStructure] = useState<any | null>(null);
   const [loadAttempted, setLoadAttempted] = useState<boolean>(false);
+  const [isClient, setIsClient] = useState(false);
+  const [isMolstarReady, setIsMolstarReady] = useState(false);
+
+  // First effect to check if we're on the client and load Mol* dependencies
+  useEffect(() => {
+    setIsClient(true);
+
+    // Load Mol* dependencies
+    loadMolstar().then(success => {
+      if (success) {
+        setIsMolstarReady(true);
+      } else {
+        setError("Failed to load Mol* visualization libraries");
+        setIsLoading(false);
+        if (onError) onError("Failed to load Mol* visualization libraries");
+      }
+    });
+  }, [onError]);
+
+  // Check for WebGL support
+  const checkWebGLSupport = useCallback(() => {
+    if (typeof window === 'undefined') return { supported: false, error: 'Not in browser environment' };
+
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+      if (!gl) {
+        return { supported: false, error: 'WebGL is not supported by your browser' };
+      }
+
+      // Check for specific extensions/capabilities needed by Mol*
+      const maxVertexTextures = gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS);
+
+      if (maxVertexTextures < 8) {
+        return {
+          supported: false,
+          error: `Your graphics hardware supports only ${maxVertexTextures} vertex textures, but Mol* requires at least 8`
+        };
+      }
+
+      return { supported: true };
+    } catch (e) {
+      return { supported: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }, []);
 
   // Function to highlight a domain with query expression
   const highlightDomain = useCallback(async (domain: Domain, options: MolstarHighlightOptions = {}) => {
@@ -185,10 +257,26 @@ export function CanvasMolstarViewer({
     }
   }, [isInitialized]);
 
+  // Check WebGL support only on client
+  useEffect(() => {
+    if (!isClient || !isMolstarReady) return;
+
+    const webglSupport = checkWebGLSupport();
+
+    if (!webglSupport.supported) {
+      setError(`WebGL compatibility issue: ${webglSupport.error}`);
+      setIsLoading(false);
+      if (onError) onError(`WebGL compatibility issue: ${webglSupport.error}`);
+    }
+  }, [isClient, isMolstarReady, checkWebGLSupport, onError]);
+
   // Initialize Mol* viewer
   useEffect(() => {
+    // Only run on client and after Mol* is loaded
+    if (!isClient || !isMolstarReady) return;
     if (!canvasRef.current || !parentRef.current) return;
     if (loadAttempted) return; // Prevent multiple load attempts
+    if (error) return; // Don't try to initialize if we have a WebGL error
 
     setLoadAttempted(true);
     const canvas = canvasRef.current;
@@ -210,18 +298,26 @@ export function CanvasMolstarViewer({
         setIsInitialized(false);
 
         // Create plugin with default spec
+        const { DefaultPluginSpec, PluginContext } = molstarImports;
         const plugin = new PluginContext(DefaultPluginSpec());
         await plugin.init();
 
-        // Initialize the viewer with our canvas
-        if (!plugin.initViewer(canvas, parent)) {
-          throw new Error('Failed to initialize Mol* viewer');
+        // Try to initialize the viewer with proper error handling
+        try {
+          // Initialize the viewer with our canvas
+          if (!plugin.initViewer(canvas, parent)) {
+            throw new Error('Failed to initialize Mol* viewer');
+          }
+        } catch (viewerInitError) {
+          console.error('Error initializing viewer:', viewerInitError);
+          throw new Error(`WebGL compatibility issue: ${viewerInitError instanceof Error ? viewerInitError.message : String(viewerInitError)}`);
         }
 
         // Store reference to plugin
         pluginRef.current = plugin;
 
         // Set background color
+        const { ColorNames } = molstarImports;
         plugin.canvas3d?.setProps({
           backgroundColor: {
             color: backgroundColor in ColorNames ? ColorNames[backgroundColor] : ColorNames.white
@@ -233,7 +329,7 @@ export function CanvasMolstarViewer({
         let detectedFileFormat;
 
         if (useLocalRepository) {
-          // Use local API - Update the path to match your API
+          // Use local API
           url = `/api/pdb/${pdbId.toLowerCase()}`;
 
           try {
@@ -346,7 +442,12 @@ export function CanvasMolstarViewer({
       }
     };
 
-    initMolstar();
+    initMolstar().catch(err => {
+      console.error('Unhandled error in initMolstar:', err);
+      setError(`Unhandled error: ${err instanceof Error ? err.message : String(err)}`);
+      setIsLoading(false);
+      if (onError) onError(`Unhandled error: ${err instanceof Error ? err.message : String(err)}`);
+    });
 
     // Clean up on unmount
     return () => {
@@ -361,13 +462,28 @@ export function CanvasMolstarViewer({
         }
       }
     };
-  }, [pdbId, chainId, useLocalRepository, format, initialRepresentation, backgroundColor, domains, onReady, onError, highlightDomain, clearRepresentations, loadAttempted]);
+  }, [
+    pdbId, chainId, useLocalRepository, format, initialRepresentation, backgroundColor,
+    domains, onReady, onError, highlightDomain, clearRepresentations, loadAttempted,
+    error, checkWebGLSupport, isClient, isMolstarReady
+  ]);
 
   // Reset loadAttempted when key props change
   useEffect(() => {
     setLoadAttempted(false);
     setError(null);
   }, [pdbId, chainId, useLocalRepository]);
+
+  // Server-side render gracefully
+  if (!isClient) {
+    return (
+      <div className={`relative ${className}`} style={{ width, height }}>
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+          <LoadingSpinner />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`relative ${className}`} style={{ width, height }}>
@@ -379,8 +495,9 @@ export function CanvasMolstarViewer({
 
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50 z-10">
-          <div className="text-red-500 bg-white p-4 rounded shadow">
-            {error}
+          <div className="text-red-500 bg-white p-4 rounded shadow max-w-md">
+            <p className="font-bold mb-2">Error:</p>
+            <p>{error}</p>
           </div>
         </div>
       )}

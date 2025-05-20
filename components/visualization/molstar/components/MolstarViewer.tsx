@@ -6,11 +6,11 @@
  * the context provider, hooks, and canvas.
  */
 import React, { useState, useEffect, useRef } from 'react';
-import { MolstarProvider } from './MolstarContext';
-import { useMolstar } from './MolstarContext';
+import { MolstarProvider } from '../context/MolstarContext';
+import { useMolstar } from '../context/MolstarContext';
 import { MolstarCanvas } from './MolstarCanvas';
-import { useStructureLoader, StructureInfo } from './useStructureLoader';
-import { useDomainViewer, Domain } from './useDomainViewer';
+import { useStructureLoader, StructureInfo } from '../hooks/useStructureLoader';
+import { useDomainViewer, Domain } from '../hooks/useDomainViewer';
 
 // Types
 export interface MolstarViewerProps {
@@ -20,7 +20,7 @@ export interface MolstarViewerProps {
   assemblyId?: string;
   format?: 'mmcif' | 'pdb' | 'mmtf' | 'auto';
   useLocalRepository?: boolean;
-  
+
   // Display options
   width?: string | number;
   height?: string | number;
@@ -30,11 +30,14 @@ export interface MolstarViewerProps {
   showLogger?: boolean;
   transparentBackground?: boolean;
   safeMode?: boolean;
-  
+
   // Domain visualization
   domains?: Domain[];
   colorByClassification?: boolean;
-  
+
+  // Representation style
+  initialRepresentation?: 'cartoon' | 'ball-and-stick' | 'surface' | 'spacefill';
+
   // Events
   onReady?: (plugin: any) => void;
   onError?: (message: string) => void;
@@ -57,59 +60,60 @@ const ViewerContent: React.FC<Omit<MolstarViewerProps, 'style' | 'safeMode'>> = 
   transparentBackground = false,
   domains = [],
   colorByClassification = true,
+  initialRepresentation = 'cartoon',
   onReady,
   onError
 }) => {
   // Get context and hooks
   const { plugin, isBusy, isInitialized, error: contextError, logs, takeScreenshot } = useMolstar();
-  const { 
-    loadStructure, 
-    isLoading, 
-    hasStructure, 
+  const {
+    loadStructure,
+    isLoading,
+    hasStructure,
     error: structureError,
     focusChain
   } = useStructureLoader();
-  
+
   const {
     highlightMultipleDomains,
     clearDomainHighlights,
     activeDomains,
     error: domainError
   } = useDomainViewer();
-  
+
   // Track loaded structure
   const [isStructureReady, setIsStructureReady] = useState(false);
   const lastPdbIdRef = useRef(pdbId);
   const lastChainIdRef = useRef(chainId);
-  
+
   // Load structure when initialized
   useEffect(() => {
     if (!plugin || !isInitialized) return;
-    
+
     // Check if we need to load a new structure (PDB ID or chain ID changed)
-    const needsLoad = 
-      !isStructureReady || 
-      pdbId !== lastPdbIdRef.current || 
+    const needsLoad =
+      !isStructureReady ||
+      pdbId !== lastPdbIdRef.current ||
       chainId !== lastChainIdRef.current;
-    
+
     if (needsLoad) {
       // Update refs
       lastPdbIdRef.current = pdbId;
       lastChainIdRef.current = chainId;
-      
+
       // Reset ready state
       setIsStructureReady(false);
-      
+
       // Define structure info
       const structureInfo: StructureInfo = {
         pdbId,
         chainId,
         assemblyId,
-        format,
+        format: format === 'auto' ? undefined : format,
         useLocalRepository,
-        representationStyle: 'cartoon'
+        representationStyle: initialRepresentation
       };
-      
+
       // Load structure
       loadStructure(structureInfo)
         .then(success => {
@@ -123,9 +127,9 @@ const ViewerContent: React.FC<Omit<MolstarViewerProps, 'style' | 'safeMode'>> = 
         });
     }
   }, [
-    plugin, isInitialized, pdbId, chainId, assemblyId, 
+    plugin, isInitialized, pdbId, chainId, assemblyId,
     format, useLocalRepository, loadStructure, isStructureReady,
-    onReady, onError
+    onReady, onError, initialRepresentation
   ]);
   
   // Process domains when structure is ready

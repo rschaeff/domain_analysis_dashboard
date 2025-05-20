@@ -5,7 +5,7 @@
  * It provides a clean React wrapper for Molstar's canvas rendering.
  */
 import React, { useRef, useEffect } from 'react';
-import { useMolstar } from './MolstarContext';
+import { useMolstar } from '../context/MolstarContext';
 
 // Types
 export interface MolstarCanvasProps {

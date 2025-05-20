@@ -5,7 +5,7 @@
  * which is particularly useful for ECOD domain visualization.
  */
 import { useState, useCallback } from 'react';
-import { useMolstar } from './MolstarContext';
+import { useMolstar } from '../context/MolstarContext';
 import { useStructureLoader } from './useStructureLoader';
 import { Vec3 } from 'molstar/lib/mol-math/linear-algebra';
 
@@ -45,21 +45,21 @@ export interface DomainViewerResult {
 export function useDomainViewer(): DomainViewerResult {
   const { plugin, addLog } = useMolstar();
   const { currentStructure, hasStructure } = useStructureLoader();
-  
+
   // State
   const [isHighlighting, setIsHighlighting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeDomains, setActiveDomains] = useState<Domain[]>([]);
   const [domainRepresentations, setDomainRepresentations] = useState<DomainRepresentation[]>([]);
-  
+
   // Clear domain highlights
   const clearDomainHighlights = useCallback(async () => {
     if (!plugin || !hasStructure) return;
-    
+
     try {
       setIsHighlighting(true);
       addLog('Clearing domain highlights');
-      
+
       // Remove domain visual components
       for (const rep of domainRepresentations) {
         if (rep.representationRef) {
@@ -70,7 +70,7 @@ export function useDomainViewer(): DomainViewerResult {
           }
         }
       }
-      
+
       setDomainRepresentations([]);
       setActiveDomains([]);
       setError(null);
@@ -82,24 +82,24 @@ export function useDomainViewer(): DomainViewerResult {
       setIsHighlighting(false);
     }
   }, [plugin, hasStructure, domainRepresentations, addLog]);
-  
+
   // Restore default representation
   const restoreDefaultRepresentation = useCallback(async () => {
     if (!plugin || !hasStructure || !currentStructure) return;
-    
+
     try {
       setIsHighlighting(true);
       addLog('Restoring default representation');
-      
+
       // Clear domain highlights first
       await clearDomainHighlights();
-      
+
       // Apply cartoon representation to everything
       await plugin.builders.structure.representation.addRepresentation(currentStructure, {
         type: 'cartoon',
         color: 'chain-id'
       });
-      
+
       plugin.canvas3d?.commit();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -109,18 +109,18 @@ export function useDomainViewer(): DomainViewerResult {
       setIsHighlighting(false);
     }
   }, [plugin, hasStructure, currentStructure, clearDomainHighlights, addLog]);
-  
+
   // Highlight a single domain
   const highlightDomain = useCallback(async (domain: Domain, chainId?: string): Promise<boolean> => {
     if (!plugin || !hasStructure || !currentStructure) {
       addLog('Cannot highlight domain: No structure loaded', 'warn');
       return false;
     }
-    
+
     try {
       setIsHighlighting(true);
       addLog(`Highlighting domain ${domain.id} (${domain.start}-${domain.end})`);
-      
+
       // Determine color based on domain properties
       let color = domain.color;
       if (!color && domain.t_group) {
@@ -132,7 +132,7 @@ export function useDomainViewer(): DomainViewerResult {
         const hue = hash % 360;
         color = `hsl(${hue}, 70%, 50%)`;
       }
-      
+
       // Create selection query for the domain residues
       const query = {
         residueTest: (residue: any) => {
@@ -140,7 +140,7 @@ export function useDomainViewer(): DomainViewerResult {
           return seqNumber >= domain.start && seqNumber <= domain.end;
         }
       };
-      
+
       // If chain is specified, add it to the query
       if (chainId) {
         Object.assign(query, {
@@ -149,7 +149,7 @@ export function useDomainViewer(): DomainViewerResult {
           }
         });
       }
-      
+
       // Add cartoon representation for the domain
       const representation = await plugin.builders.structure.representation.addRepresentation(currentStructure, {
         type: 'cartoon',
@@ -159,21 +159,21 @@ export function useDomainViewer(): DomainViewerResult {
         sizeParams: { value: 0.6 },
         alpha: domain.transparent ? (domain.opacity || 0.7) : 1.0
       }, { selector: plugin.helpers.structureSelectionBuilder.withPredicate(currentStructure!, query) });
-      
+
       // Store the representation for later removal
       setDomainRepresentations(prev => [...prev, { domainId: domain.id, representationRef: representation }]);
       setActiveDomains(prev => [...prev, domain]);
-      
+
       // Focus camera on the domain
       const loci = plugin.helpers.structureSelectionBuilder.buildFromPredicate(currentStructure!,
         (structure: any) => query
       );
-      
+
       if (loci.elements.length > 0) {
         plugin.managers.camera.focusLoci(loci);
         plugin.canvas3d?.commit();
       }
-      
+
       return true;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -184,32 +184,32 @@ export function useDomainViewer(): DomainViewerResult {
       setIsHighlighting(false);
     }
   }, [plugin, hasStructure, currentStructure, addLog]);
-  
+
   // Highlight multiple domains at once
   const highlightMultipleDomains = useCallback(async (domains: Domain[], chainId?: string): Promise<boolean> => {
     if (!plugin || !hasStructure || !currentStructure) {
       addLog('Cannot highlight domains: No structure loaded', 'warn');
       return false;
     }
-    
+
     try {
       setIsHighlighting(true);
       addLog(`Highlighting ${domains.length} domains`);
-      
+
       // First clear any existing domain highlights
       await clearDomainHighlights();
-      
+
       // Highlight each domain
       let success = true;
       for (const domain of domains) {
         const result = await highlightDomain(domain, chainId);
         if (!result) success = false;
       }
-      
+
       // Focus on the structure after highlighting all domains
       plugin.canvas3d?.resetCamera();
       plugin.canvas3d?.commit();
-      
+
       return success;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -220,7 +220,7 @@ export function useDomainViewer(): DomainViewerResult {
       setIsHighlighting(false);
     }
   }, [plugin, hasStructure, currentStructure, highlightDomain, clearDomainHighlights, addLog]);
-  
+
   return {
     highlightDomain,
     highlightMultipleDomains,
@@ -232,42 +232,22 @@ export function useDomainViewer(): DomainViewerResult {
   };
 }
 
-// Helper function to generate random color
-function getRandomColor(): string {
-  const letters = '0123456789ABCDEF';
-  let color = '#';
-  for (let i = 0; i < 6; i++) {
-    color += letters[Math.floor(Math.random() * 16)];
-  }
-  return color;
-}
-
 // Helper function to convert hex color to RGB
 function hexToRgb(hex: string): { r: number, g: number, b: number } {
   // Remove # if present
   hex = hex.replace(/^#/, '');
-  
+
   // Handle shorthand hex
   if (hex.length === 3) {
     hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
   }
-  
+
   // Parse hex values
   const r = parseInt(hex.substring(0, 2), 16) / 255;
   const g = parseInt(hex.substring(2, 4), 16) / 255;
   const b = parseInt(hex.substring(4, 6), 16) / 255;
-  
-  return { r, g, b };
-}
 
-// Helper function to generate random color
-function getRandomColor(): string {
-  const letters = '0123456789ABCDEF';
-  let color = '#';
-  for (let i = 0; i < 6; i++) {
-    color += letters[Math.floor(Math.random() * 16)];
-  }
-  return color;
+  return { r, g, b };
 }
 
 // T-Group to color mapping for consistent coloring of domains by classification

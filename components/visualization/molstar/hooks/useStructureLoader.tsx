@@ -5,13 +5,17 @@
  * process state (loading, error, success).
  */
 import { useState, useCallback, useEffect } from 'react';
-import { useMolstar } from './MolstarContext';
+import { useMolstar } from '../context/MolstarContext';
 import { StructureRepresentationPresetProvider } from 'molstar/lib/mol-plugin-state/builder/structure/representation-preset';
 import { PluginContext } from 'molstar/lib/mol-plugin/context';
 import { StructureElement } from 'molstar/lib/mol-model/structure';
 import { PluginStateObject } from 'molstar/lib/mol-plugin-state/objects';
 import { StateObjectSelector } from 'molstar/lib/mol-state';
-import { getValidFormatName, detectFormatFromContent, detectFormatFromContentType } from './formats';
+import {
+  getValidFormatName,
+  detectFormatFromContent,
+  detectFormatFromContentType
+} from '../index';
 
 // Types
 export interface StructureInfo {
@@ -41,18 +45,18 @@ export interface StructureLoaderResult {
  */
 export function useStructureLoader(): StructureLoaderResult {
   const { plugin, isBusy, addLog } = useMolstar();
-  
+
   // State
   const [isLoading, setIsLoading] = useState(false);
   const [hasStructure, setHasStructure] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [structureInfo, setStructureInfo] = useState<StructureInfo | null>(null);
   const [currentStructure, setCurrentStructure] = useState<StateObjectSelector<PluginStateObject.Molecule.Structure, any> | null>(null);
-  
+
   // Clear structure
   const clearStructure = useCallback(async () => {
     if (!plugin) return;
-    
+
     try {
       addLog('Clearing structure...');
       await plugin.clear();
@@ -64,11 +68,11 @@ export function useStructureLoader(): StructureLoaderResult {
       addLog(`Error clearing structure: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
   }, [plugin, addLog]);
-  
+
   // Focus on loaded structure
   const focusStructure = useCallback(async () => {
     if (!plugin || !hasStructure) return;
-    
+
     try {
       addLog('Focusing on structure');
       plugin.canvas3d?.resetCamera();
@@ -77,74 +81,74 @@ export function useStructureLoader(): StructureLoaderResult {
       addLog(`Error focusing on structure: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
   }, [plugin, hasStructure, addLog]);
-  
+
   // Focus on a specific chain
   const focusChain = useCallback(async (chainId: string) => {
     if (!plugin || !hasStructure) return false;
-    
+
     try {
       addLog(`Focusing on chain ${chainId}`);
-      
+
       // Create selection query
       const selection = {
-        query: { 
+        query: {
           'chain-id': { '==': chainId.toUpperCase() }
         },
         descriptions: [{ text: `Chain ${chainId}` }],
       };
-      
+
       // Select and focus
       const sel = plugin.managers.structure.selection.fromSelectionQuery(selection);
       if (!sel.structures.length) {
         addLog(`Chain ${chainId} not found in structure`, 'warn');
         return false;
       }
-      
+
       // Focus camera on selection
       plugin.managers.camera.focusLoci(sel);
       plugin.canvas3d?.commit();
-      
+
       return true;
     } catch (err) {
       addLog(`Error focusing on chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`, 'error');
       return false;
     }
   }, [plugin, hasStructure, addLog]);
-  
+
   // Determine API URL based on the structure info
   const getStructureUrl = useCallback((info: StructureInfo): string => {
     const { pdbId, format, useLocalRepository = true } = info;
-    
+
     if (useLocalRepository) {
       // Use local repository API
       return `/api/pdb/${pdbId.toLowerCase()}`;
     } else {
       // Use RCSB PDB API
-      const fileExtension = format === 'pdb' ? 'pdb' : 
+      const fileExtension = format === 'pdb' ? 'pdb' :
                            format === 'mmtf' ? 'mmtf' : 'cif';
       return `https://files.rcsb.org/download/${pdbId.toLowerCase()}.${fileExtension}`;
     }
   }, []);
-  
+
   // Apply structure representation
   const applyRepresentation = useCallback(async (
-    trajectory: any, 
+    trajectory: any,
     style: string = 'cartoon',
     assemblyId?: string
   ) => {
     if (!plugin) return null;
-    
+
     try {
       // Determine structure preset based on style
-      const preset: keyof StructureRepresentationPresetProvider = 
+      const preset: keyof StructureRepresentationPresetProvider =
         style === 'ball-and-stick' ? 'ball-and-stick' :
         style === 'surface' ? 'surface' :
         style === 'ribbon' ? 'ribbon' :
         style === 'spacefill' ? 'spacefill' : 'cartoon';
-      
+
       // Determine assembly or model
       const structurePreset = assemblyId
-        ? { name: 'assembly', params: { id: assemblyId } } 
+        ? { name: 'assembly', params: { id: assemblyId }}
         : { name: 'model', params: {} };
       
       // Apply preset to the structure

@@ -42,6 +42,12 @@ const TEST_STRUCTURES = [
   { id: '7bv2', description: 'Multi-domain protein', chains: ['A'] }
 ]
 
+// Generate random color for domains
+function getRandomColor(): string {
+  const colors = DOMAIN_COLORS;
+  return colors[Math.floor(Math.random() * colors.length)];
+}
+
 // Logs panel component
 function LogsPanel({ logs }: { logs: {message: string, level: string, timestamp: string}[] }) {
   return (
@@ -50,10 +56,10 @@ function LogsPanel({ logs }: { logs: {message: string, level: string, timestamp:
         <div className="text-gray-500">No logs yet. Load a structure to see logs.</div>
       ) : (
         logs.map((log, index) => (
-          <div 
-            key={index} 
+          <div
+            key={index}
             className={`mb-1 ${
-              log.level === 'error' ? 'text-red-400' : 
+              log.level === 'error' ? 'text-red-400' :
               log.level === 'warn' ? 'text-yellow-400' : 'text-gray-100'
             }`}
           >
@@ -68,15 +74,15 @@ function LogsPanel({ logs }: { logs: {message: string, level: string, timestamp:
 // Custom component to interact with Molstar hooks
 function MolstarTestControls() {
   const { plugin, isBusy, isInitialized, logs, error } = useMolstar();
-  const { 
-    loadStructure, 
-    clearStructure, 
-    focusStructure, 
-    focusChain, 
-    isLoading, 
-    hasStructure 
+  const {
+    loadStructure,
+    clearStructure,
+    focusStructure,
+    focusChain,
+    isLoading,
+    hasStructure
   } = useStructureLoader();
-  
+
   const {
     highlightDomain,
     highlightMultipleDomains,
@@ -90,13 +96,13 @@ function MolstarTestControls() {
   const [chainId, setChainId] = useState('A');
   const [useLocalRepository, setUseLocalRepository] = useState(true);
   const [format, setFormat] = useState<'auto' | 'mmcif' | 'pdb'>('auto');
-  
+
   // Domain highlighting state
   const [domainStart, setDomainStart] = useState(1);
   const [domainEnd, setDomainEnd] = useState(100);
   const [domainColor, setDomainColor] = useState('#3b82f6');
   const [domainLabel, setDomainLabel] = useState('Custom Domain');
-  
+
   // Load structure
   const handleLoadStructure = async () => {
     try {
@@ -110,14 +116,14 @@ function MolstarTestControls() {
       console.error('Failed to load structure:', err);
     }
   };
-  
+
   // Highlight custom domain
   const handleHighlightDomain = async () => {
     if (domainStart > domainEnd) {
       alert('Start position must be less than or equal to end position');
       return;
     }
-    
+
     const domain: Domain = {
       id: `custom-${Date.now()}`,
       start: domainStart,
@@ -125,19 +131,19 @@ function MolstarTestControls() {
       color: domainColor,
       label: domainLabel
     };
-    
+
     await highlightDomain(domain, chainId);
   };
-  
+
   // Highlight sample domains
   const handleHighlightSampleDomains = async () => {
     await highlightMultipleDomains(EXAMPLE_DOMAINS, chainId);
   };
-  
+
   // Take screenshot
   const handleTakeScreenshot = () => {
     if (!plugin || !isInitialized) return;
-    
+
     try {
       const canvas = plugin.canvas3d?.canvas.element;
       if (canvas) {
@@ -175,7 +181,7 @@ function MolstarTestControls() {
           </Alert>
         )}
       </div>
-      
+
       {/* Structure Controls */}
       <div className="space-y-3">
         <h3 className="font-medium">Structure Loading</h3>
@@ -210,8 +216,8 @@ function MolstarTestControls() {
           </div>
           <div className="flex items-center gap-1">
             <label className="text-sm">Format:</label>
-            <select 
-              value={format} 
+            <select
+              value={format}
               onChange={(e) => setFormat(e.target.value as any)}
               className="text-sm p-1 border rounded"
             >
@@ -238,7 +244,7 @@ function MolstarTestControls() {
       </div>
 
       <Separator />
-      
+
       {/* Domain Controls */}
       <div className="space-y-3">
         <h3 className="font-medium">Domain Visualization</h3>
@@ -303,7 +309,7 @@ function MolstarTestControls() {
           </Button>
         </div>
       </div>
-      
+
       {/* Active Domains List */}
       {activeDomains.length > 0 && (
         <div className="space-y-2">
@@ -321,7 +327,7 @@ function MolstarTestControls() {
           </div>
         </div>
       )}
-      
+
       {/* Logs */}
       <Separator />
       <div className="space-y-2">
@@ -357,24 +363,39 @@ export default function MolstarComponentsPage() {
   const [activeTab, setActiveTab] = useState('basic');
   const [selectedPdb, setSelectedPdb] = useState('');
   const [selectedChain, setSelectedChain] = useState('');
-  
+
+  // Client-side rendering check
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Handle structure selection from picker
   const handleStructureSelect = (pdbId: string, chainId: string) => {
     setSelectedPdb(pdbId);
     setSelectedChain(chainId);
   };
 
+  if (!mounted) {
+    return (
+      <div className="container mx-auto p-6">
+        <h1 className="text-2xl font-bold">Molstar Components Test Page</h1>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-bold">Molstar Components Test Page</h1>
-      
+
       <Alert>
         <AlertDescription>
           This page demonstrates the capabilities of the molstar components using the context-hooks pattern.
           You can test both the simplified components and the advanced hooks API.
         </AlertDescription>
       </Alert>
-      
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-2">
           <Card className="p-6">
@@ -384,7 +405,7 @@ export default function MolstarComponentsPage() {
                 <TabsTrigger value="advanced">Advanced API</TabsTrigger>
               </TabsList>
             </Tabs>
-            
+
             <div className="h-[600px] rounded-lg overflow-hidden border">
               {activeTab === 'basic' ? (
                 // Basic viewer with props-based API
@@ -413,16 +434,16 @@ export default function MolstarComponentsPage() {
             </div>
           </Card>
         </div>
-        
+
         <div>
           <Card className="p-6">
             <QuickStructurePicker onSelect={handleStructureSelect} />
-            
+
             <Separator className="my-6" />
-            
+
             <div className="space-y-4">
               <h3 className="font-medium">Component Documentation</h3>
-              
+
               <div className="space-y-2">
                 <div className="font-medium text-sm">Basic Component</div>
                 <div className="text-sm text-gray-700">
@@ -430,7 +451,7 @@ export default function MolstarComponentsPage() {
                   molecular structures with domain highlighting capabilities.
                 </div>
               </div>
-              
+
               <div className="space-y-2">
                 <div className="font-medium text-sm">Advanced API</div>
                 <div className="text-sm text-gray-700">
@@ -444,36 +465,18 @@ export default function MolstarComponentsPage() {
                   </ul>
                 </div>
               </div>
-              
+
               <div className="space-y-2">
-                <div className="font-medium text-sm">Component Migration</div>
+                <div className="font-medium text-sm">Database Integration</div>
                 <div className="text-sm text-gray-700">
-                  Legacy components (<code>CanvasMolstarViewer</code>, etc.) should be migrated
-                  to use these standardized components.
+                  These components integrate with your PostgreSQL database
+                  to visualize protein domain data from the pdb_analysis schema.
                 </div>
               </div>
             </div>
           </Card>
         </div>
       </div>
-      
-      {/* Deprecation Notice */}
-      <Card className="p-6 bg-amber-50 border-amber-200">
-        <h2 className="text-xl font-semibold mb-4">Deprecation Notice</h2>
-        <p className="mb-4">
-          The following test pages are using deprecated Molstar components and should be updated to use the new architecture:
-        </p>
-        <ul className="list-disc pl-5 space-y-2">
-          <li><code>/app/domain-viewer/page.tsx</code> - Uses <code>CanvasMolstarViewer</code></li>
-          <li><code>/app/domain-visualization/page.tsx</code> - Uses <code>DomainStructureViewer</code></li>
-          <li><code>/app/molstar-debug/page.tsx</code> - Uses <code>ImprovedMolstarViewer</code></li>
-          <li><code>/app/molstar-safe/page.tsx</code> - Uses <code>SafeModeViewer</code></li>
-          <li><code>/app/molstar-test/page.tsx</code> - Uses direct plugin manipulation</li>
-        </ul>
-        <p className="mt-4">
-          Please use this test page as a reference for the new architecture. The deprecated components will be removed in a future update.
-        </p>
-      </Card>
     </div>
   );
 }

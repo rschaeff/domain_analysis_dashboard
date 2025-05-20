@@ -10,7 +10,7 @@ interface DomainData {
   id: string;
   pdb_id: string;
   chain_id: string;
-  range: string;
+  range?: string;
   start: number;
   end: number;
   t_group?: string;
@@ -41,21 +41,21 @@ const T_GROUP_COLORS: Record<string, string> = {
   '1.20.5': '#FFC300', // Alpha-solenoid
   '1.10.10': '#DAF7A6', // Orthogonal Bundle
   '1.20.120': '#C70039', // Up-down Bundle
-  
+
   // Beta proteins
   '2.40.50': '#900C3F', // Beta-barrel
   '2.60.40': '#581845', // Beta-sandwich
   '2.30.30': '#2471A3', // Beta-trefoil
-  
+
   // Alpha/Beta proteins
   '3.40.50': '#1ABC9C', // Rossmann fold
   '3.30.70': '#2E86C1', // TIM barrel
   '3.90.1580': '#8E44AD', // ATP-binding domain
-  
+
   // Other groups
   '4.10.220': '#7D3C98', // Immunoglobulin-like
   '4.10.520': '#138D75', // SH3-like
-  
+
   // Default colors for other groups
   'default': '#3498DB' // Default blue
 };
@@ -68,7 +68,7 @@ const getDomainColor = (domain: DomainData, colorByClassification: boolean): str
     const hue = hash % 360;
     return `hsl(${hue}, 70%, 50%)`;
   }
-  
+
   return T_GROUP_COLORS[domain.t_group] || T_GROUP_COLORS.default;
 };
 
@@ -102,7 +102,7 @@ export function DomainStructureViewer({
         // If a string range is provided (e.g., "10-156"), parse it
         let start = domain.start;
         let end = domain.end;
-        
+
         if (!start || !end) {
           const rangeParts = domain.range?.split('-');
           if (rangeParts && rangeParts.length === 2) {
@@ -110,10 +110,10 @@ export function DomainStructureViewer({
             end = parseInt(rangeParts[1], 10);
           }
         }
-        
+
         // Get color based on classification if enabled
         const color = getDomainColor(domain, colorByClassification);
-        
+
         // Create label based on available information
         let label = domain.id;
         if (showLabels) {
@@ -126,7 +126,7 @@ export function DomainStructureViewer({
             label = `${domain.id} (${start}-${end})`;
           }
         }
-        
+
         return {
           id: domain.id,
           start,
@@ -135,7 +135,7 @@ export function DomainStructureViewer({
           label: showLabels ? label : undefined
         };
       });
-      
+
       setDomains(formattedDomains);
     } catch (err) {
       console.error('Error processing domain data:', err);
@@ -148,7 +148,7 @@ export function DomainStructureViewer({
     pluginRef.current = plugin;
     setViewerReady(true);
     setIsLoading(false);
-    
+
     if (onReady) {
       onReady();
     }
@@ -167,7 +167,7 @@ export function DomainStructureViewer({
           <LoadingSpinner />
         </div>
       )}
-      
+
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50 z-10">
           <div className="text-red-500 bg-white p-4 rounded shadow">
@@ -175,7 +175,7 @@ export function DomainStructureViewer({
           </div>
         </div>
       )}
-      
+
       <CanvasMolstarViewer
         pdbId={pdbId}
         chainId={chainId}
@@ -187,9 +187,9 @@ export function DomainStructureViewer({
         domains={autoHighlightDomains ? domains : []}
         initialRepresentation="cartoon"
       />
-      
+
       {viewerReady && domains.length > 0 && (
-        <div className="absolute top-2 right-2 bg-white/80 rounded shadow p-2 text-xs max-w-xs max-h-[50%] overflow-y-auto">
+        <div className="absolute top-2 right-2 bg-white/90 rounded shadow p-2 text-xs max-w-xs max-h-[60%] overflow-y-auto">
           <div className="font-medium mb-1">Domains</div>
           <div className="space-y-1">
             {domains.map((domain) => (

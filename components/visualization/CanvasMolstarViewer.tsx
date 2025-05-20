@@ -6,8 +6,8 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 
 import { DefaultPluginSpec } from 'molstar/lib/mol-plugin/spec'
 import { PluginContext } from 'molstar/lib/mol-plugin/context'
-// Import color properly
 import { ColorNames } from 'molstar/lib/mol-util/color/names'
+import { Structure } from 'molstar/lib/mol-model/structure'
 import 'molstar/build/viewer/molstar.css'
 
 export type FormatType = 'auto' | 'pdb' | 'mmcif' | 'mmtf';
@@ -63,10 +63,11 @@ export function CanvasMolstarViewer({
   const [error, setError] = useState<string | null>(null);
   const [detectedFormat, setDetectedFormat] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [structure, setStructure] = useState<Structure | null>(null);
 
-  // Function to highlight a domain
+  // Function to highlight a domain with query expression
   const highlightDomain = useCallback(async (domain: Domain, options: MolstarHighlightOptions = {}) => {
-    if (!pluginRef.current || !isInitialized) return;
+    if (!pluginRef.current || !isInitialized || !structure) return false;
 
     try {
       const plugin = pluginRef.current;
@@ -77,23 +78,24 @@ export function CanvasMolstarViewer({
         representationType = 'cartoon'
       } = options;
 
-      // Add representation for domain
-      await plugin.builders.structure.representation.addRepresentation({
-        repr: {
-          type: representationType,
-          params: {
-            alpha: opacity,
-            colorTheme: { name: 'uniform', params: { color: { name: 'color', params: { value: domain.color || color } } } }
-          }
-        },
-        selection: {
-          queryString: chainId ? `chain ${chainId} and resnumber >= ${domain.start} and resnumber <= ${domain.end}` : undefined
-        }
-      });
+      // Build the query for residue selection
+      let query = '';
+      if (chainId) {
+        // Try both auth_asym_id and label_asym_id for maximum compatibility
+        query = `(auth_asym_id="${chainId}" OR label_asym_id="${chainId}") AND `;
+      }
+      query += `resi>${domain.start - 1} AND resi<${domain.end + 1}`;
 
-      // Focus camera on selection if requested
-      if (focus) {
-        plugin.canvas3d?.camera.focusOnSelection();
+      // Add representation for domain
+      const component = await plugin.builders.structure.representation.addRepresentation(structure, {
+        type: representationType,
+        color: domain.color || color,
+        opacity
+      }, { query });
+
+      // Focus camera if requested
+      if (focus && component) {
+        plugin.managers.camera.focusLoci(component.representations[0].getLoci());
       }
 
       return true;
@@ -101,14 +103,23 @@ export function CanvasMolstarViewer({
       console.error('Error highlighting domain:', err);
       return false;
     }
-  }, [chainId, isInitialized]);
+  }, [chainId, isInitialized, structure]);
 
   // Function to clear all representations
   const clearRepresentations = useCallback(async () => {
     if (!pluginRef.current || !isInitialized) return false;
 
     try {
-      await pluginRef.current.builders.structure.representation.clearSelections();
+      // Clear all existing representations
+      const plugin = pluginRef.current;
+      const state = plugin.state.data;
+
+      const components = state.select(q => q.ofType('structure-representation-3d'));
+      if (components.length === 0) return true;
+
+      for (const c of components) {
+        await state.updateTree({ state, removes: [c.transform.ref] });
+      }
       return true;
     } catch (err) {
       console.error('Error clearing representations:', err);
@@ -118,18 +129,30 @@ export function CanvasMolstarViewer({
 
   // Function to apply representation preset
   const applyRepresentation = useCallback(async (type: string) => {
-    if (!pluginRef.current || !isInitialized) return false;
+    if (!pluginRef.current || !isInitialized || !structure) return false;
 
     try {
-      await pluginRef.current.representation.preset.applyPreset({
-        name: type
-      });
+      await clearRepresentations();
+
+      // Apply new representation
+      const plugin = pluginRef.current;
+
+      if (type === 'cartoon') {
+        await plugin.builders.structure.representation.addRepresentation(structure, { type: 'cartoon' });
+      } else if (type === 'ball-and-stick') {
+        await plugin.builders.structure.representation.addRepresentation(structure, { type: 'ball-and-stick' });
+      } else if (type === 'surface') {
+        await plugin.builders.structure.representation.addRepresentation(structure, { type: 'molecular-surface' });
+      } else if (type === 'spacefill') {
+        await plugin.builders.structure.representation.addRepresentation(structure, { type: 'spacefill' });
+      }
+
       return true;
     } catch (err) {
       console.error('Error applying representation:', err);
       return false;
     }
-  }, [isInitialized]);
+  }, [isInitialized, structure, clearRepresentations]);
 
   // Function to take screenshot
   const takeScreenshot = useCallback(() => {
@@ -152,23 +175,14 @@ export function CanvasMolstarViewer({
     if (!pluginRef.current || !isInitialized) return false;
 
     try {
-      pluginRef.current.canvas3d?.resetCamera();
+      // Try to reset camera view to show all
+      pluginRef.current.managers.camera.reset();
       return true;
     } catch (err) {
       console.error('Error resetting camera:', err);
       return false;
     }
   }, [isInitialized]);
-
-  // Expose methods via ref
-  const methods = {
-    highlightDomain,
-    clearRepresentations,
-    applyRepresentation,
-    takeScreenshot,
-    resetCamera,
-    getPlugin: () => pluginRef.current
-  };
 
   // Initialize Mol* viewer
   useEffect(() => {
@@ -182,15 +196,17 @@ export function CanvasMolstarViewer({
       pluginRef.current.dispose();
       pluginRef.current = null;
       setIsInitialized(false);
+      setStructure(null);
     }
 
+    // Initialize viewer and load structure
     const initMolstar = async () => {
       try {
         setIsLoading(true);
         setError(null);
         setIsInitialized(false);
 
-        // Create plugin with custom spec
+        // Create plugin with default spec
         const plugin = new PluginContext(DefaultPluginSpec());
         await plugin.init();
 
@@ -202,10 +218,9 @@ export function CanvasMolstarViewer({
         // Store reference to plugin
         pluginRef.current = plugin;
 
-        // Set background color - Fixed implementation
+        // Set background color
         plugin.canvas3d?.setProps({
           backgroundColor: {
-            // Use built-in color names or fallback to white
             color: backgroundColor in ColorNames ? ColorNames[backgroundColor] : ColorNames.white
           }
         });
@@ -247,8 +262,11 @@ export function CanvasMolstarViewer({
         setDetectedFormat(detectedFileFormat);
         console.log(`Loading ${pdbId} from ${url} as ${detectedFileFormat}`);
 
-        // Load structure
-        const data = await plugin.builders.data.download({ url, isBinary: detectedFileFormat === 'mmtf' }, { state: { isGhost: true } });
+        // Load structure (following the documentation example)
+        const data = await plugin.builders.data.download({
+          url,
+          isBinary: detectedFileFormat === 'mmtf'
+        }, { state: { isGhost: true } });
 
         if (!data) {
           throw new Error(`Failed to download structure ${pdbId}`);
@@ -257,34 +275,39 @@ export function CanvasMolstarViewer({
         // Parse using detected format
         const trajectory = await plugin.builders.structure.parseTrajectory(data, detectedFileFormat as any);
 
-        // Apply initial representation
-        if (initialRepresentation) {
-          await plugin.builders.structure.hierarchy.applyPreset(trajectory, initialRepresentation);
-        } else {
-          await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default');
+        // Apply representation preset
+        const structureObject = await plugin.builders.structure.hierarchy.applyPreset(
+          trajectory,
+          initialRepresentation === 'cartoon' ? 'default' : initialRepresentation
+        );
+
+        // Store the structure for later use
+        if (structureObject?.structures?.length > 0) {
+          setStructure(structureObject.structures[0]);
         }
 
         // Focus on chain if specified
-        if (chainId) {
-          // Fixed: Use proper method to select chain
+        if (chainId && structureObject) {
           try {
-            // Create a selection query for the specified chain
+            // Create a query expression for the chain
             const components = plugin.managers.structure.hierarchy.current.structures[0].components;
-            const chainComponent = components.find(c => c.cell.obj.data.entities.some(e =>
-              (e.data.chains.some(chain => chain.authAsymId === chainId || chain.asymId === chainId))
-            ));
+            const chainComponent = components.find(c =>
+              c.cell.obj.data.models.some(m =>
+                m.chains.some(ch =>
+                  ch.authAsymId === chainId || ch.asymId === chainId
+                )
+              )
+            );
 
             if (chainComponent) {
-              // Select the component
-              plugin.managers.structure.hierarchy.selection.addByComponent(chainComponent);
-              await plugin.managers.structure.component.updateRepresentationsTheme({ color: 'chain-id' });
-            } else {
-              console.warn(`Chain ${chainId} not found in structure`);
+              // Select the chain
+              plugin.managers.structure.hierarchy.selection.selectAll();
+              plugin.managers.structure.component.updateRepresentationsTheme({ color: 'chain-id' });
+              plugin.managers.camera.focus(components.map(c => c.cell), { durationMs: 250 });
             }
           } catch (chainErr) {
-            console.warn('Error focusing on chain:', chainErr);
-            // Fallback: try to focus on the whole structure
-            plugin.canvas3d?.resetCamera();
+            console.warn('Error focusing on chain, showing whole structure:', chainErr);
+            plugin.managers.camera.reset();
           }
         }
 
@@ -292,8 +315,11 @@ export function CanvasMolstarViewer({
         setIsInitialized(true);
 
         // Apply domain highlighting if domains are provided
-        if (domains.length > 0) {
+        if (domains.length > 0 && structureObject) {
+          // Clear existing representations
           await clearRepresentations();
+
+          // Apply representations for each domain
           for (const domain of domains) {
             await highlightDomain(domain);
           }
@@ -320,6 +346,7 @@ export function CanvasMolstarViewer({
           pluginRef.current.dispose();
           pluginRef.current = null;
           setIsInitialized(false);
+          setStructure(null);
         } catch (e) {
           console.error('Error disposing Mol* plugin:', e);
         }

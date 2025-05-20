@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react';
-import ThreeDMolViewer, { Domain } from '@/components/ThreeDMolViewer';
+import ThreeDMolViewer, { Domain } from '@/components/visualization/ThreeDMolViewer';
 
 export default function ThreeDMolTestPage() {
   const [pdbId, setPdbId] = useState('1cbs');

@@ -6,6 +6,7 @@
  */
 import React, { useRef, useEffect } from 'react';
 import { useMolstar } from '../context/MolstarContext';
+import { useDomainContext } from '../context/DomainContext';
 
 // Types
 export interface MolstarCanvasProps {
@@ -28,8 +29,11 @@ export const MolstarCanvas: React.FC<MolstarCanvasProps> = ({
   transparentBackground = false,
   showControls = false
 }) => {
+// Add this line to access plugin from context
+  const { plugin: contextPlugin } = useDomainContext();
   // Context
-  const { plugin, isInitialized, isBusy, addLog } = useMolstar();
+  const { plugin: directPlugin, isInitialized, isBusy, addLog } = useMolstar();
+  const plugin = contextPlugin || directPlugin;
   
   // Refs
   const canvasContainerRef = useRef<HTMLDivElement>(null);

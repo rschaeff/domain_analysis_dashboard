@@ -1,4 +1,5 @@
 import './globals.css'
+import '../components/visualization/molstar/styles/domain-visualization.css';
 import { inter } from '@/lib/fonts' // Assuming you have this import
 
 export default function RootLayout({

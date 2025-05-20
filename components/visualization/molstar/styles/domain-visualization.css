@@ -1,0 +1,267 @@
+/* Domain Visualizer Styles */
+
+.domain-visualizer {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* Loading and error overlays */
+.loading-overlay, .error-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.8);
+  z-index: 10;
+}
+
+.error-overlay {
+  color: #e74c3c;
+  flex-direction: column;
+  text-align: center;
+  padding: 20px;
+}
+
+/* Domain controls */
+.domain-controls {
+  padding: 10px;
+  background-color: #f8f9fa;
+  height: 100%;
+}
+
+.domain-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.domain-actions button {
+  padding: 6px 12px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.domain-actions button:hover {
+  background-color: #2980b9;
+}
+
+/* Domain list */
+.domain-list {
+  margin-bottom: 15px;
+}
+
+.domain-list h3 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.domain-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.domain-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background-color: white;
+  border-radius: 4px;
+  border: 1px solid #eee;
+}
+
+.domain-item.active {
+  background-color: #f0f7ff;
+  border-color: #3498db;
+}
+
+.domain-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.domain-info {
+  flex: 1;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.domain-name {
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.domain-range {
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.domain-delete {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.domain-delete:hover {
+  background-color: #f1f1f1;
+  color: #e74c3c;
+}
+
+/* Domain annotations in sequence view */
+.sequence-view-with-domains {
+  position: relative;
+}
+
+.domain-annotations {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  display: flex;
+  z-index: 5;
+  overflow: hidden;
+}
+
+.domain-annotation {
+  height: 100%;
+  position: absolute;
+  border-radius: 2px;
+  transition: opacity 0.2s;
+}
+
+.domain-annotation.active {
+  z-index: 2;
+}
+
+/* Forms */
+.domain-editor, .add-domain-form {
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 10px;
+}
+
+.domain-editor h3, .add-domain-form h3 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.form-group {
+  margin-bottom: 10px;
+}
+
+.form-row {
+  display: flex;
+  gap: 10px;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+  color: #555;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.form-actions button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.form-actions button[type="submit"] {
+  background-color: #3498db;
+  color: white;
+}
+
+.form-actions button[type="button"] {
+  background-color: #eee;
+  color: #333;
+}
+
+.add-domain-button {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  background-color: #2ecc71;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.add-domain-button:hover {
+  background-color: #27ae60;
+}
+
+/* Sequence view styling */
+.sequence-container {
+  padding: 10px;
+  background-color: white;
+  height: 100%;
+}
+
+.no-domains {
+  padding: 20px;
+  text-align: center;
+  color: #999;
+  font-style: italic;
+}

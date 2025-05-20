@@ -6,7 +6,8 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 
 import { DefaultPluginSpec } from 'molstar/lib/mol-plugin/spec'
 import { PluginContext } from 'molstar/lib/mol-plugin/context'
-import { Color } from 'molstar/lib/mol-util/color'
+// Import color properly
+import { ColorNames } from 'molstar/lib/mol-util/color/names'
 import 'molstar/build/viewer/molstar.css'
 
 export type FormatType = 'auto' | 'pdb' | 'mmcif' | 'mmtf';
@@ -169,8 +170,6 @@ export function CanvasMolstarViewer({
     getPlugin: () => pluginRef.current
   };
 
-  // Use useImperativeHandle if you want to expose these methods via a forwardRef
-
   // Initialize Mol* viewer
   useEffect(() => {
     if (!canvasRef.current || !parentRef.current) return;
@@ -203,9 +202,12 @@ export function CanvasMolstarViewer({
         // Store reference to plugin
         pluginRef.current = plugin;
 
-        // Set background color
+        // Set background color - Fixed implementation
         plugin.canvas3d?.setProps({
-          backgroundColor: { color: Color.fromString(backgroundColor) }
+          backgroundColor: {
+            // Use built-in color names or fallback to white
+            color: backgroundColor in ColorNames ? ColorNames[backgroundColor] : ColorNames.white
+          }
         });
 
         // Determine URL based on data source

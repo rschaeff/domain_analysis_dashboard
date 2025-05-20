@@ -1,3 +1,5 @@
+'use client'
+
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { DomainFilters } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
@@ -134,6 +136,7 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
               <button
                 onClick={() => removeOption(val)}
                 className="hover:text-blue-900"
+                type="button"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -154,6 +157,7 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
         <button
           onClick={() => setIsOpen(!isOpen)}
           className="absolute right-3 top-1/2 transform -translate-y-1/2"
+          type="button"
         >
           {loading ? (
             <Loader className="w-4 h-4 animate-spin text-gray-500" />
@@ -179,6 +183,7 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
                   className={`w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center justify-between ${
                     value.includes(option.value) ? 'bg-blue-50 text-blue-700' : ''
                   }`}
+                  type="button"
                 >
                   <span className="flex items-center gap-2">
                     <input
@@ -343,6 +348,7 @@ export function FilterPanel({
               <button
                 onClick={clearConfidenceFilters}
                 className="text-xs text-gray-500 hover:text-gray-700"
+                type="button"
               >
                 Clear
               </button>
@@ -405,7 +411,7 @@ export function FilterPanel({
                 }}
                 className="px-2 py-1 text-xs"
               >
-                Low (<0.5)
+                Low (&lt;0.5)
               </Button>
             </div>
           </div>
@@ -419,6 +425,7 @@ export function FilterPanel({
               <button
                 onClick={clearClassificationFilters}
                 className="text-xs text-gray-500 hover:text-gray-700"
+                type="button"
               >
                 Clear All Classification
               </button>
@@ -555,6 +562,7 @@ export function FilterPanel({
                     <button
                       onClick={() => removeFilter(key as keyof DomainFilters)}
                       className="ml-1 hover:text-blue-900 hover:bg-blue-200 rounded-full p-0.5"
+                      type="button"
                     >
                       <X className="w-3 h-3" />
                     </button>

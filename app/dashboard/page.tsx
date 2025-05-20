@@ -232,28 +232,56 @@ export default function DashboardPage() {
       }
     },
     {
+      key: 'x_group',
+      label: 'X-Group',
+      render: (value: string | null) => renderClassificationBadge(value, 'x_group', 'X-group')
+    },
+    {
+      key: 'h_group',
+      label: 'H-Group',
+      render: (value: string | null) => renderClassificationBadge(value, 'h_group', 'H-group')
+    },
+    {
       key: 't_group',
       label: 'T-Group',
-      render: (value: string | null, domain: DomainSummary) => (
-        <button
-          onClick={(e) => {
-            e.stopPropagation() // Prevent row click
-            if (value) {
-              // Set filter to this T-group
-              handleFiltersChange({ ...filters, t_group: [value] })
-            }
-          }}
-          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-            value
-              ? 'bg-blue-500 text-white hover:bg-blue-600 cursor-pointer'
-              : 'bg-gray-100 text-gray-500 cursor-default'
-          }`}
-          disabled={!value}
-          title={value ? `Filter by T-group ${value}` : undefined}
-        >
-          {value || 'Unclassified'}
-        </button>
-      )
+      render: (value: string | null, domain: DomainSummary) => {
+        const isCurrentlyFiltered = filters.t_group?.includes(value || '') || false
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation() // Prevent row click
+              if (value) {
+                // Add to existing T-group filters rather than replacing
+                const currentTGroups = filters.t_group || []
+                const newTGroups = currentTGroups.includes(value)
+                  ? currentTGroups.filter(t => t !== value) // Remove if already selected
+                  : [...currentTGroups, value] // Add if not selected
+
+                handleFiltersChange({
+                  ...filters,
+                  t_group: newTGroups.length > 0 ? newTGroups : undefined
+                })
+              }
+            }}
+            className={`px-2 py-1 rounded text-xs font-medium transition-all duration-200 ${
+              value
+                ? isCurrentlyFiltered
+                  ? 'bg-green-500 text-white hover:bg-green-600 ring-2 ring-green-300 cursor-pointer'
+                  : 'bg-blue-500 text-white hover:bg-blue-600 hover:scale-105 cursor-pointer'
+                : 'bg-gray-100 text-gray-500 cursor-default'
+            }`}
+            disabled={!value}
+            title={value ? (
+              isCurrentlyFiltered
+                ? `Click to remove T-group ${value} from filter`
+                : `Click to add T-group ${value} to filter`
+            ) : undefined}
+          >
+            {value || 'Unclassified'}
+            {isCurrentlyFiltered && <span className="ml-1">✓</span>}
+          </button>
+        )
+      }
     },
     {
       key: 'evidence_count',

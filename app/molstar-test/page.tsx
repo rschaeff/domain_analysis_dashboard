@@ -1,12 +1,11 @@
 'use client'
 
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef } from 'react'
 import { CanvasMolstarViewer } from '@/components/visualization/CanvasMolstarViewer'
 import { PluginContext } from 'molstar/lib/mol-plugin/context'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 
 export default function MolstarTestPage() {
   // State for PDB and chain input
@@ -14,17 +13,21 @@ export default function MolstarTestPage() {
   const [chainId, setChainId] = useState('A')
   const [inputPdbId, setInputPdbId] = useState('1cbs')
   const [inputChainId, setInputChainId] = useState('A')
-  
+
+  // State for data source and format
+  const [useLocalRepository, setUseLocalRepository] = useState(true)
+  const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>('auto')
+
   // State for viewer
   const [isViewerReady, setIsViewerReady] = useState(false)
   const [viewerError, setViewerError] = useState<string | null>(null)
   const pluginRef = useRef<PluginContext | null>(null)
-  
+
   // State for test domain
   const [domainStart, setDomainStart] = useState('1')
   const [domainEnd, setDomainEnd] = useState('100')
   const [domainColor, setDomainColor] = useState('#3b82f6')
-  
+
   // Handle viewer ready
   const handleViewerReady = (plugin: PluginContext) => {
     console.log('Mol* viewer is ready')
@@ -32,14 +35,14 @@ export default function MolstarTestPage() {
     setIsViewerReady(true)
     setViewerError(null)
   }
-  
+
   // Handle viewer error
   const handleViewerError = (error: string) => {
     console.error('Mol* viewer error:', error)
     setViewerError(error)
     setIsViewerReady(false)
   }
-  
+
   // Load structure
   const handleLoadStructure = (e: React.FormEvent) => {
     e.preventDefault()
@@ -47,67 +50,31 @@ export default function MolstarTestPage() {
     setChainId(inputChainId)
     setIsViewerReady(false)
   }
-  
+
   // Reset camera
   const handleResetCamera = () => {
     if (!pluginRef.current) return
     pluginRef.current.canvas3d?.resetCamera()
   }
 
-  // Add state for format selection
-const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>('auto')
-
-// In the controls section, add:
-<div className="mb-4">
-  <div className="text-sm font-medium mb-2">File Format</div>
-// Correct syntax for the onChange handler in a select element
-<select
-  value={fileFormat}
-  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFileFormat(e.target.value as 'auto' | 'pdb' | 'mmcif' | 'mmtf')}
-  className="w-full px-3 py-2 border rounded"
-  disabled={useLocalRepository}
->
-  <option value="auto">Auto-detect</option>
-  <option value="mmcif">mmCIF (.cif)</option>
-  <option value="pdb">Legacy PDB (.pdb/.ent)</option>
-  <option value="mmtf">MMTF (binary)</option>
-</select>
-  {useLocalRepository && (
-    <p className="text-xs text-gray-500 mt-1">
-      Format auto-detected when using local repository
-    </p>
-  )}
-</div>
-
-// In the CanvasMolstarViewer component:
-<CanvasMolstarViewer
-  pdbId={pdbId}
-  chainId={chainId}
-  height="100%"
-  onReady={handleViewerReady}
-  onError={handleViewerError}
-  useLocalRepository={useLocalRepository}
-  format={fileFormat}
-/>
-  
   // Highlight domain
   const handleHighlightDomain = async () => {
     if (!pluginRef.current || !chainId) return
-    
+
     const start = parseInt(domainStart)
     const end = parseInt(domainEnd)
-    
+
     if (isNaN(start) || isNaN(end) || start > end) {
       alert('Invalid domain range')
       return
     }
-    
+
     try {
       const plugin = pluginRef.current
-      
+
       // Clear representations
       await plugin.builders.structure.representation.clearSelections()
-      
+
       // Add cartoon representation for domain
       await plugin.builders.structure.representation.addRepresentation({
         repr: {
@@ -121,20 +88,20 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
           entities: [{ chain_id: chainId, residueNumbers: [{ start, end }] }]
         }
       })
-      
+
       // Focus camera on selection
       plugin.canvas3d?.camera.focusOnSelection()
-      
+
     } catch (err) {
       console.error('Error highlighting domain:', err)
       alert(`Failed to highlight domain: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
-  
+
   // Take screenshot
   const handleTakeScreenshot = () => {
     if (!pluginRef.current) return
-    
+
     try {
       const canvas = pluginRef.current.canvas3d?.canvas.element
       if (canvas) {
@@ -151,14 +118,14 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
       alert(`Failed to take screenshot: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
-  
+
   // Change representation
   const handleChangeRepresentation = (representationType: string) => {
     if (!pluginRef.current) return
-    
+
     try {
       const plugin = pluginRef.current
-      
+
       plugin.representation.preset.applyPreset({
         name: representationType
       })
@@ -170,15 +137,15 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
   return (
     <div className="container mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-bold">Mol* Viewer Test Page</h1>
-      
+
       {/* PDB and Chain Input */}
       <Card className="p-4">
         <form onSubmit={handleLoadStructure} className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[200px]">
             <label className="block text-sm font-medium mb-1">PDB ID</label>
-            <Input 
-              type="text" 
-              value={inputPdbId} 
+            <Input
+              type="text"
+              value={inputPdbId}
               onChange={(e) => setInputPdbId(e.target.value)}
               placeholder="e.g., 1cbs"
               maxLength={4}
@@ -186,9 +153,9 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
           </div>
           <div className="w-24">
             <label className="block text-sm font-medium mb-1">Chain ID</label>
-            <Input 
-              type="text" 
-              value={inputChainId} 
+            <Input
+              type="text"
+              value={inputChainId}
               onChange={(e) => setInputChainId(e.target.value)}
               placeholder="e.g., A"
               maxLength={1}
@@ -199,7 +166,7 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
           </div>
         </form>
       </Card>
-      
+
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Mol* Viewer */}
@@ -218,17 +185,17 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
               />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleResetCamera}
                 disabled={!isViewerReady}
               >
                 Reset Camera
               </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleTakeScreenshot}
                 disabled={!isViewerReady}
               >
@@ -237,12 +204,12 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
             </div>
           </Card>
         </div>
-        
+
         {/* Controls */}
         <div>
           <Card className="p-4">
             <h2 className="text-lg font-semibold mb-4">Controls</h2>
-            
+
             {/* Status */}
             <div className="mb-4 p-3 rounded border bg-gray-50">
               <div className="text-sm font-medium mb-1">Status</div>
@@ -256,25 +223,41 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
                 <div className="mt-2 text-sm text-red-500">{viewerError}</div>
               )}
             </div>
-              <div className="mb-4">
-                  <div className="text-sm font-medium mb-2">File Format</div>
-                  <select
-                    value={fileFormat}
-                    onChange={(e) => setFileFormat(e.target.value as any)}
-                    className="w-full px-3 py-2 border rounded"
-                    disabled={useLocalRepository} // Disable when using local repo (will auto-detect)
-                  >
-                    <option value="auto">Auto-detect</option>
-                    <option value="mmcif">mmCIF (.cif)</option>
-                    <option value="pdb">Legacy PDB (.pdb/.ent)</option>
-                    <option value="mmtf">MMTF (binary)</option>
-                  </select>
-                  {useLocalRepository && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Format auto-detected when using local repository
-                    </p>
-                  )}
-              </div>
+
+            {/* Data Source */}
+            <div className="mb-4">
+              <div className="text-sm font-medium mb-2">Data Source</div>
+              <label className="flex items-center gap-2 mb-2">
+                <input
+                  type="checkbox"
+                  checked={useLocalRepository}
+                  onChange={(e) => setUseLocalRepository(e.target.checked)}
+                />
+                <span className="text-sm">Use Local PDB Repository</span>
+              </label>
+            </div>
+
+            {/* File Format */}
+            <div className="mb-4">
+              <div className="text-sm font-medium mb-2">File Format</div>
+              <select
+                value={fileFormat}
+                onChange={(e) => setFileFormat(e.target.value as 'auto' | 'pdb' | 'mmcif' | 'mmtf')}
+                className="w-full px-3 py-2 border rounded"
+                disabled={useLocalRepository}
+              >
+                <option value="auto">Auto-detect</option>
+                <option value="mmcif">mmCIF (.cif)</option>
+                <option value="pdb">Legacy PDB (.pdb/.ent)</option>
+                <option value="mmtf">MMTF (binary)</option>
+              </select>
+              {useLocalRepository && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Format auto-detected when using local repository
+                </p>
+              )}
+            </div>
+            
             {/* Representation Controls */}
             <div className="mb-4">
               <h3 className="text-sm font-medium mb-2">Representation</h3>

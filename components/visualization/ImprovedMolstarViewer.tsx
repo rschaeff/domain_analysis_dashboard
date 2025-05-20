@@ -24,12 +24,7 @@ export function ImprovedMolstarViewer({
   const pluginRef = useRef<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const [loadRequested, setLoadRequested] = useState(false);
-
-  // Use this flag to prevent infinite fetch attempts
-  const isLoadingRef = useRef(false);
 
   // Add a log entry for debugging
   const addLog = useCallback((message: string) => {
@@ -37,17 +32,17 @@ export function ImprovedMolstarViewer({
     setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
   }, []);
 
-  // Report error safely
+  // Report errors consistently
   const reportError = useCallback((errorMessage: string) => {
     addLog(`Error: ${errorMessage}`);
     setError(errorMessage);
     setIsLoading(false);
-    isLoadingRef.current = false;
     if (onError) onError(errorMessage);
   }, [addLog, onError]);
 
-  // Add required CSS - only run once on mount
+  // Initialize CSS once
   useEffect(() => {
+    // Add inline CSS for Molstar
     const cssId = 'molstar-inline-css';
     if (!document.getElementById(cssId)) {
       const style = document.createElement('style');
@@ -88,55 +83,158 @@ export function ImprovedMolstarViewer({
     document.head.appendChild(link);
   }, [addLog]);
 
-  // Initialize the plugin only once
+  // Main initialization and loading effect
   useEffect(() => {
-    if (isInitialized || !canvasRef.current || !containerRef.current) return;
+    // Skip if refs aren't ready
+    if (!canvasRef.current || !containerRef.current) {
+      return;
+    }
 
-    const initMolstar = async () => {
+    let isComponentMounted = true;
+    let plugin: any = null;
+
+    // Initialize and load the structure
+    const initAndLoad = async () => {
+      if (!isComponentMounted) return;
+
+      setIsLoading(true);
+      setError(null);
+
       try {
+        // 1. Initialize Molstar Plugin
         addLog("Initializing Molstar plugin");
-        setIsLoading(true);
-        setError(null);
 
         // Import Molstar libraries
         const { DefaultPluginSpec } = await import('molstar/lib/mol-plugin/spec');
         const { PluginContext } = await import('molstar/lib/mol-plugin/context');
 
-        addLog("Creating plugin instance");
         // Create plugin instance
-        const plugin = new PluginContext(DefaultPluginSpec());
+        plugin = new PluginContext(DefaultPluginSpec());
         await plugin.init();
 
         // Store reference
         pluginRef.current = plugin;
 
-        addLog("Initializing viewer");
         // Initialize viewer
+        addLog("Initializing viewer");
         const viewerInitialized = plugin.initViewer(canvasRef.current, containerRef.current);
 
         if (!viewerInitialized) {
           throw new Error('Failed to initialize Molstar viewer');
         }
 
-        // Set background color to confirm rendering is working
+        // Set background color to white
         plugin.canvas3d?.setProps({
           backgroundColor: { color: 0xFFFFFF }
         });
 
         addLog("Viewer initialized successfully");
-        setIsInitialized(true);
-        // Signal that we're ready to load a structure
-        setLoadRequested(true);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        reportError(`Error initializing plugin: ${errorMessage}`);
+
+        // 2. Load the structure using the API
+        addLog(`Loading structure for PDB ID: ${pdbId}`);
+
+        // Use the local API route which handles repository access
+        const url = `/api/pdb/${pdbId.toLowerCase()}`;
+        addLog(`Fetching from API: ${url}`);
+
+        // Try to detect format with HEAD request
+        let formatName = 'mmcif'; // Default format
+        try {
+          const headResponse = await fetch(url, { method: 'HEAD' });
+          if (headResponse.ok) {
+            const format = headResponse.headers.get('X-PDB-Format');
+            if (format === 'pdb' || format === 'mmcif') {
+              formatName = format;
+              addLog(`Detected format from API: ${format}`);
+            }
+          }
+        } catch (headError) {
+          addLog(`HEAD request failed, using default format: ${formatName}`);
+        }
+
+        // Fetch the actual structure
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch structure: ${response.status} ${response.statusText}`);
+        }
+
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength < 100) {
+          throw new Error(`Data is too small (${buffer.byteLength} bytes)`);
+        }
+
+        addLog(`Downloaded data: ${buffer.byteLength} bytes`);
+
+        // Create data object for Molstar
+        const data = await plugin.builders.data.rawData({ data: new Uint8Array(buffer) });
+
+        // Try primary format
+        addLog(`Parsing trajectory as ${formatName}`);
+        try {
+          // Parse trajectory with primary format
+          const trajectory = await plugin.builders.structure.parseTrajectory(data, formatName);
+          addLog(`${formatName.toUpperCase()} trajectory parsed successfully`);
+
+          // Apply representation
+          await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
+            id: 'preset-structure-representation-cartoon',
+            params: {}
+          });
+
+          // Handle chain selection
+          if (chainId && isComponentMounted) {
+            try {
+              plugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
+              plugin.managers.camera.focusSelection();
+              addLog(`Focused on chain ${chainId}`);
+            } catch (chainErr) {
+              addLog(`Could not focus on chain ${chainId}`);
+              plugin.canvas3d?.resetCamera();
+            }
+          } else {
+            plugin.canvas3d?.resetCamera();
+          }
+        } catch (primaryError) {
+          // Try fallback format if primary format fails
+          addLog(`${formatName} parsing failed: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`);
+
+          const fallbackFormat = formatName === 'mmcif' ? 'pdb' : 'mmcif';
+          addLog(`Trying fallback format: ${fallbackFormat}`);
+
+          const trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat);
+          addLog(`${fallbackFormat.toUpperCase()} trajectory parsed successfully`);
+
+          // Apply representation
+          await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
+            id: 'preset-structure-representation-cartoon',
+            params: {}
+          });
+
+          // Reset camera
+          plugin.canvas3d?.resetCamera();
+        }
+
+        // Structure loaded successfully
+        addLog("Structure loaded successfully");
+        if (isComponentMounted) {
+          setIsLoading(false);
+          if (onReady) onReady(plugin);
+        }
+      } catch (error) {
+        // Handle any errors during initialization or loading
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (isComponentMounted) {
+          reportError(errorMessage);
+        }
       }
     };
 
-    initMolstar();
+    // Start the initialization and loading process
+    initAndLoad();
 
     // Cleanup
     return () => {
+      isComponentMounted = false;
       if (pluginRef.current) {
         try {
           pluginRef.current.dispose();
@@ -144,154 +242,9 @@ export function ImprovedMolstarViewer({
           console.error('Error disposing plugin:', e);
         }
         pluginRef.current = null;
-        setIsInitialized(false);
       }
     };
-  }, [addLog, reportError]);
-
-  // Load structure in a separate effect when initialized and PDB ID changes
-  // Use loadRequested as a trigger to prevent repeated loading after errors
-  useEffect(() => {
-    if (!isInitialized || !pluginRef.current || !pdbId || !loadRequested || isLoadingRef.current) return;
-
-    const loadStructure = async () => {
-      // Set loading flag to prevent multiple concurrent requests
-      isLoadingRef.current = true;
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        addLog(`Loading structure for ${pdbId}${chainId ? ` chain ${chainId}` : ''}`);
-
-        const plugin = pluginRef.current;
-        let success = false;
-
-        // Try to load the structure using our API route
-        try {
-          addLog(`Loading structure for PDB ID: ${pdbId}`);
-
-          // Use the local API route which handles repository access
-          const url = `/api/pdb/${pdbId.toLowerCase()}`;
-          addLog(`Fetching from API: ${url}`);
-
-          // First make a HEAD request to check format
-          const headResponse = await fetch(url, { method: 'HEAD' });
-          if (!headResponse.ok) {
-            throw new Error(`HEAD request failed: ${headResponse.status} ${headResponse.statusText}`);
-          }
-
-          // Get format from header if available
-          const format = headResponse.headers.get('X-PDB-Format');
-          addLog(`Detected format from API: ${format || 'unknown'}`);
-
-          // Now fetch the actual file
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch structure: ${response.status} ${response.statusText}`);
-          }
-
-          const buffer = await response.arrayBuffer();
-          if (buffer.byteLength < 100) {
-            throw new Error(`Data is too small (${buffer.byteLength} bytes)`);
-          }
-
-          addLog(`Downloaded data: ${buffer.byteLength} bytes`);
-
-          // Use the detected format
-          const plugin = pluginRef.current;
-          const data = await plugin.builders.data.rawData({ data: new Uint8Array(buffer) });
-
-          // Determine format to use for parsing
-          let formatName;
-          if (format === 'mmcif') {
-            formatName = 'mmcif';
-          } else if (format === 'pdb') {
-            formatName = 'pdb';
-          } else {
-            // Try to detect from content if header wasn't helpful
-            // For simplicity we'll try mmCIF first, then PDB
-            formatName = 'mmcif';
-          }
-
-          addLog(`Parsing trajectory as ${formatName}`);
-          try {
-            const trajectory = await plugin.builders.structure.parseTrajectory(data, formatName);
-            addLog(`${formatName.toUpperCase()} trajectory parsed successfully`);
-
-            // Apply representation
-            await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
-              id: 'preset-structure-representation-cartoon',
-              params: {}
-            });
-
-            // Handle chain selection
-            if (chainId) {
-              try {
-                // Simplified chain selection
-                plugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
-                plugin.managers.camera.focusSelection();
-              } catch (chainErr) {
-                addLog(`Warning: Could not focus on chain ${chainId}`);
-                plugin.canvas3d?.resetCamera();
-              }
-            } else {
-              plugin.canvas3d?.resetCamera();
-            }
-
-            addLog("Structure loaded successfully");
-            setIsLoading(false);
-            isLoadingRef.current = false;
-            if (onReady) onReady(plugin);
-          } catch (parseError) {
-            addLog(`Error parsing as ${formatName}: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
-
-            // If mmCIF parsing failed, try PDB format
-            if (formatName === 'mmcif') {
-              addLog('Falling back to PDB format');
-              try {
-                const trajectory = await plugin.builders.structure.parseTrajectory(data, 'pdb');
-                addLog('PDB trajectory parsed successfully');
-
-                await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
-                  id: 'preset-structure-representation-cartoon',
-                  params: {}
-                });
-
-                plugin.canvas3d?.resetCamera();
-                addLog("Structure loaded successfully with PDB fallback");
-                setIsLoading(false);
-                isLoadingRef.current = false;
-                if (onReady) onReady(plugin);
-              } catch (pdbError) {
-                throw new Error(`Failed with both mmCIF and PDB formats: ${pdbError instanceof Error ? pdbError.message : String(pdbError)}`);
-              }
-            } else {
-              throw parseError;
-            }
-          }
-        } catch (err) {
-
-        setIsLoading(false);
-        isLoadingRef.current = false;
-        if (success && onReady) onReady(plugin);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        reportError(errorMessage);
-        // Important: set loadRequested to false to prevent automatic retries
-        setLoadRequested(false);
-      }
-    };
-
-    loadStructure();
-  }, [pdbId, chainId, isInitialized, loadRequested, addLog, reportError, onReady]);
-
-  // Function to manually trigger loading (used by Load Structure button)
-  const triggerLoad = useCallback(() => {
-    if (!isInitialized) return;
-    setLoadRequested(true);
-  }, [isInitialized]);
-
-  // No need for imperative handle, parent controls loading via props
+  }, [pdbId, chainId, addLog, reportError, onReady]);
 
   return (
     <div className="relative" style={{ width, height }}>
@@ -312,6 +265,14 @@ export function ImprovedMolstarViewer({
           <div className="text-red-500 bg-white p-4 rounded shadow max-w-md">
             <p className="font-bold mb-2">Error:</p>
             <p className="mb-2">{error}</p>
+            <details className="text-xs text-gray-600 mt-2">
+              <summary className="cursor-pointer">View logs</summary>
+              <div className="mt-2 p-2 bg-gray-100 max-h-40 overflow-y-auto">
+                {logs.map((log, i) => (
+                  <div key={i}>{log}</div>
+                ))}
+              </div>
+            </details>
           </div>
         </div>
       )}

@@ -150,17 +150,14 @@ export default function DashboardPage() {
     router.push(`/domains/${domain.id}`)
   }
 
-  const handleViewProtein = (domain: DomainSummary) => {
-    if (domain.pdb_id && domain.chain_id) {
-      // Use the navigation helper for consistent URL generation
-      nav.toProtein({
-        pdb_id: domain.pdb_id,
-        chain_id: domain.chain_id
-      })
-    } else {
-      console.error('Missing pdb_id or chain_id for domain:', domain)
-    }
+const handleViewProtein = (domain: DomainSummary) => {
+  if (domain.pdb_id && domain.chain_id) {
+    const sourceId = `${domain.pdb_id}_${domain.chain_id}`
+    router.push(`/protein/${sourceId}`)
+  } else {
+    console.error('Missing pdb_id or chain_id for domain:', domain)
   }
+}
 
   // Enhanced classification badge renderer
   const renderClassificationBadge = (

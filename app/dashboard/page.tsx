@@ -1,6 +1,3 @@
-// Enhanced Dashboard with Fixed Statistics
-// app/dashboard/page.tsx
-
 'use client'
 
 import React, { useState, useEffect } from 'react'
@@ -52,24 +49,25 @@ export default function DashboardPage() {
 
   // Fetch domains data
   const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {
+    if (initialLoad) setInitialLoad(false)
     setLoading(true)
     setStatsLoading(true)
     setError(null)
 
     try {
+      const filtersToUse = newFilters !== undefined ? newFilters : filters
+
       const params = new URLSearchParams({
         page: page.toString(),
-        size: pagination.size.toString()
+        size: '50'
       })
-
-      const filtersToUse = newFilters || filters
 
       // Add filters to URL params
       Object.entries(filtersToUse).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          if (Array.isArray(value)) {
-            params.set(key, value.join(','))
-          } else {
+        if (value !== undefined && value !== null && value !== '') {
+          if (Array.isArray(value) && value.length > 0) {
+            params.set(key === 't_group' ? 't_groups' : key === 'h_group' ? 'h_groups' : key, value.join(','))
+          } else if (!Array.isArray(value)) {
             params.set(key, value.toString())
           }
         }
@@ -78,25 +76,24 @@ export default function DashboardPage() {
       const response = await fetch(`/api/domains?${params}`)
 
       if (!response.ok) {
-        throw new Error('Failed to fetch domains')
+        const errorText = await response.text()
+        throw new Error(`Failed to fetch domains: ${response.status} ${errorText}`)
       }
 
       const data = await response.json()
 
-      // Check if response includes statistics (new format) or use fallback
+      // Update states
+      setDomains(data.data || [])
+      setPagination(data.pagination || { page, size: 50, total: 0 })
+
+      // Handle statistics - support both new and old API format
       if (data.statistics) {
-        setDomains(data.data)
-        setPagination(data.pagination)
         setStatistics(data.statistics)
       } else {
-        // Fallback for API that doesn't return statistics yet
-        setDomains(data.data)
-        setPagination(data.pagination)
-
-        // Calculate basic statistics from current data as fallback
-        const domains = data.data
+        // Fallback for older API format
+        const domains = data.data || []
         setStatistics({
-          totalDomains: data.pagination.total || 0,
+          totalDomains: data.pagination?.total || 0,
           classifiedDomains: domains.filter((d: DomainSummary) => d.t_group).length,
           highConfidenceDomains: domains.filter((d: DomainSummary) => d.confidence && d.confidence >= 0.8).length,
           avgConfidence: domains.length > 0 ? domains.reduce((sum: number, d: DomainSummary) => sum + (d.confidence || 0), 0) / domains.length : 0,
@@ -105,23 +102,23 @@ export default function DashboardPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
-      console.error('Fetch error:', err)
     } finally {
       setLoading(false)
       setStatsLoading(false)
     }
   }
 
-  // Initial fetch on mount
+  // Initial load and filter changes
   useEffect(() => {
     fetchDomains(1)
-  }, [])
+  }, []) // Only run on mount
 
-  // Filter changes (skip initial if already loading)
+  // Handle filter changes separately
   useEffect(() => {
-    if (loading) return // Skip if already loading from initial mount
-    fetchDomains(1, filters)
-  }, [filters])
+    if (!initialLoad) { // Skip filter changes on initial load
+      fetchDomains(1)
+    }
+  }, [filters, initialLoad])
 
   // Handle filter changes
   const handleFiltersChange = (newFilters: DomainFilters) => {
@@ -192,9 +189,90 @@ export default function DashboardPage() {
     }
   }
 
-  // Table columns configuration (unchanged)
+  // Table columns configuration
   const columns = [
-    // ... (existing column configuration)
+    {
+      key: 'pdb_id',
+      label: 'PDB ID',
+      sortable: true,
+      render: (value: string, domain: DomainSummary) => (
+        <button
+          onClick={() => handleViewProtein(domain)}
+          className="text-blue-600 hover:text-blue-800 font-medium"
+        >
+          {value}_{domain.chain_id}
+        </button>
+      )
+    },
+    {
+      key: 'domain_number',
+      label: 'Domain',
+      sortable: true,
+      render: (value: number, domain: DomainSummary) => (
+        <span className="font-mono">{value}</span>
+      )
+    },
+    {
+      key: 'range',
+      label: 'Range',
+      render: (value: string) => (
+        <span className="font-mono text-sm">{value}</span>
+      )
+    },
+    {
+      key: 'confidence',
+      label: 'Confidence',
+      sortable: true,
+      render: (value: number | null) => {
+        if (!value) return <span className="text-gray-400">N/A</span>
+        const color = value >= 0.8 ? 'text-green-600' : value >= 0.5 ? 'text-yellow-600' : 'text-red-600'
+        return <span className={`font-medium ${color}`}>{value.toFixed(3)}</span>
+      }
+    },
+    {
+      key: 't_group',
+      label: 'T-Group',
+      render: (value: string | null) => (
+        <span className={`px-2 py-1 rounded text-xs font-medium ${
+          value ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'
+        }`}>
+          {value || 'Unclassified'}
+        </span>
+      )
+    },
+    {
+      key: 'evidence_count',
+      label: 'Evidence',
+      sortable: true,
+      render: (value: number, domain: DomainSummary) => (
+        <div className="text-center">
+          <span className="font-medium">{value}</span>
+          <div className="text-xs text-gray-500">{domain.evidence_types}</div>
+        </div>
+      )
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      render: (_: any, domain: DomainSummary) => (
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleViewDomain(domain)}
+          >
+            <Eye className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleDomainClick(domain)}
+          >
+            <BarChart3 className="w-4 h-4" />
+          </Button>
+        </div>
+      )
+    }
   ]
 
   // Loading state component for statistics
@@ -297,8 +375,127 @@ export default function DashboardPage() {
         onReset={handleResetFilters}
       />
 
-      {/* Rest of the component remains the same */}
-      {/* ... */}
+      {/* Main Content */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          {loading ? (
+            <Card className="p-8 text-center">
+              <LoadingSpinner />
+              <p className="mt-4 text-gray-600">Loading domains...</p>
+            </Card>
+          ) : error ? (
+            <Card className="p-8 text-center">
+              <div className="text-red-600 mb-4">Error: {error}</div>
+              <Button onClick={() => fetchDomains(pagination.page)}>Retry</Button>
+            </Card>
+          ) : domains.length === 0 ? (
+            <Card className="p-8 text-center">
+              <div className="text-gray-500 mb-4">No domains found</div>
+              <p className="text-sm text-gray-400">
+                Try adjusting your filters or check if data is available in the database.
+              </p>
+              <Button
+                onClick={() => fetchDomains(1)}
+                className="mt-4"
+                variant="outline"
+              >
+                Load Data
+              </Button>
+            </Card>
+          ) : viewMode === 'table' ? (
+            <div className="w-full min-w-0">
+              <DataTable
+                data={domains}
+                columns={columns}
+                pagination={pagination}
+                onPageChange={handlePageChange}
+                onRowClick={handleDomainClick}
+                loading={loading}
+              />
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Group by protein for visualization */}
+              {Object.entries(
+                domains.reduce((acc, domain) => {
+                  const key = `${domain.pdb_id}_${domain.chain_id}`
+                  if (!acc[key]) acc[key] = []
+                  acc[key].push(domain)
+                  return acc
+                }, {} as Record<string, DomainSummary[]>)
+              ).map(([proteinKey, proteinDomains]) => {
+                const firstDomain = proteinDomains[0]
+                return (
+                  <BoundaryVisualization
+                    key={proteinKey}
+                    protein={{
+                      id: firstDomain.protein_id,
+                      pdb_id: firstDomain.pdb_id,
+                      chain_id: firstDomain.chain_id,
+                      sequence_length: 500 // This would come from the actual data
+                    }}
+                    domains={proteinDomains}
+                    onDomainClick={handleDomainClick}
+                  />
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Side Panel - Domain Details */}
+        {selectedDomain && (
+          <div className="lg:col-span-1">
+            <Card className="p-6">
+              <h3 className="text-lg font-semibold mb-4">Domain Details</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Protein</label>
+                  <div className="text-sm">{selectedDomain.pdb_id}_{selectedDomain.chain_id}</div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Domain Number</label>
+                  <div className="text-sm">{selectedDomain.domain_number}</div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Range</label>
+                  <div className="text-sm font-mono">{selectedDomain.range}</div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Confidence</label>
+                  <div className="text-sm">
+                    {selectedDomain.confidence ? selectedDomain.confidence.toFixed(3) : 'N/A'}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Classification</label>
+                  <div className="text-sm space-y-1">
+                    <div>T: {selectedDomain.t_group || 'Not assigned'}</div>
+                    <div>H: {selectedDomain.h_group || 'Not assigned'}</div>
+                    <div>X: {selectedDomain.x_group || 'Not assigned'}</div>
+                    <div>A: {selectedDomain.a_group || 'Not assigned'}</div>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Evidence</label>
+                  <div className="text-sm">
+                    <div>Count: {selectedDomain.evidence_count}</div>
+                    <div>Types: {selectedDomain.evidence_types}</div>
+                  </div>
+                </div>
+                <div className="pt-4 border-t">
+                  <Button
+                    className="w-full"
+                    onClick={() => handleViewDomain(selectedDomain)}
+                  >
+                    View Full Details
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

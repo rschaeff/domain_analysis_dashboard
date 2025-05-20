@@ -9,8 +9,8 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
-import { Eye, Download, BarChart3 } from 'lucide-react'
-import { useNavigation } from '@/lib/navigation'
+import { MultiTrackDomainVisualization } from '@/components/visualization/MultiTrackDomainVisualization'
+import { Eye, Download, BarChart3, Users } from 'lucide-react'
 
 // Enhanced API Response Type
 interface DomainsResponse {
@@ -25,13 +25,10 @@ interface DomainsResponse {
   }
 }
 
-
-
 export default function DashboardPage() {
   const router = useRouter()
-  const nav = useNavigation()
   const [domains, setDomains] = useState<DomainSummary[]>([])
-  const [loading, setLoading] = useState(false) // Start with false to avoid hydration issues
+  const [loading, setLoading] = useState(false)
   const [statsLoading, setStatsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState<DomainFilters>({})
@@ -49,7 +46,8 @@ export default function DashboardPage() {
   })
   const [selectedDomain, setSelectedDomain] = useState<DomainSummary | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'visualization'>('table')
-  const [initialLoad, setInitialLoad] = useState(true) // Track initial load separately
+  const [visualizationMode, setVisualizationMode] = useState<'simple' | 'detailed'>('detailed')
+  const [initialLoad, setInitialLoad] = useState(true)
 
   // Fetch domains data
   const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {
@@ -74,7 +72,7 @@ export default function DashboardPage() {
             let paramKey = key
             if (key === 't_group') paramKey = 't_groups'
             else if (key === 'h_group') paramKey = 'h_groups'
-            else if (key === 'x_group') paramKey = 'x_groups'  // Add this line
+            else if (key === 'x_group') paramKey = 'x_groups'
 
             params.set(paramKey, value.join(','))
           } else if (!Array.isArray(value)) {
@@ -121,11 +119,11 @@ export default function DashboardPage() {
   // Initial load and filter changes
   useEffect(() => {
     fetchDomains(1)
-  }, []) // Only run on mount
+  }, [])
 
   // Handle filter changes separately
   useEffect(() => {
-    if (!initialLoad) { // Skip filter changes on initial load
+    if (!initialLoad) {
       fetchDomains(1)
     }
   }, [filters, initialLoad])
@@ -154,14 +152,15 @@ export default function DashboardPage() {
     router.push(`/domains/${domain.id}`)
   }
 
-const handleViewProtein = (domain: DomainSummary) => {
-  if (domain.pdb_id && domain.chain_id) {
-    const sourceId = `${domain.pdb_id}_${domain.chain_id}`
-    router.push(`/protein/${sourceId}`)
-  } else {
-    console.error('Missing pdb_id or chain_id for domain:', domain)
+  // Fixed navigation to use source_id format
+  const handleViewProtein = (domain: DomainSummary) => {
+    if (domain.pdb_id && domain.chain_id) {
+      const sourceId = `${domain.pdb_id}_${domain.chain_id}`
+      router.push(`/protein/${sourceId}`)
+    } else {
+      console.error('Missing pdb_id or chain_id for domain:', domain)
+    }
   }
-}
 
   // Enhanced classification badge renderer
   const renderClassificationBadge = (
@@ -175,12 +174,11 @@ const handleViewProtein = (domain: DomainSummary) => {
     return (
       <button
         onClick={(e) => {
-          e.stopPropagation() // Prevent row click
+          e.stopPropagation()
           if (value) {
-            // Toggle the classification in the filter
             const newFilters = isCurrentlyFiltered
-              ? currentFilters.filter(item => item !== value) // Remove if already selected
-              : [...currentFilters, value] // Add if not selected
+              ? currentFilters.filter(item => item !== value)
+              : [...currentFilters, value]
 
             handleFiltersChange({
               ...filters,
@@ -211,12 +209,15 @@ const handleViewProtein = (domain: DomainSummary) => {
   // Enhanced export functionality
   const handleExport = async () => {
     try {
-      // Export all filtered results, not just current page
       const params = new URLSearchParams({ size: '10000' })
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           if (Array.isArray(value)) {
-            params.set(key, value.join(','))
+            let paramKey = key
+            if (key === 't_group') paramKey = 't_groups'
+            else if (key === 'h_group') paramKey = 'h_groups'
+            else if (key === 'x_group') paramKey = 'x_groups'
+            params.set(paramKey, value.join(','))
           } else {
             params.set(key, value.toString())
           }
@@ -226,7 +227,6 @@ const handleViewProtein = (domain: DomainSummary) => {
       const response = await fetch(`/api/domains?${params}`)
       const data = await response.json()
 
-      // Convert to CSV
       const csvData = data.data.map((domain: DomainSummary) => ({
         pdb_id: domain.pdb_id,
         chain_id: domain.chain_id,
@@ -396,6 +396,26 @@ const handleViewProtein = (domain: DomainSummary) => {
           >
             Visualization
           </Button>
+          {viewMode === 'visualization' && (
+            <div className="flex border rounded-md">
+              <Button
+                size="sm"
+                variant={visualizationMode === 'simple' ? 'default' : 'ghost'}
+                onClick={() => setVisualizationMode('simple')}
+                className="rounded-r-none"
+              >
+                Simple
+              </Button>
+              <Button
+                size="sm"
+                variant={visualizationMode === 'detailed' ? 'default' : 'ghost'}
+                onClick={() => setVisualizationMode('detailed')}
+                className="rounded-l-none"
+              >
+                Detailed
+              </Button>
+            </div>
+          )}
           <Button variant="outline" onClick={handleExport}>
             <Download className="w-4 h-4 mr-2" />
             Export
@@ -403,7 +423,7 @@ const handleViewProtein = (domain: DomainSummary) => {
         </div>
       </div>
 
-      {/* Simplified Summary Cards */}
+      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           title="Total Domains"
@@ -431,7 +451,7 @@ const handleViewProtein = (domain: DomainSummary) => {
         />
       </div>
 
-      {/* Enhanced Filters with Active Filter Count and Badge Hint */}
+      {/* Enhanced Filters */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg">
         <FilterPanel
           filters={filters}
@@ -445,7 +465,7 @@ const handleViewProtein = (domain: DomainSummary) => {
         )}
       </div>
 
-{/* Main Content */}
+      {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           {loading ? (
@@ -460,6 +480,7 @@ const handleViewProtein = (domain: DomainSummary) => {
             </Card>
           ) : domains.length === 0 ? (
             <Card className="p-8 text-center">
+              <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <div className="text-gray-500 mb-4">No domains found</div>
               <p className="text-sm text-gray-400">
                 Try adjusting your filters or check if data is available in the database.
@@ -496,18 +517,24 @@ const handleViewProtein = (domain: DomainSummary) => {
               ).map(([proteinKey, proteinDomains]) => {
                 const firstDomain = proteinDomains[0]
 
-                // Use actual sequence length from domain data, or estimate from ranges if not available
+                // Separate putative and reference domains
+                const putativeDomains = proteinDomains.filter(d =>
+                  d.domain_type === 'putative' || !d.domain_type
+                )
+                const referenceDomains = proteinDomains.filter(d =>
+                  d.domain_type === 'reference'
+                )
+
+                // Use actual sequence length from domain data, or estimate from ranges
                 let sequenceLength = firstDomain.protein_sequence_length
 
                 if (!sequenceLength) {
                   // Fallback: estimate from maximum domain range
                   sequenceLength = Math.max(
                     ...proteinDomains.map(d => {
-                      // Parse range to get maximum position
                       const rangeParts = d.range?.split(',') || []
                       let maxPos = 0
                       for (const part of rangeParts) {
-                        // Handle ranges with chain prefixes like "A:1-100"
                         const withoutChain = part.includes(':') ? part.split(':')[1] : part
                         const endPos = parseInt(withoutChain.split('-')[1] || '0')
                         if (!isNaN(endPos)) {
@@ -520,7 +547,7 @@ const handleViewProtein = (domain: DomainSummary) => {
 
                   // Add some padding to the estimated length
                   if (sequenceLength > 0) {
-                    sequenceLength = Math.ceil(sequenceLength * 1.1) // Add 10% padding
+                    sequenceLength = Math.ceil(sequenceLength * 1.1)
                   }
 
                   // If we still don't have a length, use a default
@@ -529,16 +556,16 @@ const handleViewProtein = (domain: DomainSummary) => {
                   }
                 }
 
-                return (
+                return visualizationMode === 'simple' ? (
+                  // Simple visualization - only putative domains
                   <Card key={proteinKey} className="p-4">
-                    {/* Protein header */}
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-4">
                         <h3 className="text-lg font-semibold">
                           Protein: {firstDomain.pdb_id}_{firstDomain.chain_id}
                         </h3>
                         <div className="text-sm text-gray-600">
-                          {proteinDomains.length} domain{proteinDomains.length !== 1 ? 's' : ''} | {sequenceLength} residues
+                          {putativeDomains.length} putative domain{putativeDomains.length !== 1 ? 's' : ''} | {sequenceLength} residues
                         </div>
                       </div>
                       <Button
@@ -551,38 +578,6 @@ const handleViewProtein = (domain: DomainSummary) => {
                       </Button>
                     </div>
 
-                    {/* Domain stats for this protein */}
-                    <div className="grid grid-cols-4 gap-4 mb-4 text-sm">
-                      <div className="bg-blue-50 p-3 rounded">
-                        <div className="font-medium text-blue-900">Total Domains</div>
-                        <div className="text-xl font-bold text-blue-600">{proteinDomains.length}</div>
-                      </div>
-                      <div className="bg-green-50 p-3 rounded">
-                        <div className="font-medium text-green-900">Classified</div>
-                        <div className="text-xl font-bold text-green-600">
-                          {proteinDomains.filter(d => d.t_group).length}
-                        </div>
-                      </div>
-                      <div className="bg-purple-50 p-3 rounded">
-                        <div className="font-medium text-purple-900">With Evidence</div>
-                        <div className="text-xl font-bold text-purple-600">
-                          {proteinDomains.filter(d => d.evidence_count > 0).length}
-                        </div>
-                      </div>
-                      <div className="bg-orange-50 p-3 rounded">
-                        <div className="font-medium text-orange-900">Avg Confidence</div>
-                        <div className="text-xl font-bold text-orange-600">
-                          {proteinDomains.filter(d => d.confidence !== null).length > 0
-                            ? (proteinDomains
-                                .filter(d => d.confidence !== null)
-                                .reduce((sum, d) => sum + (d.confidence || 0), 0) /
-                              proteinDomains.filter(d => d.confidence !== null).length).toFixed(2)
-                            : 'N/A'}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Boundary visualization */}
                     <BoundaryVisualization
                       protein={{
                         id: firstDomain.protein_id,
@@ -590,60 +585,30 @@ const handleViewProtein = (domain: DomainSummary) => {
                         chain_id: firstDomain.chain_id,
                         sequence_length: sequenceLength
                       }}
-                      domains={proteinDomains}
+                      domains={putativeDomains}
                       onDomainClick={handleDomainClick}
                     />
 
-                    {/* Domain details list */}
-                    <div className="mt-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Domain Details</h4>
-                      <div className="space-y-2">
-                        {proteinDomains.map((domain, index) => (
-                          <div
-                            key={domain.id}
-                            className="flex items-center justify-between p-2 bg-gray-50 rounded border hover:bg-gray-100 cursor-pointer transition-colors"
-                            onClick={() => handleDomainClick(domain)}
-                          >
-                            <div className="flex items-center gap-3">
-                              <div
-                                className="w-4 h-4 rounded border-2 opacity-80"
-                                style={{
-                                  backgroundColor: `hsl(${index * 137.5 % 360}, 70%, 50%)`,
-                                  borderColor: `hsl(${index * 137.5 % 360}, 70%, 40%)`
-                                }}
-                              />
-                              <div>
-                                <div className="font-medium text-sm">
-                                  Domain {domain.domain_number}
-                                </div>
-                                <div className="text-xs text-gray-600 font-mono">
-                                  {domain.range}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3 text-sm">
-                              {domain.t_group && (
-                                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                                  {domain.t_group}
-                                </span>
-                              )}
-                              {domain.confidence && (
-                                <span className={`font-medium ${
-                                  domain.confidence >= 0.8 ? 'text-green-600' :
-                                  domain.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'
-                                }`}>
-                                  {domain.confidence.toFixed(2)}
-                                </span>
-                              )}
-                              <span className="text-gray-500">
-                                {domain.evidence_count} evidence
-                              </span>
-                            </div>
-                          </div>
-                        ))}
+                    {referenceDomains.length > 0 && (
+                      <div className="mt-3 text-sm text-gray-600 bg-blue-50 p-3 rounded">
+                        💡 This protein also has {referenceDomains.length} reference domains from ECOD used as supporting evidence.
                       </div>
-                    </div>
+                    )}
                   </Card>
+                ) : (
+                  // Detailed multi-track visualization
+                  <MultiTrackDomainVisualization
+                    key={proteinKey}
+                    protein={{
+                      id: firstDomain.protein_id,
+                      pdb_id: firstDomain.pdb_id,
+                      chain_id: firstDomain.chain_id,
+                      sequence_length: sequenceLength
+                    }}
+                    putativeDomains={putativeDomains}
+                    referenceDomains={referenceDomains}
+                    onDomainClick={handleDomainClick}
+                  />
                 )
               })}
             </div>
@@ -801,7 +766,6 @@ function downloadAsCSV(data: any[], filename: string) {
     ...data.map(row =>
       headers.map(key => {
         const value = row[key]
-        // Handle values that contain commas or quotes
         if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
           return `"${value.replace(/"/g, '""')}"`
         }

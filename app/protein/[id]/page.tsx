@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { DomainSummary, ProteinOverview } from '@/lib/types'
 import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
+import { MultiTrackDomainVisualization } from '@/components/visualization/MultiTrackDomainVisualization'
 import { DataTable } from '@/components/common/DataTable'
 import { SequenceViewer } from '@/app/domains/[id]/components/SequenceViewer'
 import { StructureViewer } from '@/app/domains/[id]/components/StructureViewer'
@@ -289,20 +290,16 @@ export default function ProteinDetailPage() {
                 </div>
               </div>
 
-              {/* Domain Visualization */}
-              <BoundaryVisualization
-                protein={{
-                  id: protein.id,
-                  pdb_id: protein.pdb_id,
-                  chain_id: protein.chain_id,
-                  sequence_length: protein.sequence_length
-                }}
-                  domains={(() => {
-                    // ADD THIS DEBUG:
-                    console.log('[BOUNDARY VIZ] Receiving domains:', domains)
-                    console.log('[BOUNDARY VIZ] domains.length:', domains?.length)
-                    return domains
-                  })()}
+                {/* Multi-Track Domain Visualization */}
+                <MultiTrackDomainVisualization
+                  protein={{
+                    id: protein.id,
+                    pdb_id: protein.pdb_id,
+                    chain_id: protein.chain_id,
+                    sequence_length: protein.sequence_length
+                  }}
+                  putativeDomains={protein.putative_domains || []}
+                  referenceDomains={protein.reference_domains || []}
                   onDomainClick={handleDomainClick}
               />
             </div>

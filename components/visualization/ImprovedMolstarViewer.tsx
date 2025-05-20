@@ -1,3 +1,40 @@
+'use client'
+
+import React, { useEffect, useRef, useState, useCallback } from 'react'
+
+interface MolstarViewerProps {
+  pdbId: string;
+  chainId?: string;
+  height?: string | number;
+  width?: string | number;
+  onReady?: (plugin: any) => void;
+  onError?: (error: string) => void;
+}
+
+export function ImprovedMolstarViewer({
+  pdbId,
+  chainId,
+  height = '400px',
+  width = '100%',
+  onReady,
+  onError
+}: MolstarViewerProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pluginRef = useRef<any>(null);
+  const isLoadingRef = useRef(false);
+  const isInitializedRef = useRef(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+
+  // Add a log entry for debugging
+  const addLog = useCallback((message: string) => {
+    console.log(`[MolstarViewer] ${message}`);
+    setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
+  }, []);
+
+
 // Add debug button to display in dev environment
   const debugStructure = useCallback(() => {
     if (!pluginRef.current) {
@@ -83,41 +120,7 @@
 
       return () => clearTimeout(timeoutId);
     }
-  }, [isLoading, addLog, reportError]);'use client'
-
-import React, { useEffect, useRef, useState, useCallback } from 'react'
-
-interface MolstarViewerProps {
-  pdbId: string;
-  chainId?: string;
-  height?: string | number;
-  width?: string | number;
-  onReady?: (plugin: any) => void;
-  onError?: (error: string) => void;
-}
-
-export function ImprovedMolstarViewer({
-  pdbId,
-  chainId,
-  height = '400px',
-  width = '100%',
-  onReady,
-  onError
-}: MolstarViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const pluginRef = useRef<any>(null);
-  const isLoadingRef = useRef(false);
-  const isInitializedRef = useRef(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
-
-  // Add a log entry for debugging
-  const addLog = useCallback((message: string) => {
-    console.log(`[MolstarViewer] ${message}`);
-    setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
-  }, []);
+  }, [isLoading, addLog, reportError]);
 
   // Report errors consistently
   const reportError = useCallback((errorMessage: string) => {

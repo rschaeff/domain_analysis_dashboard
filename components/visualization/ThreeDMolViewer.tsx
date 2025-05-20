@@ -51,10 +51,18 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
+  const loadedRef = useRef(false);
 
   // State
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Debug function
+  const debugLog = (message: string, data?: any) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[3DMol] ${message}`, data || '');
+    }
+  };
 
   // Expose the viewer methods via ref
   useImperativeHandle(ref, () => ({
@@ -71,6 +79,45 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
           return viewerRef.current.pngURI();
         }
         return null;
+      },
+      highlightDomain: (domainIndex: number) => {
+        if (!viewerRef.current || domains.length <= domainIndex) return;
+
+        const domain = domains[domainIndex];
+        try {
+          debugLog(`Highlighting domain: ${domain.id}, range: ${domain.start}-${domain.end}`);
+
+          // Clear all selections
+          viewerRef.current.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });
+
+          // Highlight the specific chain
+          if (chainId) {
+            viewerRef.current.setStyle({chain: chainId}, {
+              cartoon: {
+                color: 'gray',
+                opacity: 0.8
+              }
+            });
+          }
+
+          // Highlight the specific domain
+          const selection = {
+            chain: domain.chainId,
+            resi: `${domain.start}-${domain.end}`
+          };
+
+          viewerRef.current.setStyle(selection, {
+            cartoon: {
+              color: domain.color,
+              opacity: 1.0
+            }
+          });
+
+          viewerRef.current.zoomTo(selection);
+          viewerRef.current.render();
+        } catch (error) {
+          console.error('Error highlighting domain:', error);
+        }
       }
     }
   }));
@@ -88,6 +135,81 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     }
   };
 
+  // Apply the domain styling
+  const applyDomainStyling = (viewer: any) => {
+    if (!viewer) return;
+
+    debugLog(`Applying styling for ${domains.length} domains`);
+
+    // Set base style for all atoms with reduced opacity
+    viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.4 } });
+
+    // Highlight specific chain if provided
+    if (chainId) {
+      debugLog(`Setting style for chain: ${chainId}`);
+      viewer.setStyle({chain: chainId}, {
+        cartoon: {
+          color: 'gray',
+          opacity: 0.7
+        }
+      });
+    }
+
+    // Apply styling for each domain
+    if (domains.length > 0) {
+      domains.forEach((domain, index) => {
+        try {
+          // Validate domain range
+          if (domain.start > domain.end || domain.start <= 0) {
+            debugLog(`Invalid domain range: ${domain.start}-${domain.end}`, domain);
+            return;
+          }
+
+          // Ensure chain ID is valid
+          const domainChainId = domain.chainId || chainId || 'A';
+
+          // Create selection for this domain
+          // Using a string for residue range which is more reliable
+          const selection = {
+            chain: domainChainId,
+            resi: `${domain.start}-${domain.end}`
+          };
+
+          debugLog(`Setting style for domain ${index}:`, selection);
+
+          // Apply style with full opacity for the domain
+          viewer.setStyle(selection, {
+            cartoon: {
+              color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+              opacity: 1.0
+            }
+          });
+
+          // Add label if requested
+          if (showControls && domain.label) {
+            try {
+              viewer.addLabel(domain.label, {
+                position: { resi: Math.floor((domain.start + domain.end) / 2), chain: domainChainId },
+                backgroundColor: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+                fontColor: "#ffffff",
+                fontSize: 12,
+                alignment: "center",
+                inFront: true
+              });
+            } catch (labelError) {
+              debugLog(`Label creation error for domain ${index}:`, labelError);
+            }
+          }
+        } catch (domainError) {
+          debugLog(`Error applying domain ${domain.id}:`, domainError);
+        }
+      });
+    }
+
+    // Final render
+    viewer.render();
+  };
+
   // Initialize and load structure
   useEffect(() => {
     // Only run in browser environment
@@ -96,12 +218,14 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     // Reset state for new PDB ID
     setIsLoading(true);
     setErrorMessage(null);
+    loadedRef.current = false;
 
     // Dynamically import 3DMol.js
     const init3DMol = async () => {
       try {
         // Import 3DMol dynamically to avoid SSR issues
         const $3Dmol = await import('3dmol');
+        debugLog('3DMol library loaded');
 
         // Clean up previous viewer if it exists
         if (viewerRef.current) {
@@ -118,96 +242,46 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
 
         // Create a new viewer
         const config = {
-          backgroundColor: backgroundColor,
+          backgroundColor: backgroundColor || 'white',
           id: containerRef.current.id
         };
 
+        debugLog('Creating 3DMol viewer with config:', config);
         const viewer = $3Dmol.createViewer(containerRef.current, config);
         viewerRef.current = viewer;
 
-        // Load structure from PDB using Promise pattern
+        // Load structure from PDB
+        debugLog(`Loading PDB ID: ${pdbId}`);
         try {
-          const model = await $3Dmol.download(`pdb:${pdbId}`, viewer, {});
+          // First try the standard PDB URL
+          const pdbUrl = `pdb:${pdbId}`;
+          $3Dmol.download(pdbUrl, viewer, {}, function(model) {
+            if (!model) {
+              handleError(`Failed to load model: ${pdbId}`);
+              return;
+            }
 
-          if (!model) {
-            throw new Error('Failed to load model');
-          }
+            debugLog('PDB model loaded successfully');
 
-          // Set base style for all atoms
-          viewer.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });
+            // Apply domain styling
+            applyDomainStyling(viewer);
 
-          // Focus on specific chain if requested
-          if (chainId) {
-            viewer.setStyle({chain: chainId}, {
-              cartoon: {
-                color: 'gray',
-                opacity: 0.8
-              }
-            });
-          }
+            // Zoom to fit the model
+            viewer.zoomTo();
 
-          // Add domain representations - OUTSIDE the chainId condition
-          if (domains.length > 0) {
-            for (const domain of domains) {
+            // Update loading state
+            setIsLoading(false);
+            loadedRef.current = true;
+
+            // Call onStructureLoaded callback
+            if (onStructureLoaded) {
               try {
-                // Check that the domain range is valid
-                if (domain.start > domain.end) {
-                  console.log(`Invalid domain range: ${domain.start}-${domain.end}`);
-                  continue;
-                }
-
-                // Create a safe selection object for this domain
-                const selection = {
-                  chain: domain.chainId,
-                  resi: domain.start.toString() + "-" + domain.end.toString()
-                };
-
-                // Set the style for this domain
-                viewer.setStyle(selection, {
-                  cartoon: {
-                    color: domain.color,
-                    opacity: 1.0
-                  }
-                });
-
-                // Add label if present and controls are shown
-                if (showControls && domain.label) {
-                  try {
-                    viewer.addLabel(domain.label, {
-                      position: "centered",
-                      backgroundColor: domain.color,
-                      fontColor: "#ffffff",
-                      fontSize: 12,
-                      alignment: "center",
-                      inFront: true,
-                      sel: selection
-                    });
-                  } catch (labelError) {
-                    console.log('Label creation error:', labelError);
-                  }
-                }
-              } catch (domainError) {
-                console.log(`Error applying domain ${domain.id}:`, domainError);
+                onStructureLoaded();
+              } catch (callbackError) {
+                debugLog('Error in onStructureLoaded callback:', callbackError);
               }
             }
-          }
-
-          // Zoom to fit the model
-          viewer.zoomTo();
-          // Render the model
-          viewer.render();
-
-          // Finished loading
-          setIsLoading(false);
-
-          // Call onStructureLoaded callback
-          if (onStructureLoaded) {
-            try {
-              onStructureLoaded();
-            } catch (callbackError) {
-              console.log('Error in onStructureLoaded callback:', callbackError);
-            }
-          }
+          });
         } catch (loadError) {
           handleError(`Error loading or rendering structure: ${loadError instanceof Error ? loadError.message : String(loadError)}`);
         }
@@ -232,12 +306,20 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
         }
       }
     };
-  }, [pdbId, chainId, domains, backgroundColor, showControls, onStructureLoaded, onError]);
+  }, [pdbId, backgroundColor]);
+
+  // Update domain styling when domains or chainId change
+  useEffect(() => {
+    if (viewerRef.current && loadedRef.current) {
+      debugLog('Domain or chain info changed, updating styling');
+      applyDomainStyling(viewerRef.current);
+    }
+  }, [domains, chainId, showControls]);
 
   return (
     <div
       ref={containerRef}
-      id={`3dmol-viewer-${pdbId}`}
+      id={`3dmol-viewer-${pdbId}-${Date.now()}`} // Unique ID to prevent conflicts
       className={`three-dmol-viewer ${className}`}
       style={{
         position: 'relative',
@@ -313,7 +395,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
         <div style={{
           position: 'absolute',
           top: '10px',
-          right: '10px',
+          left: '10px',
           zIndex: 10,
           display: 'flex',
           gap: '5px'

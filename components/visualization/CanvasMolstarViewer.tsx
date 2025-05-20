@@ -87,7 +87,7 @@ export function CanvasMolstarViewer({
           }
         },
         selection: {
-          entities: [{ chain_id: chainId, residueNumbers: [{ start: domain.start, end: domain.end }] }]
+          queryString: chainId ? `chain ${chainId} and resnumber >= ${domain.start} and resnumber <= ${domain.end}` : undefined
         }
       });
 
@@ -266,7 +266,26 @@ export function CanvasMolstarViewer({
 
         // Focus on chain if specified
         if (chainId) {
-          await plugin.builders.structure.selection.selectChain({ chain_id: chainId });
+          // Fixed: Use proper method to select chain
+          try {
+            // Create a selection query for the specified chain
+            const components = plugin.managers.structure.hierarchy.current.structures[0].components;
+            const chainComponent = components.find(c => c.cell.obj.data.entities.some(e =>
+              (e.data.chains.some(chain => chain.authAsymId === chainId || chain.asymId === chainId))
+            ));
+
+            if (chainComponent) {
+              // Select the component
+              plugin.managers.structure.hierarchy.selection.addByComponent(chainComponent);
+              await plugin.managers.structure.component.updateRepresentationsTheme({ color: 'chain-id' });
+            } else {
+              console.warn(`Chain ${chainId} not found in structure`);
+            }
+          } catch (chainErr) {
+            console.warn('Error focusing on chain:', chainErr);
+            // Fallback: try to focus on the whole structure
+            plugin.canvas3d?.resetCamera();
+          }
         }
 
         // Mark as initialized

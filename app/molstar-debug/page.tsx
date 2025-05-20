@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { Card } from '@/components/ui/Card'
 import { ImprovedMolstarViewer } from '@/components/visualization/ImprovedMolstarViewer'
 import { Input } from '@/components/ui/Input'
@@ -13,11 +13,24 @@ export default function MolstarDebugPage() {
   const [logs, setLogs] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isLoaded, setIsLoaded] = useState(false)
+  const [key, setKey] = useState(0) // Used to force remount of viewer
+
+  // Reference to the current PDB ID being displayed
+  const currentPdbIdRef = useRef(pdbId)
+  const currentChainIdRef = useRef(chainId)
 
   const handleLoad = () => {
+    // Only remount if PDB ID or chain ID has changed
+    if (currentPdbIdRef.current !== pdbId || currentChainIdRef.current !== chainId) {
+      currentPdbIdRef.current = pdbId
+      currentChainIdRef.current = chainId
+      setKey(prevKey => prevKey + 1)
+    }
+
     setLogs([])
     setError(null)
     setIsLoaded(false)
+    addLog(`Loading structure: ${pdbId}${chainId ? ` chain ${chainId}` : ''}`)
   }
 
   const handleReady = (plugin: any) => {
@@ -31,7 +44,8 @@ export default function MolstarDebugPage() {
   }
 
   const addLog = (message: string) => {
-    setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`])
+    const timestamp = new Date().toISOString().split('T')[1].split('.')[0]
+    setLogs(prev => [...prev, `${timestamp} - ${message}`])
   }
 
   return (
@@ -68,8 +82,9 @@ export default function MolstarDebugPage() {
               </div>
 
               <div className="relative h-96 flex-grow bg-gray-50 rounded border">
+                {/* Key prop forces remount only when the Load button is clicked */}
                 <ImprovedMolstarViewer
-                  key={`${pdbId}-${chainId}-${Date.now()}`} // Force remount when structure changes
+                  key={key}
                   pdbId={pdbId}
                   chainId={chainId || undefined}
                   height="100%"
@@ -80,8 +95,8 @@ export default function MolstarDebugPage() {
               </div>
 
               {isLoaded && (
-                <Alert className="mt-4 bg-green-50 border-green-200">
-                  <AlertDescription>
+                <Alert className="mt-4">
+                  <AlertDescription className="text-green-700">
                     Structure loaded successfully!
                   </AlertDescription>
                 </Alert>
@@ -96,7 +111,7 @@ export default function MolstarDebugPage() {
             <div className="mb-4">
               <div className="text-sm font-medium mb-1">Current Structure</div>
               <div className="bg-gray-100 p-2 rounded font-mono text-sm">
-                {pdbId}{chainId ? ` (Chain ${chainId})` : ''}
+                {currentPdbIdRef.current}{currentChainIdRef.current ? ` (Chain ${currentChainIdRef.current})` : ''}
               </div>
             </div>
 
@@ -153,7 +168,8 @@ export default function MolstarDebugPage() {
                 variant="outline"
                 onClick={() => {
                   setPdbId(id)
-                  handleLoad()
+                  setChainId('')
+                  setTimeout(() => handleLoad(), 0) // Use setTimeout to ensure state is updated
                 }}
                 className="text-blue-600 hover:bg-blue-100"
               >

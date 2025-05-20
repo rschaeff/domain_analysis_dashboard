@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react';
-import { SimplifiedMolstarViewer, Domain } from '@/components/SimplifiedMolstarViewer';
+import { SimplifiedMolstarViewer, Domain } from '@/components/visualization/SimplifiedMolstarViewer';
 
 export default function SimpleDomainPage() {
   const [pdbId, setPdbId] = useState('1cbs');

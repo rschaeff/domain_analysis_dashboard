@@ -30,8 +30,8 @@ interface DomainsResponse {
 export default function DashboardPage() {
   const router = useRouter()
   const [domains, setDomains] = useState<DomainSummary[]>([])
-  const [loading, setLoading] = useState(true) // Start with loading true
-  const [statsLoading, setStatsLoading] = useState(true)
+  const [loading, setLoading] = useState(false) // Start with false to avoid hydration issues
+  const [statsLoading, setStatsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState<DomainFilters>({})
   const [pagination, setPagination] = useState<PaginationParams>({
@@ -48,6 +48,7 @@ export default function DashboardPage() {
   })
   const [selectedDomain, setSelectedDomain] = useState<DomainSummary | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'visualization'>('table')
+  const [initialLoad, setInitialLoad] = useState(true) // Track initial load separately
 
   // Fetch domains data
   const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {

@@ -19,122 +19,48 @@ export function ImprovedMolstarViewer({
   onReady,
   onError
 }: MolstarViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const pluginRef = useRef<any>(null);
-  const isLoadingRef = useRef(false);
-  const isInitializedRef = useRef(false);
-  const [isLoading, setIsLoading] = useState(true);
+  // Component state
+  const [status, setStatus] = useState<'initializing' | 'loading' | 'ready' | 'error'>('initializing');
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
 
-  // Add a log entry for debugging
-  const addLog = useCallback((message: string) => {
-    console.log(`[MolstarViewer] ${message}`);
-    setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
+  // Refs
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pluginRef = useRef<any>(null);
+  const mountedRef = useRef(true);
+  const pdbIdRef = useRef(pdbId);
+  const chainIdRef = useRef(chainId);
+
+  // Update refs when props change
+  useEffect(() => {
+    pdbIdRef.current = pdbId;
+    chainIdRef.current = chainId;
+  }, [pdbId, chainId]);
+
+  // Safe state update functions
+  const safeSetStatus = useCallback((newStatus: 'initializing' | 'loading' | 'ready' | 'error') => {
+    if (mountedRef.current) {
+      setStatus(newStatus);
+    }
   }, []);
 
-  // Report errors consistently
-  const reportError = useCallback((errorMessage: string) => {
-    console.error(`[MolstarViewer Error] ${errorMessage}`);
-    setError(errorMessage);
-    setIsLoading(false);
-    isLoadingRef.current = false;
-    if (onError) onError(errorMessage);
+  const safeSetError = useCallback((errorMessage: string | null) => {
+    if (mountedRef.current) {
+      setError(errorMessage);
+      if (errorMessage && onError) onError(errorMessage);
+    }
   }, [onError]);
 
-// Add debug button to display in dev environment
-  const debugStructure = useCallback(() => {
-    if (!pluginRef.current) {
-      addLog("Plugin not initialized, cannot debug");
-      return;
+  const addLog = useCallback((message: string) => {
+    if (mountedRef.current) {
+      console.log(`[MolstarViewer] ${message}`);
+      setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
     }
+  }, []);
 
-    try {
-      // Try to log state of the viewer
-      const plugin = pluginRef.current;
-
-      addLog("------------- DEBUG INFO -------------");
-      addLog(`Plugin initialized: ${isInitializedRef.current}`);
-      addLog(`Loading ref: ${isLoadingRef.current}`);
-      addLog(`Loading state: ${isLoading}`);
-      addLog(`Canvas: ${!!canvasRef.current}`);
-      addLog(`Container: ${!!containerRef.current}`);
-
-      // Log state of plugin components
-      addLog(`Canvas3D: ${!!plugin.canvas3d}`);
-      addLog(`Plugin state: ${plugin.state.isAnimating ? 'Animating' : 'Static'}`);
-
-      if (plugin.canvas3d) {
-        // Get camera state
-        const cameraState = plugin.canvas3d.camera.state;
-        addLog(`Camera position: ${JSON.stringify(cameraState.position)}`);
-        addLog(`Camera target: ${JSON.stringify(cameraState.target)}`);
-      }
-
-      // Check if we have any structures
-      const structures = plugin.managers?.structure?.hierarchy?.current?.structures || [];
-      addLog(`Number of structures: ${structures.length}`);
-
-      if (structures.length > 0) {
-        addLog("Structure details:");
-        structures.forEach((s, i) => {
-          addLog(`Structure ${i+1}: ${s.obj?.data?.label || 'Unnamed'}`);
-          addLog(`- Atoms: ${s.obj?.data?.models?.[0]?.atomCount || 'unknown'}`);
-          addLog(`- Chains: ${s.obj?.data?.models?.[0]?.chains.length || 'unknown'}`);
-        });
-      }
-
-      // Try to manually reset camera
-      if (plugin.canvas3d) {
-        addLog("Attempting to reset camera");
-        plugin.canvas3d.resetCamera();
-        plugin.canvas3d.commit();
-      }
-
-      addLog("-----------------------------------");
-
-    } catch (error) {
-      addLog(`Debug error: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, [addLog, isInitializedRef, isLoadingRef, isLoading]);
-
-  // Debug timer - automatically run debug after 10 seconds if still loading
+  // Add inline CSS for Molstar
   useEffect(() => {
-    if (isLoading && isLoadingRef.current) {
-      const debugTimerId = setTimeout(() => {
-        // Only debug if we're still loading
-        if (isLoadingRef.current) {
-          addLog("Auto-running debug after 10 seconds of loading");
-          debugStructure();
-        }
-      }, 10000); // 10 second timeout
-
-      return () => clearTimeout(debugTimerId);
-    }
-  }, [isLoading, addLog, debugStructure]);  // Add a timeout for the loading process
-  useEffect(() => {
-    if (isLoading && isLoadingRef.current) {
-      // Set a timeout to prevent infinite loading
-      const timeoutId = setTimeout(() => {
-        // Only update if we're still loading
-        if (isLoadingRef.current) {
-          addLog("Loading timeout reached (20 seconds) - forcing reset");
-          setIsLoading(false);
-          isLoadingRef.current = false;
-          reportError("Structure loading timed out after 20 seconds. Try a different structure or check network connectivity.");
-        }
-      }, 20000); // 20 second timeout
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [isLoading, addLog, reportError]);
-
-
-
-  // Initialize CSS once
-  useEffect(() => {
-    // Add inline CSS for Molstar
     const cssId = 'molstar-inline-css';
     if (!document.getElementById(cssId)) {
       const style = document.createElement('style');
@@ -165,274 +91,301 @@ export function ImprovedMolstarViewer({
         }
       `;
       document.head.appendChild(style);
-    }
 
-    // Also try to load the external CSS for completeness
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = '/css/molstar.css';
-    document.head.appendChild(link);
+      // Also try to load external CSS
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/css/molstar.css';
+      document.head.appendChild(link);
+    }
   }, []);
 
-  // Step 1: Initialize the Molstar plugin - only once
-  useEffect(() => {
-    // Skip if already initialized or refs aren't ready
-    if (isInitializedRef.current || !canvasRef.current || !containerRef.current) {
+  // Debug function
+  const debugStructure = useCallback(() => {
+    if (!pluginRef.current) {
+      addLog("Cannot debug: Plugin not initialized");
       return;
     }
 
-    // Prevent concurrent initialization
-    if (isLoadingRef.current) return;
-    isLoadingRef.current = true;
+    try {
+      const plugin = pluginRef.current;
 
-    const initPlugin = async () => {
+      addLog("------------- DEBUG INFO -------------");
+      addLog(`Component status: ${status}`);
+      addLog(`Current PDB ID: ${pdbIdRef.current}`);
+      addLog(`Current chain ID: ${chainIdRef.current || 'none'}`);
+      addLog(`Canvas ref exists: ${!!canvasRef.current}`);
+      addLog(`Container ref exists: ${!!containerRef.current}`);
+
+      // Plugin state
+      addLog(`Canvas3D exists: ${!!plugin.canvas3d}`);
+      addLog(`Plugin state: ${plugin.state.isAnimating ? 'Animating' : 'Static'}`);
+
+      if (plugin.canvas3d) {
+        const cameraState = plugin.canvas3d.camera.state;
+        addLog(`Camera position: ${JSON.stringify(cameraState.position)}`);
+        addLog(`Camera target: ${JSON.stringify(cameraState.target)}`);
+      }
+
+      // Structure info
+      const structures = plugin.managers?.structure?.hierarchy?.current?.structures || [];
+      addLog(`Number of structures: ${structures.length}`);
+
+      if (structures.length > 0) {
+        structures.forEach((s, i) => {
+          addLog(`Structure ${i+1}: ${s.obj?.data?.label || 'Unnamed'}`);
+          addLog(`- Atoms: ${s.obj?.data?.models?.[0]?.atomCount || 'unknown'}`);
+          addLog(`- Chains: ${s.obj?.data?.models?.[0]?.chains.length || 'unknown'}`);
+        });
+      }
+
+      addLog("-----------------------------------");
+    } catch (error) {
+      addLog(`Debug error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [addLog, status]);
+
+  // Initialization and loading logic in a single effect
+  useEffect(() => {
+    // Skip if refs aren't ready
+    if (!canvasRef.current || !containerRef.current) {
+      return;
+    }
+
+    // Reset mounted ref
+    mountedRef.current = true;
+
+    let timeoutId: NodeJS.Timeout | null = null;
+    let debugTimeoutId: NodeJS.Timeout | null = null;
+
+    // Main function to initialize plugin and load structure
+    const initAndLoad = async () => {
       try {
+        // Start initialization
+        safeSetStatus('initializing');
+        addLog("Initializing Molstar plugin");
+
         // Import Molstar libraries
         const { DefaultPluginSpec } = await import('molstar/lib/mol-plugin/spec');
         const { PluginContext } = await import('molstar/lib/mol-plugin/context');
 
-        // Create plugin instance
+        // Create and initialize plugin
         const plugin = new PluginContext(DefaultPluginSpec());
         await plugin.init();
-
-        // Store reference
         pluginRef.current = plugin;
 
         // Initialize viewer
+        addLog("Initializing viewer canvas");
         const viewerInitialized = plugin.initViewer(canvasRef.current, containerRef.current);
 
         if (!viewerInitialized) {
           throw new Error('Failed to initialize Molstar viewer');
         }
 
-        // Set background color
+        // Set background color (white)
         plugin.canvas3d?.setProps({
           backgroundColor: { color: 0xFFFFFF }
         });
 
-        // Mark as initialized
-        isInitializedRef.current = true;
+        addLog("Plugin initialization complete, preparing to load structure");
 
-        // Load structure now that plugin is initialized
-        loadStructure();
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        reportError(`Initialization error: ${errorMessage}`);
-      }
-    };
+        // Load structure
+        safeSetStatus('loading');
+        addLog(`Loading structure for PDB ID: ${pdbIdRef.current}`);
 
-    addLog("Initializing Molstar plugin");
-    initPlugin();
-
-    // Cleanup function
-    return () => {
-      if (pluginRef.current) {
-        try {
-          pluginRef.current.dispose();
-        } catch (e) {
-          console.error('Error disposing plugin:', e);
-        }
-        pluginRef.current = null;
-        isInitializedRef.current = false;
-      }
-    };
-  }, [addLog, reportError]);
-
-  // Step 2: Load the PDB structure - separate function to avoid infinite loops
-  const loadStructure = useCallback(async () => {
-    // Skip if plugin isn't initialized
-    if (!isInitializedRef.current || !pluginRef.current) {
-      addLog("Plugin not initialized yet, cannot load structure");
-      return;
-    }
-
-    // Prevent concurrent loading
-    if (isLoadingRef.current) {
-      addLog("Already loading, skipping duplicate request");
-      return;
-    }
-
-    isLoadingRef.current = true;
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const plugin = pluginRef.current;
-
-      addLog(`Loading structure for PDB ID: ${pdbId}`);
-
-      // Use the local API route which handles repository access
-      const url = `/api/pdb/${pdbId.toLowerCase()}`;
-      addLog(`Fetching from API: ${url}`);
-
-      // Try to detect format with HEAD request
-      let formatName = 'mmcif'; // Default format
-      try {
-        addLog("Making HEAD request to determine format");
-        const headResponse = await fetch(url, { method: 'HEAD' });
-        if (headResponse.ok) {
-          const format = headResponse.headers.get('X-PDB-Format');
-          if (format === 'pdb' || format === 'mmcif') {
-            formatName = format;
-            addLog(`Detected format from API: ${format}`);
-          } else {
-            addLog(`No format detected from header, using default: ${formatName}`);
+        // Add loading timeout
+        timeoutId = setTimeout(() => {
+          if (mountedRef.current && status === 'loading') {
+            addLog("Loading timeout reached (20 seconds)");
+            safeSetStatus('error');
+            safeSetError("Loading timed out after 20 seconds. The structure may be too large or not available.");
           }
-        } else {
-          addLog(`HEAD request failed with status: ${headResponse.status}, using default format`);
+        }, 20000);
+
+        // Add debug timeout (runs after 10 seconds of loading)
+        debugTimeoutId = setTimeout(() => {
+          if (mountedRef.current && status === 'loading') {
+            addLog("Auto-debug after 10 seconds of loading");
+            debugStructure();
+          }
+        }, 10000);
+
+        // Use API to load structure
+        const url = `/api/pdb/${pdbIdRef.current.toLowerCase()}`;
+        addLog(`Fetching from API: ${url}`);
+
+        // Try HEAD request for format detection
+        let formatName = 'mmcif'; // Default format
+        try {
+          const headResponse = await fetch(url, { method: 'HEAD' });
+          if (headResponse.ok) {
+            const format = headResponse.headers.get('X-PDB-Format');
+            if (format === 'pdb' || format === 'mmcif') {
+              formatName = format;
+              addLog(`Format from header: ${format}`);
+            }
+          }
+        } catch (headError) {
+          addLog(`HEAD request failed: ${headError instanceof Error ? headError.message : String(headError)}`);
         }
-      } catch (headError) {
-        addLog(`HEAD request failed with error: ${headError instanceof Error ? headError.message : String(headError)}`);
-        addLog(`Using default format: ${formatName}`);
-      }
 
-      // Fetch the actual structure
-      addLog("Fetching structure data");
-      const response = await fetch(url);
+        // Main data fetch
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch structure: ${response.status} ${response.statusText}`);
+        }
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch structure: ${response.status} ${response.statusText}`);
-      }
+        // Log response info
+        addLog(`Response status: ${response.status}`);
+        addLog(`Content type: ${response.headers.get('Content-Type') || 'not specified'}`);
 
-      // Check content type header
-      const contentType = response.headers.get('Content-Type');
-      addLog(`Response content type: ${contentType || 'unknown'}`);
+        // Get data
+        const buffer = await response.arrayBuffer();
+        if (!buffer || buffer.byteLength === 0) {
+          throw new Error('Empty response received from API');
+        }
 
-      // Get the data as ArrayBuffer
-      const buffer = await response.arrayBuffer();
+        addLog(`Downloaded ${buffer.byteLength} bytes`);
 
-      if (!buffer || buffer.byteLength === 0) {
-        throw new Error('Empty response received from API');
-      }
+        // Inspect first bytes to help determine format
+        const dataView = new DataView(buffer);
+        let firstBytes = '';
+        const bytesToShow = Math.min(20, buffer.byteLength);
+        for (let i = 0; i < bytesToShow; i++) {
+          firstBytes += String.fromCharCode(dataView.getUint8(i));
+        }
+        addLog(`First bytes: ${firstBytes}`);
 
-      if (buffer.byteLength < 100) {
-        addLog(`Warning: Data is very small (${buffer.byteLength} bytes), might not be a valid structure`);
-      }
+        // Adjust format based on content inspection
+        if (firstBytes.includes('HEADER') || firstBytes.includes('ATOM')) {
+          formatName = 'pdb';
+          addLog('Content appears to be PDB format');
+        } else if (firstBytes.includes('data_') || firstBytes.includes('loop_')) {
+          formatName = 'mmcif';
+          addLog('Content appears to be mmCIF format');
+        }
 
-      addLog(`Downloaded data: ${buffer.byteLength} bytes`);
-
-      // Debug the first few bytes to see what kind of data we're getting
-      const dataView = new DataView(buffer);
-      let firstBytes = '';
-      const bytesToShow = Math.min(20, buffer.byteLength);
-      for (let i = 0; i < bytesToShow; i++) {
-        firstBytes += String.fromCharCode(dataView.getUint8(i));
-      }
-      addLog(`First ${bytesToShow} bytes: ${firstBytes}`);
-
-      // Adjust format based on content if needed
-      if (firstBytes.includes('HEADER') || firstBytes.includes('ATOM')) {
-        addLog('Data appears to be in PDB format based on content');
-        formatName = 'pdb';
-      } else if (firstBytes.includes('data_') || firstBytes.includes('loop_')) {
-        addLog('Data appears to be in mmCIF format based on content');
-        formatName = 'mmcif';
-      }
-
-      // Create data object for Molstar
-      addLog(`Creating data object for Molstar`);
-      const data = await plugin.builders.data.rawData({
-        data: new Uint8Array(buffer),
-        label: `${pdbId}.${formatName === 'mmcif' ? 'cif' : 'pdb'}`
-      });
-
-      // Try primary format with detailed error logging
-      addLog(`Parsing trajectory as ${formatName}`);
-      try {
-        // Parse trajectory with primary format
-        const trajectory = await plugin.builders.structure.parseTrajectory(data, formatName);
-        addLog(`${formatName.toUpperCase()} trajectory parsed successfully`);
-
-        // Apply representation
-        addLog('Applying cartoon representation');
-        await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
-          id: 'preset-structure-representation-cartoon',
-          params: {}
+        // Create data object
+        const data = await plugin.builders.data.rawData({
+          data: new Uint8Array(buffer),
+          label: `${pdbIdRef.current}.${formatName === 'mmcif' ? 'cif' : 'pdb'}`
         });
 
-        // Handle chain selection
-        if (chainId) {
-          try {
-            addLog(`Focusing on chain ${chainId}`);
-            plugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
-            plugin.managers.camera.focusSelection();
-            addLog(`Focused on chain ${chainId}`);
-          } catch (chainErr) {
-            addLog(`Could not focus on chain ${chainId}: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}`);
-            plugin.canvas3d?.resetCamera();
-          }
-        } else {
-          addLog('Resetting camera to show full structure');
-          plugin.canvas3d?.resetCamera();
-        }
-      } catch (primaryError) {
-        // Log detailed error
-        addLog(`${formatName} parsing failed with error: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`);
-        if (primaryError instanceof Error && primaryError.stack) {
-          addLog(`Error stack: ${primaryError.stack}`);
-        }
-
-        // Try fallback format if primary format fails
-        const fallbackFormat = formatName === 'mmcif' ? 'pdb' : 'mmcif';
-        addLog(`Trying fallback format: ${fallbackFormat}`);
+        // Try to parse with detected format
+        let success = false;
 
         try {
-          const trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat);
-          addLog(`${fallbackFormat.toUpperCase()} trajectory parsed successfully with fallback`);
+          addLog(`Parsing as ${formatName}`);
+          const trajectory = await plugin.builders.structure.parseTrajectory(data, formatName);
+          addLog('Trajectory parsed successfully');
 
-          // Apply representation
           await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
             id: 'preset-structure-representation-cartoon',
             params: {}
           });
 
-          // Reset camera
-          plugin.canvas3d?.resetCamera();
-        } catch (fallbackError) {
-          addLog(`Fallback ${fallbackFormat} parsing also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
-          throw new Error(`Failed to parse structure in both ${formatName} and ${fallbackFormat} formats. Original error: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`);
+          // Handle chain selection if specified
+          if (chainIdRef.current) {
+            try {
+              addLog(`Selecting chain: ${chainIdRef.current}`);
+              plugin.managers.structure.selection.fromSelectionString(`chain ${chainIdRef.current}`);
+              plugin.managers.camera.focusSelection();
+            } catch (chainErr) {
+              addLog(`Chain selection failed: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}`);
+              plugin.canvas3d?.resetCamera();
+            }
+          } else {
+            plugin.canvas3d?.resetCamera();
+          }
+
+          success = true;
+        } catch (primaryError) {
+          // Primary format failed, try fallback
+          addLog(`Primary format (${formatName}) failed: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`);
+
+          const fallbackFormat = formatName === 'mmcif' ? 'pdb' : 'mmcif';
+          addLog(`Trying fallback format: ${fallbackFormat}`);
+
+          try {
+            const trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat);
+            addLog('Fallback parsing successful');
+
+            await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
+              id: 'preset-structure-representation-cartoon',
+              params: {}
+            });
+
+            plugin.canvas3d?.resetCamera();
+            success = true;
+          } catch (fallbackError) {
+            addLog(`Fallback format also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+            throw new Error(`Failed to parse structure. Tried both ${formatName} and ${fallbackFormat} formats.`);
+          }
+        }
+
+        // If we got here without an error, the structure loaded successfully
+        if (success) {
+          addLog("Structure loaded successfully");
+          safeSetStatus('ready');
+          safeSetError(null);
+
+          if (onReady && mountedRef.current) {
+            onReady(plugin);
+          }
+        }
+      } catch (error) {
+        // Handle any errors
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        addLog(`Error: ${errorMessage}`);
+
+        if (mountedRef.current) {
+          safeSetStatus('error');
+          safeSetError(errorMessage);
         }
       }
+    };
 
-      // Structure loaded successfully
-      addLog("Structure loaded successfully");
-      setIsLoading(false);
-      isLoadingRef.current = false;
-      if (onReady) onReady(plugin);
-    } catch (error) {
-      // Handle any errors during loading
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      addLog(`Loading error: ${errorMessage}`);
-      if (error instanceof Error && error.stack) {
-        addLog(`Error stack: ${error.stack}`);
+    // Start the initialization process
+    initAndLoad();
+
+    // Cleanup on unmount
+    return () => {
+      mountedRef.current = false;
+
+      // Clear any pending timeouts
+      if (timeoutId) clearTimeout(timeoutId);
+      if (debugTimeoutId) clearTimeout(debugTimeoutId);
+
+      // Dispose plugin if it exists
+      if (pluginRef.current) {
+        try {
+          pluginRef.current.dispose();
+          pluginRef.current = null;
+        } catch (error) {
+          console.error('Error disposing Molstar plugin:', error);
+        }
       }
-      reportError(errorMessage);
-    }
-  }, [pdbId, chainId, addLog, reportError, onReady]);
+    };
+  }, [pdbId, chainId, addLog, safeSetStatus, safeSetError, debugStructure, onReady, status]);
 
-  // Step 3: Load structure when PDB ID changes
-  useEffect(() => {
-    // Only try to load if plugin is initialized and we're not already loading
-    if (isInitializedRef.current && !isLoadingRef.current) {
-      loadStructure();
-    }
-  }, [pdbId, chainId, loadStructure]);
-
+  // Component rendering
   return (
     <div className="relative" style={{ width, height }}>
-      {isLoading && (
+      {/* Loading spinner */}
+      {(status === 'initializing' || status === 'loading') && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50 bg-opacity-70 z-10">
           <div className="flex items-center">
             <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span>Loading structure...</span>
+            <span>{status === 'initializing' ? 'Initializing viewer...' : 'Loading structure...'}</span>
           </div>
         </div>
       )}
 
-      {error && (
+      {/* Error message */}
+      {status === 'error' && error && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50 z-10">
           <div className="text-red-500 bg-white p-4 rounded shadow max-w-md">
             <p className="font-bold mb-2">Error:</p>
@@ -449,6 +402,7 @@ export function ImprovedMolstarViewer({
         </div>
       )}
 
+      {/* Canvas container */}
       <div
         ref={containerRef}
         className="w-full h-full"

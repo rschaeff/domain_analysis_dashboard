@@ -109,48 +109,80 @@ const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
         // Load structure from PDB
         $3Dmol.download(`pdb:${pdbId}`, viewer, {}, function(model) {
           try {
+            if (!model) {
+              throw new Error('Failed to load model');
+            }
+
             // Set base style for all atoms
             viewer.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });
 
             // Focus on specific chain if requested
             if (chainId) {
-              viewer.setStyle({chain: chainId}, { cartoon: { color: 'gray', opacity: 0.8 } });
-            }
+              viewer.setStyle({chain: chainId}, {
+                cartoon: {
+                  color: 'gray',
+                  opacity: 0.8
+                }
+              });
 
-            // Add domain representations
+                          // Add domain representations
             if (domains.length > 0) {
               domains.forEach(domain => {
-                viewer.setStyle({
-                  chain: domain.chainId,
-                  resi: { gte: domain.start, lte: domain.end }
-                }, {
-                  cartoon: {
-                    color: domain.color,
-                    opacity: 1.0
+                try {
+                  // Check that the domain range is valid
+                  if (domain.start > domain.end) {
+                    console.log(`Invalid domain range: ${domain.start}-${domain.end}`);
+                    return;
                   }
-                });
 
-                // Add label if present and controls are shown
-                if (showControls && domain.label) {
-                  // Get the center of the domain
-                  const midPoint = Math.floor((domain.start + domain.end) / 2);
-
-                  // Find a representative atom for the label
-                  const atoms = viewer.getModel().selectedAtoms({
+                  // Create a safe selection object for this domain
+                  const selection = {
                     chain: domain.chainId,
-                    resi: midPoint
+                    resi: domain.start.toString() + "-" + domain.end.toString()
+                  };
+
+                  // Set the style for this domain (using string range format instead of gte/lte object)
+                  viewer.setStyle(selection, {
+                    cartoon: {
+                      color: domain.color,
+                      opacity: 1.0
+                    }
                   });
 
-                  if (atoms.length > 0) {
-                    const atom = atoms[0];
-                    viewer.addLabel(domain.label, {
-                      position: { x: atom.x, y: atom.y, z: atom.z },
-                      backgroundColor: domain.color,
-                      fontColor: "#ffffff",
-                      fontSize: 12,
-                      alignment: "center"
-                    });
+                  // Add label if present and controls are shown
+                  if (showControls && domain.label) {
+                    // Try to find the center residue of the domain for label placement
+                    const midPoint = Math.floor((domain.start + domain.end) / 2);
+
+                    // Wait to ensure the model is fully loaded
+                    setTimeout(() => {
+                      try {
+                        // Safely access the model (check it exists)
+                        const model = viewer.getModel();
+                        if (!model) {
+                          console.log('Model not available for labeling');
+                          return;
+                        }
+
+                        // Try adding a label at the centroid of the domain
+                        // Rather than selecting a specific atom, add the label at domain center
+                        viewer.addLabel(domain.label, {
+                          position: "centered",
+                          backgroundColor: domain.color,
+                          fontColor: "#ffffff",
+                          fontSize: 12,
+                          alignment: "center",
+                          inFront: true,
+                          // Use the selection to determine label position
+                          sel: selection
+                        });
+                      } catch (labelError) {
+                        console.log('Label creation error:', labelError);
+                      }
+                    }, 100); // Short delay to ensure model is processed
                   }
+                } catch (domainError) {
+                  console.log(`Error applying domain ${domain.id}:`, domainError);
                 }
               });
             }

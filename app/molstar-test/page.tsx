@@ -53,6 +53,41 @@ export default function MolstarTestPage() {
     if (!pluginRef.current) return
     pluginRef.current.canvas3d?.resetCamera()
   }
+
+  // Add state for format selection
+const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>('auto')
+
+// In the controls section, add:
+<div className="mb-4">
+  <div className="text-sm font-medium mb-2">File Format</div>
+  <select
+    value={fileFormat}
+    onChange={(e) => setFileFormat(e.target.value as any)}
+    className="w-full px-3 py-2 border rounded"
+    disabled={useLocalRepository} // Disable when using local repo (will auto-detect)
+  >
+    <option value="auto">Auto-detect</option>
+    <option value="mmcif">mmCIF (.cif)</option>
+    <option value="pdb">Legacy PDB (.pdb/.ent)</option>
+    <option value="mmtf">MMTF (binary)</option>
+  </select>
+  {useLocalRepository && (
+    <p className="text-xs text-gray-500 mt-1">
+      Format auto-detected when using local repository
+    </p>
+  )}
+</div>
+
+// In the CanvasMolstarViewer component:
+<CanvasMolstarViewer
+  pdbId={pdbId}
+  chainId={chainId}
+  height="100%"
+  onReady={handleViewerReady}
+  onError={handleViewerError}
+  useLocalRepository={useLocalRepository}
+  format={fileFormat}
+/>
   
   // Highlight domain
   const handleHighlightDomain = async () => {
@@ -177,6 +212,8 @@ export default function MolstarTestPage() {
                 height="100%"
                 onReady={handleViewerReady}
                 onError={handleViewerError}
+                useLocalRepository={useLocalRepository}
+                format={fileFormat}
               />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
@@ -218,7 +255,25 @@ export default function MolstarTestPage() {
                 <div className="mt-2 text-sm text-red-500">{viewerError}</div>
               )}
             </div>
-            
+              <div className="mb-4">
+                  <div className="text-sm font-medium mb-2">File Format</div>
+                  <select
+                    value={fileFormat}
+                    onChange={(e) => setFileFormat(e.target.value as any)}
+                    className="w-full px-3 py-2 border rounded"
+                    disabled={useLocalRepository} // Disable when using local repo (will auto-detect)
+                  >
+                    <option value="auto">Auto-detect</option>
+                    <option value="mmcif">mmCIF (.cif)</option>
+                    <option value="pdb">Legacy PDB (.pdb/.ent)</option>
+                    <option value="mmtf">MMTF (binary)</option>
+                  </select>
+                  {useLocalRepository && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Format auto-detected when using local repository
+                    </p>
+                  )}
+              </div>
             {/* Representation Controls */}
             <div className="mb-4">
               <h3 className="text-sm font-medium mb-2">Representation</h3>

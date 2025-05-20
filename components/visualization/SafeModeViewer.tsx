@@ -1,4 +1,30 @@
-'use client'
+// Debug function to show structure info
+  const showStructureInfo = useCallback((plugin: any) => {
+    try {
+      if (!plugin.managers?.structure?.hierarchy?.current?.structures) {
+        log('No structures available');
+        return;
+      }
+
+      const structures = plugin.managers.structure.hierarchy.current.structures;
+      log(`Structure count: ${structures.length}`);
+
+      structures.forEach((struct: any, i: number) => {
+        const label = struct.cell?.obj?.label || 'Unnamed';
+        const atoms = struct.cell?.obj?.data?.model?.atomCount || 0;
+        log(`Structure ${i+1}: ${label} (${atoms} atoms)`);
+
+        if (struct.components?.length) {
+          log(`  Components: ${struct.components.length}`);
+          struct.components.forEach((comp: any, j: number) => {
+            log(`  - Component ${j+1}: ${comp.cell?.obj?.label || 'Unnamed'}`);
+          });
+        }
+      });
+    } catch (error) {
+      log(`Error in structure info: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [log]);'use client'
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { getValidFormatName, detectFormatFromContent, getFileExtension } from './formats';
@@ -173,7 +199,7 @@ export function SafeModeViewer({
         let trajectory;
         try {
           log(`Explicitly using format: "${dataFormat}"`);
-          trajectory = await plugin.builders.structure.parseTrajectory(data, dataFormat, { label });
+          trajectory = await plugin.builders.structure.parseTrajectory(data, dataFormat);
           log(`${dataFormat.toUpperCase()} format parsed successfully`);
         } catch (parseError) {
           log(`Error parsing as ${dataFormat}: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
@@ -182,7 +208,7 @@ export function SafeModeViewer({
           const fallbackFormat = dataFormat === 'mmcif' ? 'pdb' : 'mmcif';
           log(`Trying alternative format: "${fallbackFormat}"`);
 
-          trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat, { label });
+          trajectory = await plugin.builders.structure.parseTrajectory(data, fallbackFormat);
           log(`${fallbackFormat.toUpperCase()} format parsed successfully`);
         }
 
@@ -289,34 +315,6 @@ export function SafeModeViewer({
       log(`Error adding CSS: ${cssError instanceof Error ? cssError.message : String(cssError)}`);
     }
   }, []);
-
-    // Debug function to show structure info
-      const showStructureInfo = useCallback((plugin: any) => {
-        try {
-          if (!plugin.managers?.structure?.hierarchy?.current?.structures) {
-            log('No structures available');
-            return;
-          }
-
-          const structures = plugin.managers.structure.hierarchy.current.structures;
-          log(`Structure count: ${structures.length}`);
-
-          structures.forEach((struct: any, i: number) => {
-            const label = struct.cell?.obj?.label || 'Unnamed';
-            const atoms = struct.cell?.obj?.data?.model?.atomCount || 0;
-            log(`Structure ${i+1}: ${label} (${atoms} atoms)`);
-
-            if (struct.components?.length) {
-              log(`  Components: ${struct.components.length}`);
-              struct.components.forEach((comp: any, j: number) => {
-                log(`  - Component ${j+1}: ${comp.cell?.obj?.label || 'Unnamed'}`);
-              });
-            }
-          });
-        } catch (error) {
-          log(`Error in structure info: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }, [log]);
 
   // Cleanup effect
   useEffect(() => {

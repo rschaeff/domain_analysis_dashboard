@@ -3,7 +3,7 @@
 
 'use client'
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { DomainFilters } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -286,7 +286,7 @@ export function FilterPanel({
               placeholder="Select X-Groups..."
               value={filters.x_group || []}
               onChange={(value) => updateFilterWithHierarchy('x_group', value.length > 0 ? value : undefined)}
-              options={xGroups.map(group => ({ value: group, label: `X-Group ${group}` }))}
+              options={availableGroups.x_groups.map(group => ({ value: group, label: `X-Group ${group}` }))}
               search
             />
           </div>

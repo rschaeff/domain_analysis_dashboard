@@ -62,11 +62,13 @@ export default function DashboardPage() {
         size: '50'
       })
 
-      // Add filters to URL params
+      // Add filters to URL params with debugging
       Object.entries(filtersToUse).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') {
           if (Array.isArray(value) && value.length > 0) {
-            params.set(key === 't_group' ? 't_groups' : key === 'h_group' ? 'h_groups' : key, value.join(','))
+            // Map frontend filter names to API parameter names
+            const paramKey = key === 't_group' ? 't_groups' : key === 'h_group' ? 'h_groups' : key
+            params.set(paramKey, value.join(','))
           } else if (!Array.isArray(value)) {
             params.set(key, value.toString())
           }
@@ -232,12 +234,25 @@ export default function DashboardPage() {
     {
       key: 't_group',
       label: 'T-Group',
-      render: (value: string | null) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${
-          value ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'
-        }`}>
+      render: (value: string | null, domain: DomainSummary) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation() // Prevent row click
+            if (value) {
+              // Set filter to this T-group
+              handleFiltersChange({ ...filters, t_group: [value] })
+            }
+          }}
+          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+            value
+              ? 'bg-blue-500 text-white hover:bg-blue-600 cursor-pointer'
+              : 'bg-gray-100 text-gray-500 cursor-default'
+          }`}
+          disabled={!value}
+          title={value ? `Filter by T-group ${value}` : undefined}
+        >
           {value || 'Unclassified'}
-        </span>
+        </button>
       )
     },
     {

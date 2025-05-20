@@ -288,17 +288,17 @@ export default function DashboardPage() {
     {
       key: 'x_group',
       label: 'X-Group',
-      render: (value: string | null) => renderClassificationBadge(value, 'x_group', 'X-group')
+      render: (value: string | null) => renderClassificationBadge(value, 'x_group', 'X-group (Possible Homology)')
     },
     {
       key: 'h_group',
       label: 'H-Group',
-      render: (value: string | null) => renderClassificationBadge(value, 'h_group', 'H-group')
+      render: (value: string | null) => renderClassificationBadge(value, 'h_group', 'H-group (Homology)')
     },
     {
       key: 't_group',
       label: 'T-Group',
-      render: (value: string | null) => renderClassificationBadge(value, 't_group', 'T-group')
+      render: (value: string | null) => renderClassificationBadge(value, 't_group', 'T-group (Topology)')
     },
     {
       key: 'evidence_count',

@@ -437,8 +437,8 @@ export function FilterPanel({
               type="x_group"
               value={filters.x_group || []}
               onChange={(value) => updateFilter('x_group', value.length > 0 ? value : undefined)}
-              placeholder="Search X-Groups (Architecture)..."
-              label="X-Groups (Architecture)"
+              placeholder="Search X-Groups (Possible Homology)..."
+              label="X-Groups (Possible Homology)"
             />
 
             <ClassificationAutocomplete
@@ -461,8 +461,8 @@ export function FilterPanel({
               type="a_group"
               value={filters.a_group || []}
               onChange={(value) => updateFilter('a_group', value.length > 0 ? value : undefined)}
-              placeholder="Search A-Groups (Fold)..."
-              label="A-Groups (Fold)"
+              placeholder="Search A-Groups (Architecture)..."
+              label="A-Groups (Architecture)"
             />
           </div>
         </div>

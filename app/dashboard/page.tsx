@@ -154,6 +154,51 @@ export default function DashboardPage() {
     }
   }
 
+  // Enhanced classification badge renderer
+  const renderClassificationBadge = (
+    value: string | null,
+    filterKey: 'h_group' | 'x_group' | 'a_group' | 't_group',
+    label: string
+  ) => {
+    const currentFilters = (filters[filterKey] as string[]) || []
+    const isCurrentlyFiltered = currentFilters.includes(value || '')
+
+    return (
+      <button
+        onClick={(e) => {
+          e.stopPropagation() // Prevent row click
+          if (value) {
+            // Toggle the classification in the filter
+            const newFilters = isCurrentlyFiltered
+              ? currentFilters.filter(item => item !== value) // Remove if already selected
+              : [...currentFilters, value] // Add if not selected
+
+            handleFiltersChange({
+              ...filters,
+              [filterKey]: newFilters.length > 0 ? newFilters : undefined
+            })
+          }
+        }}
+        className={`px-2 py-1 rounded text-xs font-medium transition-all duration-200 ${
+          value
+            ? isCurrentlyFiltered
+              ? 'bg-green-500 text-white hover:bg-green-600 ring-2 ring-green-300 cursor-pointer'
+              : 'bg-blue-500 text-white hover:bg-blue-600 hover:scale-105 cursor-pointer'
+            : 'bg-gray-100 text-gray-500 cursor-default'
+        }`}
+        disabled={!value}
+        title={value ? (
+          isCurrentlyFiltered
+            ? `Click to remove ${label} ${value} from filter`
+            : `Click to add ${label} ${value} to filter`
+        ) : undefined}
+      >
+        {value || 'Unclassified'}
+        {isCurrentlyFiltered && <span className="ml-1">✓</span>}
+      </button>
+    )
+  }
+
   // Enhanced export functionality
   const handleExport = async () => {
     try {
@@ -190,6 +235,15 @@ export default function DashboardPage() {
       console.error('Export failed:', error)
     }
   }
+
+  // Calculate active filter count
+  const activeFilterCount = Object.keys(filters).filter(key => {
+    const value = filters[key as keyof DomainFilters]
+    if (Array.isArray(value)) {
+      return value.length > 0
+    }
+    return value !== undefined && value !== null && value !== ''
+  }).length
 
   // Table columns configuration
   const columns = [
@@ -244,44 +298,7 @@ export default function DashboardPage() {
     {
       key: 't_group',
       label: 'T-Group',
-      render: (value: string | null, domain: DomainSummary) => {
-        const isCurrentlyFiltered = filters.t_group?.includes(value || '') || false
-        return (
-          <button
-            onClick={(e) => {
-              e.stopPropagation() // Prevent row click
-              if (value) {
-                // Add to existing T-group filters rather than replacing
-                const currentTGroups = filters.t_group || []
-                const newTGroups = currentTGroups.includes(value)
-                  ? currentTGroups.filter(t => t !== value) // Remove if already selected
-                  : [...currentTGroups, value] // Add if not selected
-
-                handleFiltersChange({
-                  ...filters,
-                  t_group: newTGroups.length > 0 ? newTGroups : undefined
-                })
-              }
-            }}
-            className={`px-2 py-1 rounded text-xs font-medium transition-all duration-200 ${
-              value
-                ? isCurrentlyFiltered
-                  ? 'bg-green-500 text-white hover:bg-green-600 ring-2 ring-green-300 cursor-pointer'
-                  : 'bg-blue-500 text-white hover:bg-blue-600 hover:scale-105 cursor-pointer'
-                : 'bg-gray-100 text-gray-500 cursor-default'
-            }`}
-            disabled={!value}
-            title={value ? (
-              isCurrentlyFiltered
-                ? `Click to remove T-group ${value} from filter`
-                : `Click to add T-group ${value} to filter`
-            ) : undefined}
-          >
-            {value || 'Unclassified'}
-            {isCurrentlyFiltered && <span className="ml-1">✓</span>}
-          </button>
-        )
-      }
+      render: (value: string | null) => renderClassificationBadge(value, 't_group', 'T-group')
     },
     {
       key: 'evidence_count',
@@ -405,12 +422,19 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Enhanced Filters with Active Filter Count */}
-      <FilterPanel
-        filters={filters}
-        onFiltersChange={handleFiltersChange}
-        onReset={handleResetFilters}
-      />
+      {/* Enhanced Filters with Active Filter Count and Badge Hint */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg">
+        <FilterPanel
+          filters={filters}
+          onFiltersChange={handleFiltersChange}
+          onReset={handleResetFilters}
+        />
+        {activeFilterCount > 0 && (
+          <div className="px-6 pb-4 text-sm text-blue-700">
+            💡 <strong>Tip:</strong> Click on classification badges in the table below to quickly add or remove filters!
+          </div>
+        )}
+      </div>
 
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

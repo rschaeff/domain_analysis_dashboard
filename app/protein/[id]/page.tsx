@@ -334,16 +334,16 @@ export default function ProteinDetailPage() {
           )}
 
           {activeTab === 'structure' && (
-            <StructureViewer
-              pdb_id={protein.pdb_id}
-              chain_id={protein.chain_id}
-              domains={domains.map((domain, index) => ({
-                start: domain.start_pos,
-                end: domain.end_pos,
-                label: `Domain ${domain.domain_number}`,
-                color: `hsl(${index * 137.5 % 360}, 70%, 50%)`
-              }))}
-              onDomainClick={handleDomainClick}
+               <StructureViewer
+                pdb_id={protein.pdb_id}
+                chain_id={protein.chain_id}
+                domains={(protein.putative_domains || []).map((domain, index) => ({
+                  start: domain.start_pos,
+                  end: domain.end_pos,
+                  label: `Domain ${domain.domain_number || (index + 1)}`,
+                  color: `hsl(${index * 137.5 % 360}, 70%, 50%)`
+                }))}
+              //onDomainClick={handleDomainClick}
             />
           )}
         </div>

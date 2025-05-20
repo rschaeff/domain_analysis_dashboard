@@ -166,100 +166,110 @@ export function ImprovedMolstarViewer({
         const plugin = pluginRef.current;
         let success = false;
 
-        // Try mmCIF format first
+        // Try to load the structure using our API route
         try {
-          addLog("Attempting mmCIF format");
-          const url = `https://files.rcsb.org/download/${pdbId.toLowerCase()}.cif`;
+          addLog(`Loading structure for PDB ID: ${pdbId}`);
 
-          // Direct fetch with better error handling
+          // Use the local API route which handles repository access
+          const url = `/api/pdb/${pdbId.toLowerCase()}`;
+          addLog(`Fetching from API: ${url}`);
+
+          // First make a HEAD request to check format
+          const headResponse = await fetch(url, { method: 'HEAD' });
+          if (!headResponse.ok) {
+            throw new Error(`HEAD request failed: ${headResponse.status} ${headResponse.statusText}`);
+          }
+
+          // Get format from header if available
+          const format = headResponse.headers.get('X-PDB-Format');
+          addLog(`Detected format from API: ${format || 'unknown'}`);
+
+          // Now fetch the actual file
           const response = await fetch(url);
           if (!response.ok) {
-            throw new Error(`Failed to fetch mmCIF: ${response.status} ${response.statusText}`);
+            throw new Error(`Failed to fetch structure: ${response.status} ${response.statusText}`);
           }
 
           const buffer = await response.arrayBuffer();
           if (buffer.byteLength < 100) {
-            throw new Error(`mmCIF data is too small (${buffer.byteLength} bytes)`);
+            throw new Error(`Data is too small (${buffer.byteLength} bytes)`);
           }
 
-          addLog(`Downloaded mmCIF data: ${buffer.byteLength} bytes`);
+          addLog(`Downloaded data: ${buffer.byteLength} bytes`);
 
-          // Use the data loader with the validated buffer
+          // Use the detected format
+          const plugin = pluginRef.current;
           const data = await plugin.builders.data.rawData({ data: new Uint8Array(buffer) });
 
-          addLog("Parsing mmCIF data");
-          const trajectory = await plugin.builders.structure.parseTrajectory(data, 'mmcif');
-          addLog("mmCIF trajectory parsed successfully");
-
-          // Apply representation
-          await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
-            id: 'preset-structure-representation-cartoon',
-            params: {}
-          });
-
-          // Handle chain selection
-          if (chainId) {
-            try {
-              // Simplified chain selection
-              plugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
-              plugin.managers.camera.focusSelection();
-            } catch (chainErr) {
-              addLog(`Warning: Could not focus on chain ${chainId}`);
-              plugin.canvas3d?.resetCamera();
-            }
+          // Determine format to use for parsing
+          let formatName;
+          if (format === 'mmcif') {
+            formatName = 'mmcif';
+          } else if (format === 'pdb') {
+            formatName = 'pdb';
           } else {
-            plugin.canvas3d?.resetCamera();
+            // Try to detect from content if header wasn't helpful
+            // For simplicity we'll try mmCIF first, then PDB
+            formatName = 'mmcif';
           }
 
-          success = true;
-          addLog("mmCIF structure loaded successfully");
-        } catch (mmcifErr) {
-          const mmcifErrMsg = mmcifErr instanceof Error ? mmcifErr.message : String(mmcifErr);
-          addLog(`mmCIF format failed: ${mmcifErrMsg}`);
+          addLog(`Parsing trajectory as ${formatName}`);
+          try {
+            const trajectory = await plugin.builders.structure.parseTrajectory(data, formatName);
+            addLog(`${formatName.toUpperCase()} trajectory parsed successfully`);
 
-          // Only try PDB if mmCIF failed for specific reasons
-          if (mmcifErrMsg.includes('Failed to fetch') || mmcifErrMsg.includes('parse')) {
-            // Fall back to PDB format
-            try {
-              addLog("Falling back to PDB format");
-              const url = `https://files.rcsb.org/download/${pdbId.toLowerCase()}.pdb`;
+            // Apply representation
+            await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
+              id: 'preset-structure-representation-cartoon',
+              params: {}
+            });
 
-              const response = await fetch(url);
-              if (!response.ok) {
-                throw new Error(`Failed to fetch PDB: ${response.status} ${response.statusText}`);
+            // Handle chain selection
+            if (chainId) {
+              try {
+                // Simplified chain selection
+                plugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
+                plugin.managers.camera.focusSelection();
+              } catch (chainErr) {
+                addLog(`Warning: Could not focus on chain ${chainId}`);
+                plugin.canvas3d?.resetCamera();
               }
-
-              const buffer = await response.arrayBuffer();
-              if (buffer.byteLength < 100) {
-                throw new Error(`PDB data is too small (${buffer.byteLength} bytes)`);
-              }
-
-              addLog(`Downloaded PDB data: ${buffer.byteLength} bytes`);
-
-              const data = await plugin.builders.data.rawData({ data: new Uint8Array(buffer) });
-
-              addLog("Parsing PDB data");
-              const trajectory = await plugin.builders.structure.parseTrajectory(data, 'pdb');
-              addLog("PDB trajectory parsed successfully");
-
-              await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
-                id: 'preset-structure-representation-cartoon',
-                params: {}
-              });
-
+            } else {
               plugin.canvas3d?.resetCamera();
-              success = true;
-              addLog("PDB structure loaded successfully");
-            } catch (pdbErr) {
-              const pdbErrMsg = pdbErr instanceof Error ? pdbErr.message : String(pdbErr);
-              addLog(`PDB format failed: ${pdbErrMsg}`);
-              throw new Error(`Failed with both mmCIF and PDB formats. PDB error: ${pdbErrMsg}`);
             }
-          } else {
-            // Re-throw original error if it's not a fetch or parse issue
-            throw mmcifErr;
+
+            addLog("Structure loaded successfully");
+            setIsLoading(false);
+            isLoadingRef.current = false;
+            if (onReady) onReady(plugin);
+          } catch (parseError) {
+            addLog(`Error parsing as ${formatName}: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+
+            // If mmCIF parsing failed, try PDB format
+            if (formatName === 'mmcif') {
+              addLog('Falling back to PDB format');
+              try {
+                const trajectory = await plugin.builders.structure.parseTrajectory(data, 'pdb');
+                addLog('PDB trajectory parsed successfully');
+
+                await plugin.builders.structure.hierarchy.applyPreset(trajectory, {
+                  id: 'preset-structure-representation-cartoon',
+                  params: {}
+                });
+
+                plugin.canvas3d?.resetCamera();
+                addLog("Structure loaded successfully with PDB fallback");
+                setIsLoading(false);
+                isLoadingRef.current = false;
+                if (onReady) onReady(plugin);
+              } catch (pdbError) {
+                throw new Error(`Failed with both mmCIF and PDB formats: ${pdbError instanceof Error ? pdbError.message : String(pdbError)}`);
+              }
+            } else {
+              throw parseError;
+            }
           }
-        }
+        } catch (err) {
 
         setIsLoading(false);
         isLoadingRef.current = false;
@@ -281,13 +291,7 @@ export function ImprovedMolstarViewer({
     setLoadRequested(true);
   }, [isInitialized]);
 
-  // Expose the load trigger function
-  React.useImperativeHandle(
-    React.forwardRef((props, ref) => ref),
-    () => ({
-      loadStructure: triggerLoad
-    })
-  );
+  // No need for imperative handle, parent controls loading via props
 
   return (
     <div className="relative" style={{ width, height }}>

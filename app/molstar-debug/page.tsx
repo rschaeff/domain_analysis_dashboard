@@ -116,6 +116,13 @@ export default function MolstarDebugPage() {
             </div>
 
             <div className="mb-4">
+              <div className="text-sm font-medium mb-1">Source</div>
+              <div className="bg-gray-100 p-2 rounded text-sm">
+                Local PDB Repository API at /usr2/pdb/data/structures
+              </div>
+            </div>
+
+            <div className="mb-4">
               <div className="text-sm font-medium mb-1">Status</div>
               <div className={`p-2 rounded font-medium ${isLoaded ? 'bg-green-100 text-green-800' : error ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>
                 {isLoaded ? 'Loaded' : error ? 'Error' : 'Loading'}

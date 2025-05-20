@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { DomainFilters, DomainSummary, PaginationParams } from '@/lib/types'
 import { FilterPanel } from '@/components/filters/FilterPanel'
 import { DataTable } from '@/components/common/DataTable'
+// import { DataTable } from './MinimalDataTable' // Uncomment this line and comment the line above
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'

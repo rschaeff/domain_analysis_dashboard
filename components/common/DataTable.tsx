@@ -1,8 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
-import { Button } from '@/components/ui/Button'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown } from 'lucide-react'
+import React from 'react'
 import { PaginationParams } from '@/lib/types'
 
 interface Column<T = any> {
@@ -32,255 +30,88 @@ export function DataTable<T extends Record<string, any>>({
   loading = false,
   className = ''
 }: DataTableProps<T>) {
-  const [sortField, setSortField] = useState<string | null>(null)
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
-
-  // DEBUG: Log data received by DataTable
-  console.log('📊 DataTable received:', {
-    dataCount: data?.length,
-    firstItem: data?.[0],
-    columns: columns.map(c => c.key),
-    loading
-  })
-
-  // Handle sorting
-  const handleSort = (columnKey: string) => {
-    if (sortField === columnKey) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortField(columnKey)
-      setSortDirection('asc')
-    }
-  }
-
-  // Sort data if needed
-  const sortedData = React.useMemo(() => {
-    if (!sortField) return data
-
-    return [...data].sort((a, b) => {
-      const aValue = a[sortField]
-      const bValue = b[sortField]
-
-      if (aValue === null || aValue === undefined) return 1
-      if (bValue === null || bValue === undefined) return -1
-
-      let comparison = 0
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        comparison = aValue.localeCompare(bValue)
-      } else if (typeof aValue === 'number' && typeof bValue === 'number') {
-        comparison = aValue - bValue
-      } else {
-        comparison = String(aValue).localeCompare(String(bValue))
-      }
-
-      return sortDirection === 'asc' ? comparison : -comparison
-    })
-  }, [data, sortField, sortDirection])
-
-  // DEBUG: Log sorted data
-  console.log('📊 DataTable sorted data:', {
-    originalLength: data.length,
-    sortedLength: sortedData.length,
-    sortField,
-    sortDirection
-  })
-
-  // Pagination calculations
-  const currentPage = pagination?.page || 1
-  const pageSize = pagination?.size || 50
-  const totalItems = pagination?.total || data.length
-  const totalPages = Math.ceil(totalItems / pageSize)
-
-  const startItem = (currentPage - 1) * pageSize + 1
-  const endItem = Math.min(currentPage * pageSize, totalItems)
-
-  // Generate pagination range
-  const getPaginationRange = () => {
-    const range = []
-    const maxVisible = 5
-
-    if (totalPages <= maxVisible) {
-      for (let i = 1; i <= totalPages; i++) {
-        range.push(i)
-      }
-    } else {
-      const start = Math.max(1, currentPage - Math.floor(maxVisible / 2))
-      const end = Math.min(totalPages, start + maxVisible - 1)
-
-      for (let i = start; i <= end; i++) {
-        range.push(i)
-      }
-    }
-
-    return range
-  }
-
-  const pageRange = getPaginationRange()
+  console.log('🔍 Minimal DataTable - data received:', data.length, 'items')
+  console.log('🔍 First item:', data[0])
 
   if (loading) {
     return (
-      <div className="border rounded-lg">
-        <div className="p-8 text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-500">Loading...</p>
-        </div>
+      <div className="border rounded-lg p-8 text-center">
+        <div className="text-gray-500">Loading...</div>
       </div>
     )
   }
 
   return (
-    <div className={`border rounded-lg bg-white ${className}`}>
-      {/* Debug info at the top of table */}
-      <div className="p-2 bg-gray-100 border-b text-xs text-gray-600">
-        🐛 DataTable Debug: {data.length} items received, {sortedData.length} after sorting
-        {sortedData.length === 0 && data.length > 0 && (
-          <span className="text-red-600 ml-2">⚠️ Sorting issue detected!</span>
-        )}
+    <div className={`border-2 border-red-500 rounded-lg bg-white ${className}`}>
+      {/* Large debug header */}
+      <div className="p-4 bg-red-100 border-b-2 border-red-500">
+        <h3 className="text-lg font-bold text-red-800">
+          🔍 MINIMAL DATATABLE DEBUG - {data.length} items
+        </h3>
+        <p className="text-sm text-red-600">
+          First item PDB: {data[0]?.pdb_id}, Chain: {data[0]?.chain_id}
+        </p>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-full table-auto">
-          <thead className="bg-gray-50 border-b">
-            <tr>
-              {columns.map((column) => (
+      {/* Super simple table */}
+      <div className="p-4">
+        <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#f3f4f6' }}>
+              {columns.map((col) => (
                 <th
-                  key={column.key}
-                  className={`text-left px-6 py-4 text-sm font-medium text-gray-700 whitespace-nowrap ${
-                    column.width ? `w-[${column.width}]` : ''
-                  } ${column.sortable ? 'cursor-pointer hover:bg-gray-100' : ''}`}
-                  onClick={() => column.sortable && handleSort(column.key)}
+                  key={col.key}
+                  style={{
+                    padding: '12px',
+                    textAlign: 'left',
+                    border: '1px solid #d1d5db',
+                    fontWeight: 'bold'
+                  }}
                 >
-                  <div className="flex items-center gap-2">
-                    <span>{column.label}</span>
-                    {column.sortable && (
-                      <div className="flex flex-col">
-                        {sortField === column.key ? (
-                          sortDirection === 'asc' ? (
-                            <ChevronUp className="w-4 h-4" />
-                          ) : (
-                            <ChevronDown className="w-4 h-4" />
-                          )
-                        ) : (
-                          <div className="text-gray-400">
-                            <ChevronUp className="w-3 h-3 -mb-1" />
-                            <ChevronDown className="w-3 h-3" />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  {col.label}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
-            {sortedData.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length} className="px-6 py-8 text-center text-gray-500">
-                  No data available (Debug: received {data.length} items, sorted {sortedData.length} items)
-                </td>
-              </tr>
-            ) : (
-              sortedData.map((item, index) => {
-                // DEBUG: Log each item being rendered
-                if (index === 0) {
-                  console.log('📋 Rendering first table row:', item)
-                }
-                return (
-                  <tr
-                    key={item.id || index}
-                    className={`hover:bg-gray-50 ${onRowClick ? 'cursor-pointer' : ''}`}
-                    onClick={() => onRowClick?.(item)}
+          <tbody>
+            {data.slice(0, 5).map((item, index) => (
+              <tr
+                key={item.id || index}
+                style={{
+                  backgroundColor: index % 2 === 0 ? '#ffffff' : '#f9fafb',
+                  border: '1px solid #d1d5db'
+                }}
+                onClick={() => onRowClick?.(item)}
+              >
+                {columns.map((col) => (
+                  <td
+                    key={col.key}
+                    style={{
+                      padding: '12px',
+                      border: '1px solid #d1d5db'
+                    }}
                   >
-                    {columns.map((column) => {
-                      const value = item[column.key]
-                      const rendered = column.render
-                        ? column.render(value, item)
-                        : value || '-'
-
-                      // DEBUG: Log rendering issues
-                      if (index === 0 && column.key === 'pdb_id') {
-                        console.log(`📋 Rendering column ${column.key}:`, { value, rendered })
-                      }
-
-                      return (
-                        <td key={column.key} className="px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
-                          {rendered}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                )
-              })
-            )}
+                    {col.render
+                      ? col.render(item[col.key], item)
+                      : String(item[col.key] || '-')
+                    }
+                  </td>
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
 
-      {/* Pagination */}
-      {pagination && totalPages > 1 && (
-        <div className="flex items-center justify-between px-6 py-4 border-t bg-gray-50">
-          <div className="text-sm text-gray-700">
-            Showing {startItem.toLocaleString()} to {endItem.toLocaleString()} of{' '}
-            {totalItems.toLocaleString()} results
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* First page */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange?.(1)}
-              disabled={currentPage === 1}
-            >
-              <ChevronsLeft className="w-4 h-4" />
-            </Button>
-
-            {/* Previous page */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange?.(currentPage - 1)}
-              disabled={currentPage === 1}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-
-            {/* Page numbers */}
-            {pageRange.map((pageNum) => (
-              <Button
-                key={pageNum}
-                variant={pageNum === currentPage ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => onPageChange?.(pageNum)}
-              >
-                {pageNum}
-              </Button>
-            ))}
-
-            {/* Next page */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange?.(currentPage + 1)}
-              disabled={currentPage === totalPages}
-            >
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-
-            {/* Last page */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange?.(totalPages)}
-              disabled={currentPage === totalPages}
-            >
-              <ChevronsRight className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-      )}
+      {/* Show raw data for debugging */}
+      <div className="p-4 bg-gray-50 border-t">
+        <details>
+          <summary className="cursor-pointer font-medium">🔍 Show Raw Data (First Item)</summary>
+          <pre className="mt-2 text-xs bg-white p-2 border rounded overflow-auto">
+            {JSON.stringify(data[0], null, 2)}
+          </pre>
+        </details>
+      </div>
     </div>
   )
 }

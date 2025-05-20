@@ -120,14 +120,15 @@ export interface NightingaleViewerProps {
   }>
 }
 
+// Add or update this interface in your types.ts file
 export interface MolStarViewerProps {
-  pdb_id: string
-  chain_id: string
+  pdb_id: string;
+  chain_id?: string;
   domains?: Array<{
-    start: number
-    end: number
-    label: string
-    color: string
-  }>
-  onDomainClick?: (domain: any) => void
+    start: number;
+    end: number;
+    label?: string;
+    color?: string;
+  }>;
+  onDomainClick?: (domain: any) => void;
 }

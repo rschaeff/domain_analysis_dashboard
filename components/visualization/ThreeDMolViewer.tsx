@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 
 // Domain type definition
 export interface Domain {
@@ -34,7 +34,7 @@ interface ThreeDMolViewerProps {
   showControls?: boolean;
 }
 
-const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
+const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
   pdbId,
   chainId,
   domains = [],
@@ -47,7 +47,7 @@ const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
   onError,
   showLoading = true,
   showControls = false
-}) => {
+}, ref) => {
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
@@ -55,6 +55,25 @@ const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
   // State
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Expose the viewer methods via ref
+  useImperativeHandle(ref, () => ({
+    current: {
+      viewerRef: viewerRef,
+      reset: () => {
+        if (viewerRef.current) {
+          viewerRef.current.zoomTo();
+          viewerRef.current.render();
+        }
+      },
+      exportImage: () => {
+        if (viewerRef.current) {
+          return viewerRef.current.pngURI();
+        }
+        return null;
+      }
+    }
+  }));
 
   // Safe error handler
   const handleError = (message: string) => {
@@ -344,6 +363,8 @@ const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
       )}
     </div>
   );
-};
+});
+
+ThreeDMolViewer.displayName = 'ThreeDMolViewer';
 
 export default ThreeDMolViewer;

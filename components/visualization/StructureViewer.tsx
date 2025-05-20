@@ -1,12 +1,17 @@
 'use client'
 
 import React, { useState, useRef } from 'react'
-import { CanvasMolstarViewer } from '@/components/visualization/CanvasMolstarViewer'
+import dynamic from 'next/dynamic'
 import { MolStarViewerProps } from '@/lib/types'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { RotateCcw, Download } from 'lucide-react'
-import { PluginContext } from 'molstar/lib/mol-plugin/context'
+
+// Dynamically import ThreeDMolViewer with no SSR
+const ThreeDMolViewer = dynamic(
+  () => import('@/components/visualization/ThreeDMolViewer'),
+  { ssr: false, loading: () => <div>Loading viewer...</div> }
+)
 
 export function StructureViewer({
   pdb_id,
@@ -16,69 +21,86 @@ export function StructureViewer({
 }: MolStarViewerProps) {
   const [isViewerReady, setIsViewerReady] = useState(false)
   const [selectedDomain, setSelectedDomain] = useState<number | null>(null)
-  const pluginRef = useRef<PluginContext | null>(null)
+  const viewerRef = useRef<any>(null)
 
-  const handleViewerReady = (plugin: PluginContext) => {
-    pluginRef.current = plugin
+  // Map domains to ThreeDMolViewer domain format
+  const mappedDomains = domains.map((domain, index) => ({
+    id: String(index),
+    chainId: chain_id || 'A',
+    start: domain.start,
+    end: domain.end,
+    color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+    label: domain.label || `Domain ${index + 1}`
+  }))
+
+  const handleViewerReady = () => {
     setIsViewerReady(true)
   }
 
-  const handleHighlightDomain = async (domain: any, index: number) => {
+  const handleHighlightDomain = (domain: any, index: number) => {
     setSelectedDomain(index)
-    
-    // Attempt to highlight the domain in the 3D structure
-    if (pluginRef.current && chain_id) {
+
+    // Focus on the domain in the viewer
+    if (viewerRef.current && viewerRef.current.current) {
+      // Attempt to access viewer methods through ref
+      const viewer = viewerRef.current.current;
       try {
-        const plugin = pluginRef.current
-        
-        // Create a selection for the domain residues
-        await plugin.builders.structure.representation.clearSelection()
-        
-        // Select the domain's residues
-        await plugin.builders.structure.representation.addRepresentation({
-          repr: {
-            type: 'cartoon',
-            params: {
-              alpha: 1,
-              colorTheme: { name: 'uniform', params: { color: { name: 'color', params: { value: domain.color || '#3b82f6' } } } }
-            }
-          },
-          selection: {
-            entities: [{ chain_id: chain_id, residueNumbers: [{ start: domain.start, end: domain.end }] }]
+        // Select and zoom to the domain
+        if (viewer.viewerRef && viewer.viewerRef.current) {
+          const mol3DViewer = viewer.viewerRef.current;
+          if (mol3DViewer && typeof mol3DViewer.zoomTo === 'function') {
+            mol3DViewer.zoomTo({chain: domain.chainId, resi: `${domain.start}-${domain.end}`});
           }
-        })
-      } catch (err) {
-        console.error('Error highlighting domain:', err)
+        }
+      } catch (error) {
+        console.error('Error highlighting domain:', error);
       }
     }
-    
+
+    // Call the onDomainClick callback
     if (onDomainClick) onDomainClick(domain)
   }
-  
+
   const handleReset = () => {
     setSelectedDomain(null)
-    if (pluginRef.current) {
-      // Reset view
-      pluginRef.current.canvas3d?.resetCamera()
+
+    // Reset the viewer
+    if (viewerRef.current && viewerRef.current.current) {
+      try {
+        const viewer = viewerRef.current.current;
+        if (viewer.viewerRef && viewer.viewerRef.current) {
+          const mol3DViewer = viewer.viewerRef.current;
+          if (mol3DViewer && typeof mol3DViewer.zoomTo === 'function') {
+            mol3DViewer.zoomTo();
+          }
+        }
+      } catch (error) {
+        console.error('Error resetting view:', error);
+      }
     }
   }
-  
-  const handleExport = async () => {
-    if (!pluginRef.current) return
-    
-    try {
-      const canvas = pluginRef.current.canvas3d?.canvas.element
-      if (canvas) {
-        // Create a download link for the canvas image
-        const link = document.createElement('a')
-        link.href = canvas.toDataURL('image/png')
-        link.download = `${pdb_id}_${chain_id}${selectedDomain !== null ? `_domain${domains[selectedDomain].label}` : ''}.png`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
+
+  const handleExport = () => {
+    // Try to export an image using 3DMol's capabilities
+    if (viewerRef.current && viewerRef.current.current) {
+      try {
+        const viewer = viewerRef.current.current;
+        if (viewer.viewerRef && viewer.viewerRef.current) {
+          const mol3DViewer = viewer.viewerRef.current;
+
+          if (mol3DViewer && typeof mol3DViewer.pngURI === 'function') {
+            const dataUrl = mol3DViewer.pngURI();
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = `${pdb_id}${chain_id ? '_' + chain_id : ''}${selectedDomain !== null ? `_domain${selectedDomain+1}` : ''}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          }
+        }
+      } catch (error) {
+        console.error('Error exporting image:', error);
       }
-    } catch (err) {
-      console.error('Error exporting image:', err)
     }
   }
 
@@ -90,18 +112,18 @@ export function StructureViewer({
             Structure Viewer - {pdb_id}_{chain_id}
           </h3>
           <div className="flex gap-2">
-            <Button 
-              size="sm" 
-              variant="outline" 
+            <Button
+              size="sm"
+              variant="outline"
               disabled={!isViewerReady}
               onClick={handleReset}
             >
               <RotateCcw className="w-4 h-4 mr-1" />
               Reset
             </Button>
-            <Button 
-              size="sm" 
-              variant="outline" 
+            <Button
+              size="sm"
+              variant="outline"
               disabled={!isViewerReady}
               onClick={handleExport}
             >
@@ -111,13 +133,16 @@ export function StructureViewer({
           </div>
         </div>
 
-        {/* Mol* viewer */}
+        {/* 3DMol viewer */}
         <div className="relative">
-          <CanvasMolstarViewer
+          <ThreeDMolViewer
+            ref={viewerRef}
             pdbId={pdb_id}
             chainId={chain_id}
+            domains={mappedDomains}
             height="400px"
-            onReady={handleViewerReady}
+            onStructureLoaded={handleViewerReady}
+            showControls={true}
             className="rounded-lg overflow-hidden border border-gray-200"
           />
 
@@ -131,17 +156,17 @@ export function StructureViewer({
                     <div className="w-3 h-3 bg-blue-500 rounded"></div>
                     <span>Chain {chain_id}</span>
                   </div>
-                  {domains.map((domain, index) => (
+                  {mappedDomains.map((domain, index) => (
                     <div key={index} className="flex items-center gap-2">
-                      <div 
+                      <div
                         className="w-3 h-3 rounded"
-                        style={{ backgroundColor: domain.color || '#3b82f6' }}
+                        style={{ backgroundColor: domain.color }}
                       ></div>
                       <button
                         onClick={() => handleHighlightDomain(domain, index)}
                         className={`text-left ${
-                          selectedDomain === index 
-                            ? 'text-blue-600 font-medium' 
+                          selectedDomain === index
+                            ? 'text-blue-600 font-medium'
                             : 'hover:text-blue-600'
                         } transition-colors`}
                       >
@@ -160,7 +185,7 @@ export function StructureViewer({
           <div className="border-t pt-4">
             <h4 className="text-sm font-medium mb-3">Domain Selection</h4>
             <div className="flex flex-wrap gap-2">
-              {domains.map((domain, index) => (
+              {mappedDomains.map((domain, index) => (
                 <button
                   key={index}
                   onClick={() => handleHighlightDomain(domain, index)}
@@ -169,7 +194,7 @@ export function StructureViewer({
                       ? 'bg-gray-100'
                       : 'hover:bg-gray-50'
                   } transition-colors`}
-                  style={{ borderColor: domain.color || '#3b82f6' }}
+                  style={{ borderColor: domain.color }}
                 >
                   {domain.label}
                 </button>

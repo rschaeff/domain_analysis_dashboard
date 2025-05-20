@@ -37,12 +37,21 @@ export default function ProteinDetailPage() {
           throw new Error('Failed to fetch protein details')
         }
         const proteinData = await proteinResponse.json()
+
+      console.log('[FRONTEND PROTEIN] Full response:', proteinData)
+      console.log('[FRONTEND PROTEIN] domain_count:', proteinData.domain_count)
+      console.log('[FRONTEND PROTEIN] putative_domains length:', proteinData.putative_domains?.length)
+      console.log('[FRONTEND PROTEIN] all_domains length:', proteinData.all_domains?.length)
+
         setProtein(proteinData)
 
         // Fetch domains for this protein
         const domainsResponse = await fetch(`/api/proteins/${proteinId}/domains`)
         if (domainsResponse.ok) {
           const domainsData = await domainsResponse.json()
+
+          console.log('[FRONTEND DOMAINS] Domains route returned:', domainsData.length, 'domains')
+
           setDomains(domainsData)
         }
       } catch (err) {
@@ -288,8 +297,13 @@ export default function ProteinDetailPage() {
                   chain_id: protein.chain_id,
                   sequence_length: protein.sequence_length
                 }}
-                domains={domains}
-                onDomainClick={handleDomainClick}
+                  domains={(() => {
+                    // ADD THIS DEBUG:
+                    console.log('[BOUNDARY VIZ] Receiving domains:', domains)
+                    console.log('[BOUNDARY VIZ] domains.length:', domains?.length)
+                    return domains
+                  })()}
+                  onDomainClick={handleDomainClick}
               />
             </div>
           )}

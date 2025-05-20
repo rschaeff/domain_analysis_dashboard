@@ -191,6 +191,8 @@ export async function GET(
       protein.chain_id
     )
 
+    console.log(`[PROTEIN API] Found ${(putativeDomains as any[]).length} putative domains for ${protein.pdb_id}_${protein.chain_id}`)
+
     // Fetch reference domains used as evidence
     // These come from the pdb_analysis.domain table (ECOD reference domains)
     const referenceDomainsQuery = `
@@ -233,11 +235,15 @@ export async function GET(
       protein.chain_id
     )
 
+    console.log(`[PROTEIN API] Found ${(referenceDomains as any[]).length} reference domains for ${protein.pdb_id}_${protein.chain_id}`)
+
     // Calculate domain statistics by parsing ranges (handling chain prefixes)
     const putativeDomainsArray = putativeDomains as any[]
     let totalCoverage = 0
     let classifiedDomains = 0
     let domainsWithEvidence = 0
+
+    console.log(`[PROTEIN API] putativeDomainsArray length: ${putativeDomainsArray.length}`)
 
     for (const domain of putativeDomainsArray) {
       // Parse range to calculate coverage (handles chain prefixes)
@@ -272,6 +278,8 @@ export async function GET(
       }
     })
 
+    console.log(`[PROTEIN API] processedPutativeDomains length: ${processedPutativeDomains.length}`)
+
     const processedReferenceDomains = (referenceDomains as any[]).map(domain => {
       const parsedRange = parseRange(domain.range)
       return {
@@ -304,6 +312,10 @@ export async function GET(
         ...processedReferenceDomains
       ]
     }
+
+    console.log(`[PROTEIN API] Final enrichedProtein.domain_count: ${enrichedProtein.domain_count}`)
+    console.log(`[PROTEIN API] Final enrichedProtein.putative_domains.length: ${enrichedProtein.putative_domains?.length}`)
+    console.log(`[PROTEIN API] Final enrichedProtein.all_domains.length: ${enrichedProtein.all_domains?.length}`)
 
     // Serialize the result to handle BigInt values
     const serializedProtein = serializeBigInt(enrichedProtein)

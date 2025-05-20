@@ -1,13 +1,14 @@
+// components/visualization/ClientDomainStructureViewer.tsx
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 
-// Dynamically import the CanvasMolstarViewer with no SSR
+// Dynamically import the CanvasMolstarViewer with no SSR and implement fallback
 const DynamicCanvasMolstarViewer = dynamic(
-  () => import('./CanvasMolstarViewer').then(mod => ({ default: mod.CanvasMolstarViewer })),
-  { 
+  () => import('./ClientMolstarViewer').then(mod => ({ default: mod.ClientMolstarViewer })),
+  {
     ssr: false,
     loading: () => (
       <div className="flex items-center justify-center h-full bg-gray-50">
@@ -41,7 +42,6 @@ interface Domain {
   color?: string;
   label?: string;
 }
-
 
 interface DomainStructureViewerProps {
   pdbId: string;
@@ -105,19 +105,27 @@ export function DomainStructureViewer({
   autoHighlightDomains = true,
   colorByClassification = true,
   showLabels = true,
-  className = ''
+  className = '',
+  useLocalRepository = true
 }: DomainStructureViewerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [domains, setDomains] = useState<Domain[]>([]);
   const [viewerReady, setViewerReady] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [usingRemoteFallback, setUsingRemoteFallback] = useState(false);
   const pluginRef = useRef<any>(null);
 
   // Handle client-side only rendering
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  // Reset error state and fallback when input changes
+  useEffect(() => {
+    setError(null);
+    setUsingRemoteFallback(false);
+  }, [pdbId, chainId, useLocalRepository]);
 
   // Process domain data into viewer format
   useEffect(() => {
@@ -185,8 +193,12 @@ export function DomainStructureViewer({
 
   // Handle viewer error
   const handleViewerError = (errorMsg: string) => {
-    setError(errorMsg);
-    setIsLoading(false);
+    if (errorMsg.includes("Trying external repository")) {
+      setUsingRemoteFallback(true);
+    } else {
+      setError(errorMsg);
+      setIsLoading(false);
+    }
   };
 
   if (!isMounted) {
@@ -202,13 +214,20 @@ export function DomainStructureViewer({
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50 bg-opacity-70 z-10">
           <LoadingSpinner />
+          {usingRemoteFallback && (
+            <span className="ml-3 text-orange-600">Local repository failed, trying remote repository...</span>
+          )}
         </div>
       )}
 
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50 z-10">
-          <div className="text-red-500 bg-white p-4 rounded shadow">
-            {error}
+          <div className="text-red-500 bg-white p-4 rounded shadow max-w-md">
+            <p className="font-bold mb-2">Error loading structure:</p>
+            <p>{error}</p>
+            {useLocalRepository && (
+              <p className="mt-3 text-gray-700">Try switching to "Remote Repository" in the settings above.</p>
+            )}
           </div>
         </div>
       )}
@@ -220,7 +239,7 @@ export function DomainStructureViewer({
         width="100%"
         onReady={handleViewerReady}
         onError={handleViewerError}
-        useLocalRepository={false} // Changed to false to use external repository
+        useLocalRepository={useLocalRepository}
         domains={autoHighlightDomains ? domains : []}
         initialRepresentation="cartoon"
       />
@@ -236,6 +255,12 @@ export function DomainStructureViewer({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {useLocalRepository && usingRemoteFallback && viewerReady && (
+        <div className="absolute bottom-2 left-2 bg-orange-100 text-orange-800 px-3 py-1 rounded text-xs">
+          Using remote repository fallback
         </div>
       )}
     </div>

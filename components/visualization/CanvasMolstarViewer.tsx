@@ -64,6 +64,7 @@ export function CanvasMolstarViewer({
   const [detectedFormat, setDetectedFormat] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [structure, setStructure] = useState<Structure | null>(null);
+  const [loadAttempted, setLoadAttempted] = useState<boolean>(false);
 
   // Function to highlight a domain with query expression
   const highlightDomain = useCallback(async (domain: Domain, options: MolstarHighlightOptions = {}) => {
@@ -187,7 +188,9 @@ export function CanvasMolstarViewer({
   // Initialize Mol* viewer
   useEffect(() => {
     if (!canvasRef.current || !parentRef.current) return;
+    if (loadAttempted) return; // Prevent multiple load attempts
 
+    setLoadAttempted(true);
     const canvas = canvasRef.current;
     const parent = parentRef.current;
 
@@ -230,16 +233,21 @@ export function CanvasMolstarViewer({
         let detectedFileFormat;
 
         if (useLocalRepository) {
-          // Use local API
+          // Use local API - Update the path to match your API
           url = `/api/pdb/${pdbId.toLowerCase()}`;
 
           try {
             // Make a HEAD request to check format
             const response = await fetch(url, { method: 'HEAD' });
+
+            if (!response.ok) {
+              throw new Error(`Local PDB server returned ${response.status}`);
+            }
+
             detectedFileFormat = response.headers.get('X-PDB-Format') || 'pdb';
             console.log(`Detected format from server: ${detectedFileFormat}`);
           } catch (e) {
-            console.warn('Could not detect format from server, using default', e);
+            console.warn('Could not detect format from server, attempting download anyway', e);
             detectedFileFormat = 'pdb';
           }
         } else {
@@ -265,7 +273,8 @@ export function CanvasMolstarViewer({
         // Load structure (following the documentation example)
         const data = await plugin.builders.data.download({
           url,
-          isBinary: detectedFileFormat === 'mmtf'
+          isBinary: detectedFileFormat === 'mmtf',
+          tryGzip: true
         }, { state: { isGhost: true } });
 
         if (!data) {
@@ -352,7 +361,13 @@ export function CanvasMolstarViewer({
         }
       }
     };
-  }, [pdbId, chainId, useLocalRepository, format, initialRepresentation, backgroundColor, domains, onReady, onError, highlightDomain, clearRepresentations]);
+  }, [pdbId, chainId, useLocalRepository, format, initialRepresentation, backgroundColor, domains, onReady, onError, highlightDomain, clearRepresentations, loadAttempted]);
+
+  // Reset loadAttempted when key props change
+  useEffect(() => {
+    setLoadAttempted(false);
+    setError(null);
+  }, [pdbId, chainId, useLocalRepository]);
 
   return (
     <div className={`relative ${className}`} style={{ width, height }}>

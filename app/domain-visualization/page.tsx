@@ -260,16 +260,25 @@ export default function DomainVisualizationPage() {
               <Card className="p-6">
                 <h2 className="text-xl font-semibold mb-4">Domain Visualization</h2>
 
-                <div className="h-[500px] rounded border">
-                  <DomainStructureViewer
-                    pdbId={pdbId}
-                    chainId={chainId}
-                    domainData={selectedDomains}
-                    colorByClassification={colorByClassification}
-                    showLabels={showLabels}
-                    useLocalRepository={useLocalRepo}
-                  />
-                </div>
+                  <div className="bg-yellow-50 border border-yellow-200 rounded p-2 mb-4 text-sm">
+                    <p className="font-medium text-yellow-800">Repository Information</p>
+                    <p className="text-yellow-700 mt-1">
+                      {useLocalRepo
+                        ? "Using local repository - requires a local PDB server at /api/pdb/{id}. If loading fails, try switching to remote repository."
+                        : "Using RCSB remote repository - structures are downloaded from external sources."}
+                    </p>
+                  </div>
+
+                  <div className="h-[500px] rounded border">
+                    <DomainStructureViewer
+                      pdbId={pdbId}
+                      chainId={chainId}
+                      domainData={selectedDomains}
+                      colorByClassification={colorByClassification}
+                      showLabels={showLabels}
+                      useLocalRepository={useLocalRepo}
+                    />
+                  </div>
 
                 <div className="mt-4 flex flex-wrap gap-4">
                   <label className="flex items-center gap-2">
@@ -363,15 +372,24 @@ export default function DomainVisualizationPage() {
               <Card className="p-6">
                 <h2 className="text-xl font-semibold mb-4">Custom Domain Visualization</h2>
 
-                <div className="h-[500px] rounded border">
-                  <CanvasMolstarViewer
-                    pdbId={pdbId}
-                    chainId={chainId}
-                    domains={customDomains}
-                    height="100%"
-                    useLocalRepository={useLocalRepo}
-                  />
-                </div>
+                  <div className="bg-yellow-50 border border-yellow-200 rounded p-2 mb-4 text-sm">
+                    <p className="font-medium text-yellow-800">Repository Information</p>
+                    <p className="text-yellow-700 mt-1">
+                      {useLocalRepo
+                        ? "Using local repository - requires a local PDB server at /api/pdb/{id}. If loading fails, try switching to remote repository."
+                        : "Using RCSB remote repository - structures are downloaded from external sources."}
+                    </p>
+                  </div>
+
+                  <div className="h-[500px] rounded border">
+                    <CanvasMolstarViewer
+                      pdbId={pdbId}
+                      chainId={chainId}
+                      domains={customDomains}
+                      height="100%"
+                      useLocalRepository={useLocalRepo}
+                    />
+                  </div>
               </Card>
             </div>
             

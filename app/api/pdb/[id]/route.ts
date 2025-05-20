@@ -14,53 +14,54 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = params
+    // Fix: Access params.id directly without destructuring first
+    const id = params.id;
     const pdbId = id.toLowerCase()
-    
+
     if (!pdbId || pdbId.length !== 4) {
       return NextResponse.json({ error: 'Invalid PDB ID' }, { status: 400 })
     }
-    
+
     const middleChars = pdbId.substring(1, 3)
-    
+
     // Potential file paths in order of preference
     const potentialPaths = [
       // mmCIF format (preferred)
       path.join(PDB_REPOSITORY_PATH, 'divided', 'mmCIF', middleChars, `${pdbId}.cif.gz`),
       path.join(PDB_REPOSITORY_PATH, 'divided', 'mmCIF', middleChars, `${pdbId}.cif`),
-      
+
       // Legacy PDB format
       path.join(PDB_REPOSITORY_PATH, 'divided', 'pdb', middleChars, `pdb${pdbId}.ent.gz`),
       path.join(PDB_REPOSITORY_PATH, 'divided', 'pdb', middleChars, `pdb${pdbId}.ent`),
-      
+
       // Binary formats
       path.join(PDB_REPOSITORY_PATH, 'divided', 'mmtf', middleChars, `${pdbId}.mmtf`),
-      
+
       // Alternate locations
       path.join(PDB_REPOSITORY_PATH, 'data', 'structures', 'all', 'mmCIF', `${pdbId}.cif.gz`),
       path.join(PDB_REPOSITORY_PATH, 'data', 'structures', 'all', 'pdb', `pdb${pdbId}.ent.gz`)
     ]
-    
+
     // Try each path until we find a file
     let filePath = null
     let fileFormat = null
     let isCompressed = false
-    
-    for (const path of potentialPaths) {
+
+    for (const potentialPath of potentialPaths) {
       try {
-        await fs.access(path)
-        filePath = path
-        
+        await fs.access(potentialPath)
+        filePath = potentialPath
+
         // Determine format from file extension
-        if (path.endsWith('.cif.gz') || path.endsWith('.cif')) {
+        if (potentialPath.endsWith('.cif.gz') || potentialPath.endsWith('.cif')) {
           fileFormat = 'mmcif'
-        } else if (path.endsWith('.ent.gz') || path.endsWith('.ent') || path.endsWith('.pdb')) {
+        } else if (potentialPath.endsWith('.ent.gz') || potentialPath.endsWith('.ent') || potentialPath.endsWith('.pdb')) {
           fileFormat = 'pdb'
-        } else if (path.endsWith('.mmtf')) {
+        } else if (potentialPath.endsWith('.mmtf')) {
           fileFormat = 'mmtf'
         }
-        
-        isCompressed = path.endsWith('.gz')
+
+        isCompressed = potentialPath.endsWith('.gz')
         break
       } catch (e) {
         // File doesn't exist, try next one

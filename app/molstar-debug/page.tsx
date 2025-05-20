@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import MinimalMolstarDebug from '@/components/MinimalMolstarDebug'
+import MinimalMolstarDebug from '@/components/visualization/MinimalMolstarDebug'
 import { Card } from '@/components/ui/Card'
 
 export default function MolstarDebugPage() {

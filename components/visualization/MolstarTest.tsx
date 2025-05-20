@@ -7,7 +7,7 @@ import { Molstar } from 'molstar-react'
 export function MolstarTest() {
   return (
     <div style={{ width: '100%', height: '400px' }}>
-      <MolstarViewer
+      <Molstar
         pdbId="1cbs"
         options={{
           layoutIsExpanded: false,

@@ -48,24 +48,30 @@ export function StructureViewer({
     setIsViewerReady(true)
   }
 
-  const handleHighlightDomain = (domain: Domain, index: number) => {
-    setSelectedDomain(index)
-
-    // Focus on the domain in the viewer
-    if (viewerRef.current && viewerRef.current.current) {
-      try {
-        // Call the highlightDomain method exposed via ref
-        viewerRef.current.current.highlightDomain(index);
-      } catch (error) {
-        console.error('Error highlighting domain:', error);
+    // Replace the handleHighlightDomain function with this:
+    const handleHighlightDomain = (domain: Domain, index: number, e?: React.MouseEvent) => {
+      // Stop event propagation if event is provided
+      if (e) {
+        e.stopPropagation();
       }
-    }
 
-    // Call the onDomainClick callback
-    if (onDomainClick) {
-      onDomainClick(domain)
+      setSelectedDomain(index);
+
+      // Focus on the domain in the viewer
+      if (viewerRef.current && viewerRef.current.current) {
+        try {
+          // Call the highlightDomain method exposed via ref
+          viewerRef.current.current.highlightDomain(index);
+        } catch (error) {
+          console.error('Error highlighting domain:', error);
+        }
+      }
+
+      // REMOVE THIS SECTION - this is causing navigation away from the page
+      // if (onDomainClick) {
+      //   onDomainClick(domain)
+      // }
     }
-  }
 
   const handleReset = () => {
     setSelectedDomain(null)

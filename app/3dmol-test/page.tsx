@@ -1,11 +1,18 @@
-'use client'
+import dynamic from 'next/dynamic';
+import { Domain } from '@/components/ThreeDMolViewer';
 
-import React, { useState } from 'react';
-import ThreeDMolViewer, { Domain } from '@/components/visualization/ThreeDMolViewer';
+// Import the component with dynamic import with no SSR
+const ThreeDMolViewer = dynamic(
+  () => import('@/components/ThreeDMolViewer'),
+  { ssr: false, loading: () => <div>Loading viewer...</div> }
+);
 
 export default function ThreeDMolTestPage() {
+  'use client'
+
+  const { useState } = require('react');
   const [pdbId, setPdbId] = useState('1cbs');
-  
+
   // Static domains for testing (same as your Molstar example)
   const domains: Domain[] = [
     {
@@ -25,26 +32,28 @@ export default function ThreeDMolTestPage() {
       label: 'Central Domain'
     }
   ];
-  
+
   // Track error state
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  
+
   // Handle structure loading
   const handleStructureLoaded = () => {
     // Clear previous errors
     setErrorMessage(null);
   };
-  
+
   // Handle errors
   const handleError = (error: string) => {
     setErrorMessage(error);
     // Using DOM methods to display error info
-    const errorLog = document.getElementById('error-log');
-    if (errorLog) {
-      const item = document.createElement('div');
-      item.textContent = `Error: ${error}`;
-      item.style.color = 'red';
-      errorLog.appendChild(item);
+    if (typeof document !== 'undefined') {
+      const errorLog = document.getElementById('error-log');
+      if (errorLog) {
+        const item = document.createElement('div');
+        item.textContent = `Error: ${error}`;
+        item.style.color = 'red';
+        errorLog.appendChild(item);
+      }
     }
   };
   

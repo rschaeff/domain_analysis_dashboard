@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react';
-import * as $3Dmol from '3dmol';
+// Remove direct import of 3DMol
 
 // Interface matching your existing Domain type
 export interface Domain {
@@ -56,7 +56,7 @@ const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
-  
+
   // State
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -76,38 +76,44 @@ const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
 
   // Initialize and load structure
   useEffect(() => {
-    if (!containerRef.current) return;
-    
+    // Only run in browser environment
+    if (typeof window === 'undefined' || !containerRef.current) return;
+
     // Reset state for new PDB ID
     setIsLoading(true);
     setErrorMessage(null);
 
-    try {
-      // Clean up previous viewer if it exists
-      if (viewerRef.current) {
-        try {
-          viewerRef.current.removeAllModels();
-          // In some versions, we need to call this explicitly
-          if (typeof viewerRef.current.destroy === 'function') {
-            viewerRef.current.destroy();
+    // Dynamically import 3DMol.js
+    const init3DMol = async () => {
+      try {
+        // Import 3DMol dynamically to avoid SSR issues
+        const $3Dmol = await import('3dmol');
+
+        // Clean up previous viewer if it exists
+        if (viewerRef.current) {
+          try {
+            viewerRef.current.removeAllModels();
+            // In some versions, we need to call this explicitly
+            if (typeof viewerRef.current.destroy === 'function') {
+              viewerRef.current.destroy();
+            }
+          } catch (e) {
+            // Ignore cleanup errors
           }
-        } catch (e) {
-          // Ignore cleanup errors
+          viewerRef.current = null;
         }
-        viewerRef.current = null;
-      }
 
-      // Create a new viewer
-      const config = {
-        backgroundColor: backgroundColor,
-        id: containerRef.current.id
-      };
-      
-      const viewer = $3Dmol.createViewer(containerRef.current, config);
-      viewerRef.current = viewer;
+        // Create a new viewer
+        const config = {
+          backgroundColor: backgroundColor,
+          id: containerRef.current.id
+        };
 
-      // Load structure from PDB
-      $3Dmol.download(`pdb:${pdbId}`, viewer, {}, function(model) {
+        const viewer = $3Dmol.createViewer(containerRef.current, config);
+        viewerRef.current = viewer;
+
+        // Load structure from PDB
+        $3Dmol.download(`pdb:${pdbId}`, viewer, {}, function(model) {
         try {
           // Set base style for all atoms
           viewer.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });

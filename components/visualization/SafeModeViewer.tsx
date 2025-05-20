@@ -190,15 +190,15 @@ export function SafeModeViewer({
           try {
             log(`Focusing on chain ${chainId}`);
             plugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
-            plugin.managers.camera.focusSelection();
+            plugin.managers.camera.focusLoci(plugin.managers.structure.selection.getLoci());
           } catch (chainErr) {
             log(`Chain selection failed, focusing on whole structure`);
-            plugin.canvas3d?.resetCamera();
+            plugin.managers.camera.reset();
           }
         } else {
-          plugin.canvas3d?.resetCamera();
+          plugin.managers.camera.reset();
         }
-        
+
         log('Structure loaded successfully');
         setStatus('ready');
         if (onReady) onReady(plugin);
@@ -209,7 +209,7 @@ export function SafeModeViewer({
       handleError(`Error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }, [pdbId, chainId, status, canLoad, handleError, log, onReady]);
-  
+
   // CSS styling effect
   useEffect(() => {
     // Add minimal CSS directly
@@ -241,7 +241,7 @@ export function SafeModeViewer({
     `;
     document.head.appendChild(style);
   }, []);
-  
+
   // Cleanup effect
   useEffect(() => {
     return () => {
@@ -255,7 +255,7 @@ export function SafeModeViewer({
       }
     };
   }, []);
-  
+
   return (
     <div className="relative" style={{ width, height }}>
       {/* Status display */}
@@ -270,7 +270,7 @@ export function SafeModeViewer({
                 Initialize Viewer
               </button>
             )}
-            
+
             {status === 'initializing' && (
               <div className="flex items-center">
                 <svg className="animate-spin h-5 w-5 mr-2 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -280,7 +280,7 @@ export function SafeModeViewer({
                 <span>Initializing...</span>
               </div>
             )}
-            
+
             {status === 'loading' && (
               <div className="flex items-center">
                 <svg className="animate-spin h-5 w-5 mr-2 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -290,7 +290,7 @@ export function SafeModeViewer({
                 <span>Loading structure...</span>
               </div>
             )}
-            
+
             {status === 'error' && (
               <div className="text-red-600">
                 <p className="font-semibold">Error:</p>
@@ -306,7 +306,7 @@ export function SafeModeViewer({
           </div>
         </div>
       )}
-      
+
       {/* Manual load button */}
       {status === 'ready' && canLoad && (
         <div className="absolute top-2 left-2 z-20">
@@ -318,14 +318,14 @@ export function SafeModeViewer({
           </button>
         </div>
       )}
-      
+
       {/* Logs display */}
       <div className="absolute bottom-0 left-0 right-0 z-20 bg-black bg-opacity-75 text-green-400 text-xs font-mono p-2" style={{ maxHeight: '100px', overflowY: 'auto' }}>
         {logs.map((log, i) => (
           <div key={i}>{log}</div>
         ))}
       </div>
-      
+
       {/* Main viewer */}
       <div
         ref={containerRef}

@@ -194,17 +194,17 @@ export function ImprovedMolstarViewer({
         });
 
         // Handle chain selection
-        if (targetChainId) {
+        if (chainId) {
           try {
-            logDebug(`Focusing on chain ${targetChainId}`);
-            targetPlugin.managers.structure.selection.fromSelectionString(`chain ${targetChainId}`);
-            targetPlugin.managers.camera.focusSelection();
+            addLog(`Focusing on chain ${chainId}`);
+            targetPlugin.managers.structure.selection.fromSelectionString(`chain ${chainId}`);
+            targetPlugin.managers.camera.focusLoci(targetPlugin.managers.structure.selection.getLoci());
           } catch (chainErr) {
-            logDebug(`Chain selection failed: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}`, 'warn');
-            targetPlugin.canvas3d?.resetCamera();
+            addLog(`Chain selection failed: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}`, 'warn');
+            targetPlugin.managers.camera.reset();
           }
         } else {
-          targetPlugin.canvas3d?.resetCamera();
+          targetPlugin.managers.camera.reset();
         }
 
         logDebug('Structure loaded successfully');

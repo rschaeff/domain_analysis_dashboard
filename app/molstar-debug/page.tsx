@@ -157,19 +157,19 @@ export default function MolstarDebugPage() {
       <Card className="p-6 mt-6">
         <h2 className="text-xl font-semibold mb-4">Troubleshooting Tips</h2>
         <ul className="list-disc pl-5 space-y-2">
-          <li>Ensure the PDB ID is valid and exists in the RCSB Protein Data Bank</li>
+          <li>Ensure the PDB ID is valid and exists in the local repository at <code>/usr2/pdb/data/structures</code></li>
           <li>If you specify a chain ID, make sure it exists in the structure</li>
           <li>The viewer attempts to load both mmCIF (.cif) and PDB (.pdb) formats</li>
           <li>Check the logs for detailed information about the loading process</li>
-          <li>If you see "Invalid data cell" errors, it might indicate corrupted data or network issues</li>
-          <li>Try a different structure if one fails to load - 1cbs, 4hhb, and 1bna are good test cases</li>
-          <li>WebGL support is required - check if other WebGL applications work in your browser</li>
+          <li>If loading takes more than 20 seconds, the viewer will time out automatically</li>
+          <li>If the API returns "Failed to fetch", the structure may not exist in the repository</li>
+          <li>Try a different structure if one fails to load - not all structures may render properly</li>
         </ul>
 
         <div className="mt-4 bg-blue-50 p-4 rounded">
-          <h3 className="font-semibold mb-2">Common Test Structures</h3>
+          <h3 className="font-semibold mb-2">Try These Known Working Structures</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {['1cbs', '4hhb', '1bna', '3pqr', '7jsu', '6vxx', '1ubq', '3eam'].map(id => (
+            {['4hhb', '1bna', '3pqr', '7jsu', '6vxx', '1ubq', '3eam', '1avo'].map(id => (
               <Button
                 key={id}
                 variant="outline"

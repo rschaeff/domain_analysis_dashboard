@@ -2,7 +2,7 @@
 'use client'
 
 import React from 'react'
-import { MolstarViewer } from 'molstar-react'
+import { Molstar } from 'molstar-react'
 
 export function MolstarTest() {
   return (

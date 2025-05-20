@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { Domain } from '@/components/ThreeDMolViewer';
+import { Domain } from '@/components/visualization/ThreeDMolViewer';
 
 // Import the component with dynamic import with no SSR
 const ThreeDMolViewer = dynamic(

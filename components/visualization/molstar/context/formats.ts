@@ -1,5 +1,8 @@
 /**
- * Helper module for dealing with structure format detection
+ * Format detection and handling utilities for Molstar
+ * 
+ * These utilities help with automatic detection and handling of
+ * various molecular structure file formats.
  */
 
 // Known formats supported by Molstar

@@ -26,12 +26,146 @@ export function FilterPanel({
 }: FilterPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false)
 
-  // Mock data - in real app, these would come from API
-  const tGroups = [
-    '2001.1.1', '2002.1.1', '2003.1.1', '2004.1.1', '2005.1.1',
-    '3001.1.1', '3002.1.1', '3003.1.1', '3004.1.1', '3005.1.1'
+  // Correct mock data with proper ECOD hierarchy
+  const xGroups = ['2001', '2002', '2003', '2004', '2005', '3001', '3002', '3003', '3004', '3005']
+  const allHGroups = [
+    '2001.1', '2001.2', '2001.3',
+    '2002.1', '2002.2',
+    '2003.1', '2003.2', '2003.3',
+    '2004.1', '2004.2',
+    '2005.1', '2005.2',
+    '3001.1', '3001.2',
+    '3002.1', '3002.2',
+    '3003.1', '3003.2', '3003.3',
+    '3004.1', '3004.2',
+    '3005.1', '3005.2'
   ]
-  const hGroups = ['2001', '2002', '2003', '2004', '2005', '3001', '3002', '3003', '3004', '3005']
+  const allTGroups = [
+    '2001.1.1', '2001.1.2', '2001.2.1', '2001.3.1',
+    '2002.1.1', '2002.1.2', '2002.2.1',
+    '2003.1.1', '2003.1.2', '2003.2.1', '2003.3.1',
+    '2004.1.1', '2004.1.2', '2004.2.1',
+    '2005.1.1', '2005.2.1',
+    '3001.1.1', '3001.1.2', '3001.2.1',
+    '3002.1.1', '3002.1.2',
+    '3003.1.1', '3003.2.1', '3003.3.1',
+    '3004.1.1', '3004.1.2',
+    '3005.1.1', '3005.1.2'
+  ]
+
+  // Helper functions for correct hierarchical filtering
+  const getParentHGroup = (tGroup: string): string => {
+    const parts = tGroup.split('.')
+    return `${parts[0]}.${parts[1]}` // e.g., "2001.1.1" -> "2001.1"
+  }
+
+  const getParentXGroup = (hGroup: string): string => {
+    return hGroup.split('.')[0] // e.g., "2001.1" -> "2001"
+  }
+
+  const getTGroupsForHGroup = (hGroup: string): string[] => {
+    return allTGroups.filter(tGroup => tGroup.startsWith(hGroup + '.'))
+  }
+
+  const getHGroupsForXGroup = (xGroup: string): string[] => {
+    return allHGroups.filter(hGroup => hGroup.startsWith(xGroup + '.'))
+  }
+
+  const getFilteredTGroups = (): string[] => {
+    const selectedHGroups = filters.h_group || []
+    if (selectedHGroups.length === 0) {
+      return allTGroups
+    }
+    // Only show T-groups that belong to selected H-groups
+    return allTGroups.filter(tGroup =>
+      selectedHGroups.some(hGroup => tGroup.startsWith(hGroup + '.'))
+    )
+  }
+
+  const getFilteredHGroups = (): string[] => {
+    const selectedXGroups = filters.x_group || []
+    if (selectedXGroups.length === 0) {
+      return allHGroups
+    }
+    // Only show H-groups that belong to selected X-groups
+    return allHGroups.filter(hGroup =>
+      selectedXGroups.some(xGroup => hGroup.startsWith(xGroup + '.'))
+    )
+  }
+
+  // Enhanced update filter to handle correct hierarchical relationships
+  const updateFilterWithHierarchy = useCallback(<K extends keyof DomainFilters>(
+    key: K,
+    value: DomainFilters[K]
+  ) => {
+    let newFilters = { ...filters, [key]: value }
+
+    // Handle X-group changes - clear conflicting H-groups and T-groups
+    if (key === 'x_group' && Array.isArray(value)) {
+      const selectedXGroups = value as string[]
+      const currentHGroups = filters.h_group || []
+      const currentTGroups = filters.t_group || []
+
+      if (selectedXGroups.length > 0) {
+        // Filter H-groups to only keep those that belong to selected X-groups
+        const validHGroups = currentHGroups.filter(hGroup =>
+          selectedXGroups.some(xGroup => hGroup.startsWith(xGroup + '.'))
+        )
+        newFilters.h_group = validHGroups.length > 0 ? validHGroups : undefined
+
+        // Filter T-groups based on remaining valid H-groups
+        if (validHGroups.length > 0) {
+          const validTGroups = currentTGroups.filter(tGroup =>
+            validHGroups.some(hGroup => tGroup.startsWith(hGroup + '.'))
+          )
+          newFilters.t_group = validTGroups.length > 0 ? validTGroups : undefined
+        } else {
+          newFilters.t_group = undefined
+        }
+      }
+    }
+
+    // Handle H-group changes - clear conflicting T-groups, auto-select X-groups
+    if (key === 'h_group' && Array.isArray(value)) {
+      const selectedHGroups = value as string[]
+      const currentTGroups = filters.t_group || []
+
+      if (selectedHGroups.length > 0) {
+        // Auto-select parent X-groups
+        const parentXGroups = [...new Set(selectedHGroups.map(getParentXGroup))]
+        const currentXGroups = filters.x_group || []
+        const allXGroups = [...new Set([...currentXGroups, ...parentXGroups])]
+        newFilters.x_group = allXGroups
+
+        // Filter T-groups to only keep those that belong to selected H-groups
+        const validTGroups = currentTGroups.filter(tGroup =>
+          selectedHGroups.some(hGroup => tGroup.startsWith(hGroup + '.'))
+        )
+        newFilters.t_group = validTGroups.length > 0 ? validTGroups : undefined
+      }
+    }
+
+    // Handle T-group changes - auto-select parent H-groups and X-groups
+    if (key === 't_group' && Array.isArray(value)) {
+      const selectedTGroups = value as string[]
+
+      if (selectedTGroups.length > 0) {
+        // Auto-select parent H-groups
+        const parentHGroups = [...new Set(selectedTGroups.map(getParentHGroup))]
+        const currentHGroups = filters.h_group || []
+        const allHGroups = [...new Set([...currentHGroups, ...parentHGroups])]
+        newFilters.h_group = allHGroups
+
+        // Auto-select parent X-groups
+        const parentXGroups = [...new Set(parentHGroups.map(getParentXGroup))]
+        const currentXGroups = filters.x_group || []
+        const allXGroups = [...new Set([...currentXGroups, ...parentXGroups])]
+        newFilters.x_group = allXGroups
+      }
+    }
+
+    onFiltersChange(newFilters)
+  }, [filters, onFiltersChange])
 
   const updateFilter = useCallback(<K extends keyof DomainFilters>(
     key: K,
@@ -139,27 +273,84 @@ export function FilterPanel({
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">T-Groups</label>
+            <label className="block text-sm font-medium mb-2">
+              X-Groups (Architecture)
+              {filters.x_group && filters.x_group.length > 0 && (
+                <span className="ml-2 text-xs text-gray-500">
+                  ({filters.x_group.length} selected)
+                </span>
+              )}
+            </label>
             <Select
               multiple
-              placeholder="Select T-Groups..."
-              value={filters.t_group || []}
-              onChange={(value) => updateFilter('t_group', value.length > 0 ? value : undefined)}
-              options={tGroups.map(group => ({ value: group, label: group }))}
+              placeholder="Select X-Groups..."
+              value={filters.x_group || []}
+              onChange={(value) => updateFilterWithHierarchy('x_group', value.length > 0 ? value : undefined)}
+              options={xGroups.map(group => ({ value: group, label: `X-Group ${group}` }))}
               search
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">H-Groups</label>
+            <label className="block text-sm font-medium mb-2">
+              H-Groups (Homology)
+              {filters.h_group && filters.h_group.length > 0 && (
+                <span className="ml-2 text-xs text-gray-500">
+                  ({filters.h_group.length} selected)
+                </span>
+              )}
+            </label>
             <Select
               multiple
-              placeholder="Select H-Groups..."
+              placeholder={
+                filters.x_group && filters.x_group.length > 0
+                  ? "Select H-Groups from chosen X-Groups..."
+                  : "Select H-Groups..."
+              }
               value={filters.h_group || []}
-              onChange={(value) => updateFilter('h_group', value.length > 0 ? value : undefined)}
-              options={hGroups.map(group => ({ value: group, label: group }))}
+              onChange={(value) => updateFilterWithHierarchy('h_group', value.length > 0 ? value : undefined)}
+              options={getFilteredHGroups().map(group => ({
+                value: group,
+                label: `H-Group ${group}`
+              }))}
               search
             />
+            {filters.x_group && filters.x_group.length > 0 && (
+              <div className="mt-1 text-xs text-blue-600">
+                Showing H-groups for: {filters.x_group.join(', ')}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              T-Groups (Topology)
+              {filters.t_group && filters.t_group.length > 0 && (
+                <span className="ml-2 text-xs text-gray-500">
+                  ({filters.t_group.length} selected)
+                </span>
+              )}
+            </label>
+            <Select
+              multiple
+              placeholder={
+                filters.h_group && filters.h_group.length > 0
+                  ? "Select T-Groups from chosen H-Groups..."
+                  : "Select T-Groups..."
+              }
+              value={filters.t_group || []}
+              onChange={(value) => updateFilterWithHierarchy('t_group', value.length > 0 ? value : undefined)}
+              options={getFilteredTGroups().map(group => ({
+                value: group,
+                label: `T-Group ${group}`
+              }))}
+              search
+            />
+            {filters.h_group && filters.h_group.length > 0 && (
+              <div className="mt-1 text-xs text-blue-600">
+                Showing T-groups for: {filters.h_group.join(', ')}
+              </div>
+            )}
           </div>
         </div>
 
@@ -324,14 +515,14 @@ export function FilterPanel({
                   displayValue = String(value)
                 }
 
-                // Prettier key names
+                // Prettier key names with hierarchy indication
                 const keyLabels: Record<string, string> = {
                   pdb_id: 'PDB',
                   chain_id: 'Chain',
-                  t_group: 'T-Group',
-                  h_group: 'H-Group',
-                  x_group: 'X-Group',
-                  a_group: 'A-Group',
+                  t_group: 'T-Groups',
+                  h_group: 'H-Groups',
+                  x_group: 'X-Groups',
+                  a_group: 'A-Groups',
                   min_confidence: 'Min Confidence',
                   max_confidence: 'Max Confidence',
                   sequence_length_min: 'Min Length',

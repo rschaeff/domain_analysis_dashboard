@@ -107,23 +107,24 @@ const ThreeDMolViewer: React.FC<ThreeDMolViewerProps> = ({
         viewerRef.current = viewer;
 
         // Load structure from PDB
-        $3Dmol.download(`pdb:${pdbId}`, viewer, {}, function(model) {
-          try {
-            if (!model) {
-              throw new Error('Failed to load model');
-            }
+        $3Dmol.download(`pdb:${pdbId}`, viewer, {})
+          .then(function(model) {
+            try {
+              if (!model) {
+                throw new Error('Failed to load model');
+              }
 
-            // Set base style for all atoms
-            viewer.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });
+              // Set base style for all atoms
+              viewer.setStyle({}, { cartoon: { color: 'gray', opacity: 0.5 } });
 
-            // Focus on specific chain if requested
-            if (chainId) {
-              viewer.setStyle({chain: chainId}, {
-                cartoon: {
-                  color: 'gray',
-                  opacity: 0.8
-                }
-              });
+              // Focus on specific chain if requested
+              if (chainId) {
+                viewer.setStyle({chain: chainId}, {
+                  cartoon: {
+                    color: 'gray',
+                    opacity: 0.8
+                  }
+                });
 
                           // Add domain representations
             if (domains.length > 0) {

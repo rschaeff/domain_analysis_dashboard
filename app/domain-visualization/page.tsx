@@ -86,6 +86,7 @@ export default function DomainVisualizationPage() {
   const [chainId, setChainId] = useState('A')
   const [inputPdbId, setInputPdbId] = useState('1cbs')
   const [inputChainId, setInputChainId] = useState('A')
+  const [useLocalRepo, setUseLocalRepo] = useState(true)
 
   // State for domain customization
   const [colorByClassification, setColorByClassification] = useState(true)
@@ -199,34 +200,47 @@ export default function DomainVisualizationPage() {
             </div>
           </div>
 
-          <div className="flex gap-2">
-            <Button type="submit">Load Structure</Button>
+          <div className="flex items-center justify-between">
+            <div className="flex gap-2">
+              <Button type="submit">Load Structure</Button>
 
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setInputPdbId('4hhb')
-                setInputChainId('A')
-                setPdbId('4hhb')
-                setChainId('A')
-              }}
-            >
-              Hemoglobin (4HHB)
-            </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setInputPdbId('4hhb')
+                  setInputChainId('A')
+                  setPdbId('4hhb')
+                  setChainId('A')
+                }}
+              >
+                Hemoglobin (4HHB)
+              </Button>
 
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setInputPdbId('7bv2')
-                setInputChainId('A')
-                setPdbId('7bv2')
-                setChainId('A')
-              }}
-            >
-              Multi-domain (7BV2)
-            </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setInputPdbId('7bv2')
+                  setInputChainId('A')
+                  setPdbId('7bv2')
+                  setChainId('A')
+                }}
+              >
+                Multi-domain (7BV2)
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={useLocalRepo}
+                  onChange={() => setUseLocalRepo(!useLocalRepo)}
+                />
+                <span>Use Local Repository</span>
+              </label>
+            </div>
           </div>
         </form>
       </Card>
@@ -253,6 +267,7 @@ export default function DomainVisualizationPage() {
                     domainData={selectedDomains}
                     colorByClassification={colorByClassification}
                     showLabels={showLabels}
+                    useLocalRepository={useLocalRepo}
                   />
                 </div>
 
@@ -354,7 +369,7 @@ export default function DomainVisualizationPage() {
                     chainId={chainId}
                     domains={customDomains}
                     height="100%"
-                    useLocalRepository={false}
+                    useLocalRepository={useLocalRepo}
                   />
                 </div>
               </Card>

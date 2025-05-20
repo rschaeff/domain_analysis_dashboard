@@ -42,6 +42,7 @@ interface Domain {
   label?: string;
 }
 
+
 interface DomainStructureViewerProps {
   pdbId: string;
   chainId: string;
@@ -53,6 +54,7 @@ interface DomainStructureViewerProps {
   colorByClassification?: boolean;
   showLabels?: boolean;
   className?: string;
+  useLocalRepository?: boolean;
 }
 
 // Mapping of t_groups to colors for consistent coloring

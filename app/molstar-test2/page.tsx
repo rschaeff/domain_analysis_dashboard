@@ -1,7 +1,7 @@
-'use client'
+"use client"
 
 import React from 'react';
-import { DomainVisualizer } from '@/components/visualization/DomainVisualizer';
+import { SimpleDomainVisualizer } from '@/components/visualization/SimpleDomainVisualizer';
 
 // Example domains
 const exampleDomains = [
@@ -35,21 +35,20 @@ export default function DomainVisualizationExample() {
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
       <h1>Domain Visualization Example</h1>
-      <p>This example shows how to use the DomainVisualizer component with pre-defined domains.</p>
-      
-      <DomainVisualizer 
+      <p>This example shows how to use the SimpleDomainVisualizer component with pre-defined domains.</p>
+
+      <SimpleDomainVisualizer
         pdbId="1cbs"
         initialDomains={exampleDomains}
         height="600px"
       />
-      
+
       <div style={{ marginTop: '20px' }}>
         <h2>Instructions</h2>
         <ul>
-          <li>Click on domains in the list to highlight them in the 3D view</li>
-          <li>Enter selection mode and select residues to create new domains</li>
-          <li>Use the forms to manually define domains by residue range</li>
-          <li>Edit existing domains by clicking on them in the list</li>
+          <li>Domains are visualized in the 3D structure</li>
+          <li>Add new domains by specifying chain ID, start, and end residues</li>
+          <li>Remove domains by clicking the X button</li>
         </ul>
       </div>
     </div>

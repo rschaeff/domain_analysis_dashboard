@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { DomainFilters, DomainSummary, PaginationParams } from '@/lib/types'
 import { FilterPanel } from '@/components/filters/FilterPanel'
 import { DataTable } from '@/components/common/DataTable'
-// import { DataTable } from './MinimalDataTable' // Uncomment this line and comment the line above
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -26,16 +25,10 @@ export default function DashboardPage() {
   const [selectedDomain, setSelectedDomain] = useState<DomainSummary | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'visualization'>('table')
 
-  // Add debugging state
-  const [debugInfo, setDebugInfo] = useState<string>('')
-
-  // Fetch domains data with enhanced debugging
+  // Fetch domains data
   const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {
-    console.log('🔍 fetchDomains called:', { page, newFilters, currentFilters: filters })
-
     setLoading(true)
     setError(null)
-    setDebugInfo('Starting fetch...')
 
     try {
       const params = new URLSearchParams({
@@ -56,39 +49,17 @@ export default function DashboardPage() {
         }
       })
 
-      const apiUrl = `/api/domains?${params}`
-      console.log('🌐 API URL:', apiUrl)
-      setDebugInfo(`Making request to: ${apiUrl}`)
-
-      const response = await fetch(apiUrl)
-      console.log('📡 Response status:', response.status)
-      console.log('📡 Response ok:', response.ok)
+      const response = await fetch(`/api/domains?${params}`)
 
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error('❌ API Error:', response.status, errorText)
-        throw new Error(`API Error: ${response.status} - ${errorText}`)
+        throw new Error('Failed to fetch domains')
       }
 
       const data = await response.json()
-      console.log('✅ API Response received:', {
-        dataCount: data.data?.length,
-        pagination: data.pagination,
-        firstDomain: data.data?.[0]
-      })
-
-      setDebugInfo(`Received ${data.data?.length || 0} domains`)
-      setDomains(data.data || [])
-      setPagination(data.pagination || { page: 1, size: 50, total: 0 })
-
-      if (data.data && data.data.length > 0) {
-        console.log('🔍 Sample domain structure:', Object.keys(data.data[0]))
-      }
+      setDomains(data.data)
+      setPagination(data.pagination)
     } catch (err) {
-      console.error('💥 Fetch error:', err)
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred'
-      setError(errorMessage)
-      setDebugInfo(`Error: ${errorMessage}`)
+      setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
       setLoading(false)
     }
@@ -96,47 +67,38 @@ export default function DashboardPage() {
 
   // Initial fetch and filter changes
   useEffect(() => {
-    console.log('🚀 useEffect triggered - calling fetchDomains')
     fetchDomains(1, filters)
   }, [filters])
 
   // Handle filter changes
   const handleFiltersChange = (newFilters: DomainFilters) => {
-    console.log('🔧 Filters changed:', newFilters)
     setFilters(newFilters)
   }
 
   const handleResetFilters = () => {
-    console.log('🔄 Resetting filters')
     setFilters({})
   }
 
   // Handle pagination
   const handlePageChange = (page: number) => {
-    console.log('📄 Page changed to:', page)
     setPagination(prev => ({ ...prev, page }))
     fetchDomains(page)
   }
 
   // Handle domain selection
   const handleDomainClick = (domain: DomainSummary) => {
-    console.log('👆 Domain clicked:', domain)
     setSelectedDomain(domain)
   }
 
   const handleViewDomain = (domain: DomainSummary) => {
-    console.log('🔍 View domain:', domain.id, domain)
     router.push(`/domains/${domain.id}`)
   }
 
   const handleViewProtein = (domain: DomainSummary) => {
-    console.log('🧬 View protein:', { protein_id: domain.protein_id, domain })
-
     if (domain.protein_id) {
       router.push(`/protein/${domain.protein_id}`)
     } else {
-      console.error('❌ No protein_id found for domain:', domain)
-      alert('Protein ID not available for this domain')
+      console.error('No protein_id found for domain:', domain)
     }
   }
 
@@ -232,35 +194,8 @@ export default function DashboardPage() {
   const highConfidenceDomains = domains.filter(d => d.confidence && d.confidence >= 0.8).length
   const avgConfidence = domains.length > 0 ? domains.reduce((sum, d) => sum + (d.confidence || 0), 0) / domains.length : 0
 
-  console.log('🎯 Render stats:', {
-    totalDomains,
-    domainsInState: domains.length,
-    loading,
-    error,
-    debugInfo
-  })
-
   return (
     <div className="space-y-6">
-      {/* Debug Panel - Remove this in production */}
-      <Card className="p-4 bg-yellow-50 border-yellow-200">
-        <h3 className="font-semibold mb-2">🐛 Debug Info</h3>
-        <div className="text-sm space-y-1">
-          <div>Status: {loading ? 'Loading...' : error ? 'Error' : 'Ready'}</div>
-          <div>Domains in state: {domains.length}</div>
-          <div>Total from API: {totalDomains}</div>
-          <div>Debug: {debugInfo}</div>
-          {error && <div className="text-red-600">Error: {error}</div>}
-        </div>
-        <Button
-          size="sm"
-          onClick={() => fetchDomains(1)}
-          className="mt-2"
-        >
-          Manual Refresh
-        </Button>
-      </Card>
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -333,41 +268,6 @@ export default function DashboardPage() {
             </Card>
           ) : viewMode === 'table' ? (
             <div className="w-full min-w-0">
-              {/* Temporary: Simple table for debugging */}
-              <div className="border rounded-lg bg-white overflow-hidden mb-4">
-                <div className="p-4 bg-gray-50 border-b">
-                  <h3 className="text-sm font-medium">🐛 Simple Debug Table (Domains: {domains.length})</h3>
-                </div>
-                <div className="max-h-96 overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 sticky top-0">
-                      <tr>
-                        <th className="px-4 py-2 text-left">PDB ID</th>
-                        <th className="px-4 py-2 text-left">Chain</th>
-                        <th className="px-4 py-2 text-left">Domain</th>
-                        <th className="px-4 py-2 text-left">Range</th>
-                        <th className="px-4 py-2 text-left">Confidence</th>
-                        <th className="px-4 py-2 text-left">T-Group</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {domains.slice(0, 10).map((domain, index) => (
-                        <tr key={domain.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2">{domain.pdb_id}</td>
-                          <td className="px-4 py-2">{domain.chain_id}</td>
-                          <td className="px-4 py-2">{domain.domain_number}</td>
-                          <td className="px-4 py-2 font-mono">{domain.range}</td>
-                          <td className="px-4 py-2">
-                            {domain.confidence ? domain.confidence.toFixed(3) : 'N/A'}
-                          </td>
-                          <td className="px-4 py-2">{domain.t_group || 'None'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
               <DataTable
                 data={domains}
                 columns={columns}

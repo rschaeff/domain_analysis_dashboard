@@ -13,16 +13,16 @@ const nextConfig = {
         ],
       },
       {
-        // CSP headers for all pages to fix font/script loading issues
+        // Content Security Policy headers
         source: '/(.*)',
         headers: [
           {
-            key: 'Content-Security-Policy-Report-Only',
+            key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-              "style-src 'self' 'unsafe-inline'",
-              "font-src 'self' data: https:",
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+              "font-src 'self' data: https://fonts.gstatic.com",
               "img-src 'self' data: https:",
               "connect-src 'self'"
             ].join('; ')

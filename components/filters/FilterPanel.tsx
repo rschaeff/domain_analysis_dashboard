@@ -1,3 +1,6 @@
+// Enhanced Filter Panel with Better UX
+// components/filters/FilterPanel.tsx
+
 'use client'
 
 import React, { useState, useCallback } from 'react'
@@ -15,19 +18,20 @@ interface FilterPanelProps {
   className?: string
 }
 
-export function FilterPanel({ 
-  filters, 
-  onFiltersChange, 
+export function FilterPanel({
+  filters,
+  onFiltersChange,
   onReset,
-  className = '' 
+  className = ''
 }: FilterPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false)
 
-  // Available options (these would typically come from API)
-  const tGroups = ['2001.1.1', '2002.1.1', '2003.1.1', '2004.1.1'] // Example
-  const hGroups = ['2001', '2002', '2003', '2004'] // Example
-  const xGroups = ['2001', '2002', '2003', '2004'] // Example
-  const aGroups = ['a.1', 'a.2', 'a.3', 'a.4'] // Example
+  // Mock data - in real app, these would come from API
+  const tGroups = [
+    '2001.1.1', '2002.1.1', '2003.1.1', '2004.1.1', '2005.1.1',
+    '3001.1.1', '3002.1.1', '3003.1.1', '3004.1.1', '3005.1.1'
+  ]
+  const hGroups = ['2001', '2002', '2003', '2004', '2005', '3001', '3002', '3003', '3004', '3005']
 
   const updateFilter = useCallback(<K extends keyof DomainFilters>(
     key: K,
@@ -45,223 +49,315 @@ export function FilterPanel({
     onFiltersChange(newFilters)
   }, [filters, onFiltersChange])
 
-  const activeFilterCount = Object.keys(filters).length
+  const activeFilterCount = Object.keys(filters).filter(key => {
+    const value = filters[key as keyof DomainFilters]
+    return value !== undefined && value !== null && value !== ''
+  }).length
+
+  // Quick clear for specific filter types
+  const clearConfidenceFilters = () => {
+    const newFilters = { ...filters }
+    delete newFilters.min_confidence
+    delete newFilters.max_confidence
+    onFiltersChange(newFilters)
+  }
+
+  const clearClassificationFilters = () => {
+    const newFilters = { ...filters }
+    delete newFilters.t_group
+    delete newFilters.h_group
+    delete newFilters.x_group
+    delete newFilters.a_group
+    onFiltersChange(newFilters)
+  }
 
   return (
-    <Card className={`p-4 ${className}`}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Filter className="w-5 h-5 text-gray-500" />
-          <h3 className="text-lg font-medium">Filters</h3>
-          {activeFilterCount > 0 && (
-            <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
-              {activeFilterCount}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {activeFilterCount > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onReset}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              <X className="w-4 h-4 mr-1" />
-              Clear
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsExpanded(!isExpanded)}
-          >
-            {isExpanded ? (
-              <ChevronUp className="w-4 h-4" />
-            ) : (
-              <ChevronDown className="w-4 h-4" />
+    <Card className={`p-6 ${className}`}>
+      <div className="space-y-6">
+        {/* Header with filter count */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Filter className="w-5 h-5 text-gray-500" />
+            <h3 className="text-lg font-medium">Filters</h3>
+            {activeFilterCount > 0 && (
+              <span className="px-3 py-1 text-sm bg-blue-100 text-blue-800 rounded-full font-medium">
+                {activeFilterCount} active
+              </span>
             )}
-          </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            {activeFilterCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onReset}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-4 h-4 mr-1" />
+                Clear All
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded(!isExpanded)}
+            >
+              {isExpanded ? (
+                <>
+                  <ChevronUp className="w-4 h-4 mr-1" />
+                  Less Filters
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-4 h-4 mr-1" />
+                  More Filters
+                </>
+              )}
+            </Button>
+          </div>
         </div>
-      </div>
 
-      {/* Quick filters - always visible */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">PDB ID</label>
-          <div className="relative">
+        {/* Primary filters - always visible */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">PDB ID</label>
             <Input
               placeholder="e.g., 1abc"
               value={filters.pdb_id || ''}
               onChange={(e) => updateFilter('pdb_id', e.target.value || undefined)}
             />
-            {filters.pdb_id && (
-              <button
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                onClick={() => removeFilter('pdb_id')}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
           </div>
-        </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Chain ID</label>
-          <div className="relative">
+          <div>
+            <label className="block text-sm font-medium mb-2">Chain ID</label>
             <Input
               placeholder="e.g., A"
               value={filters.chain_id || ''}
               onChange={(e) => updateFilter('chain_id', e.target.value || undefined)}
+              maxLength={1}
             />
-            {filters.chain_id && (
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">T-Groups</label>
+            <Select
+              multiple
+              placeholder="Select T-Groups..."
+              value={filters.t_group || []}
+              onChange={(value) => updateFilter('t_group', value.length > 0 ? value : undefined)}
+              options={tGroups.map(group => ({ value: group, label: group }))}
+              search
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">H-Groups</label>
+            <Select
+              multiple
+              placeholder="Select H-Groups..."
+              value={filters.h_group || []}
+              onChange={(value) => updateFilter('h_group', value.length > 0 ? value : undefined)}
+              options={hGroups.map(group => ({ value: group, label: group }))}
+              search
+            />
+          </div>
+        </div>
+
+        {/* Confidence range with quick presets */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm font-medium">Confidence Range</label>
+            {(filters.min_confidence !== undefined || filters.max_confidence !== undefined) && (
               <button
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                onClick={() => removeFilter('chain_id')}
+                onClick={clearConfidenceFilters}
+                className="text-xs text-gray-500 hover:text-gray-700"
               >
-                <X className="w-4 h-4" />
+                Clear
               </button>
             )}
           </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Min Confidence</label>
-          <Input
-            type="number"
-            min="0"
-            max="1"
-            step="0.1"
-            placeholder="0.0"
-            value={filters.min_confidence ?? ''}
-            onChange={(e) => updateFilter('min_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Max Confidence</label>
-          <Input
-            type="number"
-            min="0"
-            max="1"
-            step="0.1"
-            placeholder="1.0"
-            value={filters.max_confidence ?? ''}
-            onChange={(e) => updateFilter('max_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
-          />
-        </div>
-      </div>
-
-      {/* Advanced filters - expandable */}
-      {isExpanded && (
-        <div className="border-t pt-4">
-          <h4 className="text-sm font-medium mb-3 text-gray-700">Classification Groups</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">T-Groups</label>
-              <Select
-                multiple
-                placeholder="Select T-Groups"
-                value={filters.t_group || []}
-                onChange={(value) => updateFilter('t_group', value.length > 0 ? value : undefined)}
-                options={tGroups.map(group => ({ value: group, label: group }))}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">H-Groups</label>
-              <Select
-                multiple
-                placeholder="Select H-Groups"
-                value={filters.h_group || []}
-                onChange={(value) => updateFilter('h_group', value.length > 0 ? value : undefined)}
-                options={hGroups.map(group => ({ value: group, label: group }))}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">X-Groups</label>
-              <Select
-                multiple
-                placeholder="Select X-Groups"
-                value={filters.x_group || []}
-                onChange={(value) => updateFilter('x_group', value.length > 0 ? value : undefined)}
-                options={xGroups.map(group => ({ value: group, label: group }))}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">A-Groups</label>
-              <Select
-                multiple
-                placeholder="Select A-Groups"
-                value={filters.a_group || []}
-                onChange={(value) => updateFilter('a_group', value.length > 0 ? value : undefined)}
-                options={aGroups.map(group => ({ value: group, label: group }))}
-              />
-            </div>
-          </div>
-
-          <h4 className="text-sm font-medium mb-3 text-gray-700">Protein Properties</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Min Sequence Length</label>
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
               <Input
                 type="number"
-                min="1"
-                placeholder="e.g., 50"
-                value={filters.sequence_length_min ?? ''}
-                onChange={(e) => updateFilter('sequence_length_min', e.target.value ? parseInt(e.target.value) : undefined)}
+                min="0"
+                max="1"
+                step="0.1"
+                placeholder="Min (0.0)"
+                value={filters.min_confidence ?? ''}
+                onChange={(e) => updateFilter('min_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
               />
             </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Max Sequence Length</label>
+            <span className="text-gray-500">to</span>
+            <div className="flex-1">
               <Input
                 type="number"
-                min="1"
-                placeholder="e.g., 1000"
-                value={filters.sequence_length_max ?? ''}
-                onChange={(e) => updateFilter('sequence_length_max', e.target.value ? parseInt(e.target.value) : undefined)}
+                min="0"
+                max="1"
+                step="0.1"
+                placeholder="Max (1.0)"
+                value={filters.max_confidence ?? ''}
+                onChange={(e) => updateFilter('max_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
               />
+            </div>
+            {/* Quick preset buttons */}
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  updateFilter('min_confidence', 0.8)
+                  updateFilter('max_confidence', undefined)
+                }}
+                className="px-2 py-1 text-xs"
+              >
+                High
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  updateFilter('min_confidence', 0.5)
+                  updateFilter('max_confidence', 0.8)
+                }}
+                className="px-2 py-1 text-xs"
+              >
+                Med
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  updateFilter('min_confidence', undefined)
+                  updateFilter('max_confidence', 0.5)
+                }}
+                className="px-2 py-1 text-xs"
+              >
+                Low
+              </Button>
             </div>
           </div>
         </div>
-      )}
 
-      {/* Active filters summary */}
-      {activeFilterCount > 0 && (
-        <div className="mt-4 pt-4 border-t">
-          <div className="flex flex-wrap gap-2">
-            {Object.entries(filters).map(([key, value]) => {
-              if (value === undefined || value === null) return null
-              
-              let displayValue: string
-              if (Array.isArray(value)) {
-                displayValue = value.join(', ')
-              } else {
-                displayValue = String(value)
-              }
-
-              return (
-                <span
-                  key={key}
-                  className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+        {/* Advanced filters - expandable */}
+        {isExpanded && (
+          <div className="border-t pt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-md font-medium text-gray-700">Additional Classification</h4>
+              {(filters.x_group || filters.a_group) && (
+                <button
+                  onClick={clearClassificationFilters}
+                  className="text-xs text-gray-500 hover:text-gray-700"
                 >
-                  <span className="font-medium">{key}:</span>
-                  <span>{displayValue}</span>
-                  <button
-                    onClick={() => removeFilter(key as keyof DomainFilters)}
-                    className="ml-1 hover:text-blue-900"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )
-            })}
+                  Clear All Classification
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">X-Groups (Architecture)</label>
+                <Select
+                  multiple
+                  placeholder="Select X-Groups..."
+                  value={filters.x_group || []}
+                  onChange={(value) => updateFilter('x_group', value.length > 0 ? value : undefined)}
+                  options={hGroups.map(group => ({ value: group, label: group }))}
+                  search
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">A-Groups (Fold)</label>
+                <Select
+                  multiple
+                  placeholder="Select A-Groups..."
+                  value={filters.a_group || []}
+                  onChange={(value) => updateFilter('a_group', value.length > 0 ? value : undefined)}
+                  options={['a.1', 'a.2', 'a.3', 'a.4', 'a.5'].map(group => ({ value: group, label: group }))}
+                  search
+                />
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-md font-medium text-gray-700 mb-3">Sequence Properties</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Min Sequence Length</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="e.g., 50"
+                    value={filters.sequence_length_min ?? ''}
+                    onChange={(e) => updateFilter('sequence_length_min', e.target.value ? parseInt(e.target.value) : undefined)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Max Sequence Length</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="e.g., 1000"
+                    value={filters.sequence_length_max ?? ''}
+                    onChange={(e) => updateFilter('sequence_length_max', e.target.value ? parseInt(e.target.value) : undefined)}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Active filters summary */}
+        {activeFilterCount > 0 && (
+          <div className="border-t pt-4">
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(filters).map(([key, value]) => {
+                if (value === undefined || value === null || value === '') return null
+
+                let displayValue: string
+                if (Array.isArray(value)) {
+                  if (value.length === 0) return null
+                  displayValue = value.length === 1 ? value[0] : `${value.length} selected`
+                } else {
+                  displayValue = String(value)
+                }
+
+                // Prettier key names
+                const keyLabels: Record<string, string> = {
+                  pdb_id: 'PDB',
+                  chain_id: 'Chain',
+                  t_group: 'T-Group',
+                  h_group: 'H-Group',
+                  x_group: 'X-Group',
+                  a_group: 'A-Group',
+                  min_confidence: 'Min Confidence',
+                  max_confidence: 'Max Confidence',
+                  sequence_length_min: 'Min Length',
+                  sequence_length_max: 'Max Length'
+                }
+
+                return (
+                  <span
+                    key={key}
+                    className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-800 rounded-full text-sm border border-blue-200"
+                  >
+                    <span className="font-medium">{keyLabels[key] || key}:</span>
+                    <span>{displayValue}</span>
+                    <button
+                      onClick={() => removeFilter(key as keyof DomainFilters)}
+                      className="ml-1 hover:text-blue-900 hover:bg-blue-200 rounded-full p-0.5"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
     </Card>
   )
 }

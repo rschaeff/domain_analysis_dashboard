@@ -60,17 +60,18 @@ const [fileFormat, setFileFormat] = useState<'auto' | 'pdb' | 'mmcif' | 'mmtf'>(
 // In the controls section, add:
 <div className="mb-4">
   <div className="text-sm font-medium mb-2">File Format</div>
-  <select
-    value={fileFormat}
-    onChange={(e) => setFileFormat(e.target.value as any)}
-    className="w-full px-3 py-2 border rounded"
-    disabled={useLocalRepository} // Disable when using local repo (will auto-detect)
-  >
-    <option value="auto">Auto-detect</option>
-    <option value="mmcif">mmCIF (.cif)</option>
-    <option value="pdb">Legacy PDB (.pdb/.ent)</option>
-    <option value="mmtf">MMTF (binary)</option>
-  </select>
+// Correct syntax for the onChange handler in a select element
+<select
+  value={fileFormat}
+  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFileFormat(e.target.value as 'auto' | 'pdb' | 'mmcif' | 'mmtf')}
+  className="w-full px-3 py-2 border rounded"
+  disabled={useLocalRepository}
+>
+  <option value="auto">Auto-detect</option>
+  <option value="mmcif">mmCIF (.cif)</option>
+  <option value="pdb">Legacy PDB (.pdb/.ent)</option>
+  <option value="mmtf">MMTF (binary)</option>
+</select>
   {useLocalRepository && (
     <p className="text-xs text-gray-500 mt-1">
       Format auto-detected when using local repository

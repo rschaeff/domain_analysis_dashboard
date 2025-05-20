@@ -1,30 +1,4 @@
-// Debug function to show structure info
-  const showStructureInfo = useCallback((plugin: any) => {
-    try {
-      if (!plugin.managers?.structure?.hierarchy?.current?.structures) {
-        log('No structures available');
-        return;
-      }
-
-      const structures = plugin.managers.structure.hierarchy.current.structures;
-      log(`Structure count: ${structures.length}`);
-
-      structures.forEach((struct: any, i: number) => {
-        const label = struct.cell?.obj?.label || 'Unnamed';
-        const atoms = struct.cell?.obj?.data?.model?.atomCount || 0;
-        log(`Structure ${i+1}: ${label} (${atoms} atoms)`);
-
-        if (struct.components?.length) {
-          log(`  Components: ${struct.components.length}`);
-          struct.components.forEach((comp: any, j: number) => {
-            log(`  - Component ${j+1}: ${comp.cell?.obj?.label || 'Unnamed'}`);
-          });
-        }
-      });
-    } catch (error) {
-      log(`Error in structure info: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, [log]);'use client'
+'use client'
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { getValidFormatName, detectFormatFromContent, getFileExtension } from './formats';
@@ -270,6 +244,34 @@ export function SafeModeViewer({
       handleError(`Error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }, [pdbId, chainId, status, canLoad, handleError, log, onReady]);
+
+// Debug function to show structure info
+  const showStructureInfo = useCallback((plugin: any) => {
+    try {
+      if (!plugin.managers?.structure?.hierarchy?.current?.structures) {
+        log('No structures available');
+        return;
+      }
+
+      const structures = plugin.managers.structure.hierarchy.current.structures;
+      log(`Structure count: ${structures.length}`);
+
+      structures.forEach((struct: any, i: number) => {
+        const label = struct.cell?.obj?.label || 'Unnamed';
+        const atoms = struct.cell?.obj?.data?.model?.atomCount || 0;
+        log(`Structure ${i+1}: ${label} (${atoms} atoms)`);
+
+        if (struct.components?.length) {
+          log(`  Components: ${struct.components.length}`);
+          struct.components.forEach((comp: any, j: number) => {
+            log(`  - Component ${j+1}: ${comp.cell?.obj?.label || 'Unnamed'}`);
+          });
+        }
+      });
+    } catch (error) {
+      log(`Error in structure info: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [log]);
 
   // CSS styling effect
   useEffect(() => {

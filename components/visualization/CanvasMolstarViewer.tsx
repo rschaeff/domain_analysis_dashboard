@@ -50,7 +50,7 @@ export function CanvasMolstarViewer({
         setIsLoading(true)
         setError(null)
 
-        // Create plugin with custom spec
+      // Create plugin with custom spec
         const plugin = new PluginContext(DefaultPluginSpec())
         await plugin.init()
 
@@ -62,8 +62,10 @@ export function CanvasMolstarViewer({
         // Store reference to plugin
         pluginRef.current = plugin
 
-        // Set background
-        plugin.canvas3d?.setBackground({ color: 'white' })
+        // Set background (FIXED)
+        plugin.canvas3d?.setProps({
+          backgroundColor: { color: 'white' }
+        })
 
         // Load structure from PDB
         const url = `https://files.rcsb.org/download/${pdbId}.pdb`

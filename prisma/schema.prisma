@@ -37,31 +37,35 @@ model PartitionProteins {
 }
 
 model PartitionDomains {
-  id           Int     @id @default(autoincrement())
-  protein_id   Int
-  domain_number Int
-  domain_id    String?
-  start_pos    Int
-  end_pos      Int
-  range        String
-  source       String?
-  source_id    String?
-  confidence   Float?
-  t_group      String?
-  h_group      String?
-  x_group      String?
-  a_group      String?
-  is_manual_rep Boolean @default(false)
-  is_f70       Boolean @default(false)
-  is_f40       Boolean @default(false)
-  is_f99       Boolean @default(false)
-  created_at   DateTime @default(now())
+  id             Int      @id @default(autoincrement())
+  protein_id     Int
+  domain_number  Int
+  domain_id      String?
+  start_pos      Int
+  end_pos        Int
+  range          String
+  source         String?
+  source_id      String?
+  confidence     Float?
+  t_group        String?
+  h_group        String?
+  x_group        String?
+  a_group        String?
+  is_manual_rep  Boolean  @default(false)
+  is_f70         Boolean  @default(false)
+  is_f40         Boolean  @default(false)
+  is_f99         Boolean  @default(false)
+  // PDB-specific fields for structural visualization
+  pdb_range      String?
+  pdb_start      String?
+  pdb_end        String?
+  created_at     DateTime @default(now())
 
   // Relations
-  protein      PartitionProteins     @relation(fields: [protein_id], references: [id], onDelete: Cascade)
-  evidence     DomainEvidence[]
-  comparisons  DomainComparisons[]
-  modifications DomainModifications[]
+  protein        PartitionProteins      @relation(fields: [protein_id], references: [id], onDelete: Cascade)
+  evidence       DomainEvidence[]
+  comparisons    DomainComparisons[]
+  modifications  DomainModifications[]
 
   @@unique([protein_id, domain_number])
   @@map("partition_domains")

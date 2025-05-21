@@ -122,41 +122,43 @@ export async function GET(
 
     // Fetch reference domains used as evidence
     // Added pdb_range, pdb_start, and pdb_end fields from domain table
-    const referenceDomainsQuery = `
-      SELECT DISTINCT
-        d.id,
-        NULL as protein_id,
-        $1 as pdb_id,
-        $2 as chain_id,
-        NULL as batch_id,
-        NULL as reference_version,
-        NULL as timestamp,
-        ROW_NUMBER() OVER (ORDER BY d.id) as domain_number,
-        d.ecod_domain_id as domain_id,
-        d.range,
-        d.pdb_range,
-        d.pdb_start,
-        d.pdb_end,
-        de.evidence_type as source,
-        COALESCE(de.source_id, de.hit_id, de.domain_ref_id) as source_id,
-        de.confidence,
-        d.t_group,
-        d.h_group,
-        d.x_group,
-        d.a_group,
-        1 as evidence_count,
-        de.evidence_type as evidence_types,
-        'reference' as domain_type
-      FROM pdb_analysis.domain_evidence de
-      JOIN pdb_analysis.partition_domain_summary pds ON de.domain_id = pds.id
-      JOIN pdb_analysis.domain d ON (
-        de.source_id = d.ecod_domain_id OR
-        de.hit_id = d.ecod_domain_id OR
-        de.domain_ref_id = d.ecod_domain_id
-      )
-      WHERE pds.pdb_id = $1 AND pds.chain_id = $2
-      ORDER BY d.id
-    `
+// In app/api/proteins/[id]/domains/route.ts, around line 150-160
+const referenceDomainsQuery = `
+  SELECT DISTINCT
+    d.id,
+    NULL as protein_id,
+    $1 as pdb_id,
+    $2 as chain_id,
+    NULL as batch_id,
+    NULL as reference_version,
+    NULL as timestamp,
+    ROW_NUMBER() OVER (ORDER BY d.id) as domain_number,
+    d.ecod_domain_id as domain_id,
+    d.range,
+    NULL as pdb_range,    -- NULL instead of d.pdb_range
+    NULL as pdb_start,    -- NULL instead of d.pdb_start
+    NULL as pdb_end,      -- NULL instead of d.pdb_end
+    de.evidence_type as source,
+    COALESCE(de.source_id, de.hit_id, de.domain_ref_id) as source_id,
+    de.confidence,
+    d.t_group,
+    d.h_group,
+    d.x_group,
+    d.a_group,
+    1 as evidence_count,
+    de.evidence_type as evidence_types,
+    'reference' as domain_type
+  FROM pdb_analysis.domain_evidence de
+  JOIN pdb_analysis.partition_domain_summary pds ON de.domain_id = pds.id
+  JOIN pdb_analysis.domain d ON (
+    de.source_id = d.ecod_domain_id OR
+    de.hit_id = d.ecod_domain_id OR
+    de.domain_ref_id = d.ecod_domain_id
+  )
+  WHERE pds.pdb_id = $1 AND pds.chain_id = $2
+  ORDER BY d.id
+`
+
 
     const referenceDomains = await prisma.$queryRawUnsafe(referenceDomainsQuery, pdbId, chainId)
 

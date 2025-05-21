@@ -87,7 +87,7 @@ export async function GET(
     }
 
     // Fetch putative domains for this protein
-    // Only use range field, parse it for start/end positions
+    // Added pdb_range, pdb_start, and pdb_end fields
     const putativeDomainsQuery = `
       SELECT
         pds.id,
@@ -100,6 +100,9 @@ export async function GET(
         pds.domain_number,
         pds.domain_id,
         pds.range,
+        pds.pdb_range,
+        pds.pdb_start,
+        pds.pdb_end,
         pds.source,
         pds.source_id,
         pds.confidence,
@@ -118,7 +121,7 @@ export async function GET(
     const putativeDomains = await prisma.$queryRawUnsafe(putativeDomainsQuery, pdbId, chainId)
 
     // Fetch reference domains used as evidence
-    // Fixed: Use pdb_analysis.domain (singular) not pdb_analysis.domains (plural)
+    // Added pdb_range, pdb_start, and pdb_end fields from domain table
     const referenceDomainsQuery = `
       SELECT DISTINCT
         d.id,
@@ -131,6 +134,9 @@ export async function GET(
         ROW_NUMBER() OVER (ORDER BY d.id) as domain_number,
         d.ecod_domain_id as domain_id,
         d.range,
+        d.pdb_range,
+        d.pdb_start,
+        d.pdb_end,
         de.evidence_type as source,
         COALESCE(de.source_id, de.hit_id, de.domain_ref_id) as source_id,
         de.confidence,

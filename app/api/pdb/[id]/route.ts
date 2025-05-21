@@ -1,16 +1,16 @@
+// File: app/api/pdb/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
- * API route to proxy PDB/mmCIF file requests to avoid CORS issues
+ * Simplified API route to proxy PDB file requests to avoid CORS issues
  * Usage:
- * - GET /api/pdb/cif/1cbs - Fetches mmCIF format for 1cbs
- * - GET /api/pdb/pdb/1cbs - Fetches PDB format for 1cbs
+ * - GET /api/pdb/1cbs - Fetches PDB format for 1cbs
  */
 export async function GET(
   req: NextRequest,
-  { params }: { params: { format: string; id: string } }
+  { params }: { params: { id: string } }
 ) {
-  const { format, id } = params;
+  const { id } = params;
 
   // Validate ID format - basic check
   if (!id.match(/^[a-zA-Z0-9]{4}$/)) {
@@ -20,17 +20,8 @@ export async function GET(
     );
   }
 
-  // Validate format
-  if (format !== 'cif' && format !== 'pdb') {
-    return NextResponse.json(
-      { error: 'Invalid format. Must be "cif" or "pdb".' },
-      { status: 400 }
-    );
-  }
-
-  // Construct the URL to fetch from RCSB PDB
-  const fileExtension = format === 'cif' ? 'cif' : 'pdb';
-  const url = `https://files.rcsb.org/download/${id.toLowerCase()}.${fileExtension}`;
+  // Always use PDB format for 3DMol compatibility
+  const url = `https://files.rcsb.org/download/${id.toLowerCase()}.pdb`;
 
   try {
     // Fetch the file
@@ -44,21 +35,20 @@ export async function GET(
       return NextResponse.json(
         {
           error: `Failed to fetch PDB file: ${response.status} ${response.statusText}`,
-          pdbId: id,
-          format: format
+          pdbId: id
         },
         { status: response.status }
       );
     }
 
-    // Get the response as array buffer
-    const data = await response.arrayBuffer();
+    // Get the response as text
+    const data = await response.text();
 
     // Return the file with appropriate headers
     return new NextResponse(data, {
       headers: {
-        'Content-Type': format === 'cif' ? 'chemical/x-cif' : 'chemical/x-pdb',
-        'Content-Disposition': `inline; filename="${id}.${fileExtension}"`,
+        'Content-Type': 'chemical/x-pdb',
+        'Content-Disposition': `inline; filename="${id}.pdb"`,
         'Cache-Control': 'public, max-age=86400',
       },
     });
@@ -68,8 +58,7 @@ export async function GET(
       {
         error: 'Error fetching PDB file',
         details: error instanceof Error ? error.message : String(error),
-        pdbId: id,
-        format: format
+        pdbId: id
       },
       { status: 500 }
     );

@@ -216,7 +216,7 @@ highlightDomain: (domainIndex: number) => {
     return range?.includes(',') || false;
   }
 
-  // Apply the domain styling
+// Apply the domain styling
 const applyDomainStyling = (viewer: any) => {
   if (!viewer) return;
 
@@ -305,7 +305,6 @@ const applyDomainStyling = (viewer: any) => {
   // Final render
   viewer.render();
 };
-
   // Initialize and load structure
   useEffect(() => {
     // Only run in browser environment
@@ -348,10 +347,15 @@ const applyDomainStyling = (viewer: any) => {
         viewerRef.current = viewer;
 
         // Load structure from PDB
+        // Updated PDB loading code in ThreeDMolViewer.tsx
+
+        // Load structure from PDB
         debugLog(`Loading PDB ID: ${pdbId}`);
         try {
-          // First try the standard PDB URL
-          const pdbUrl = `pdb:${pdbId}`;
+          // Use local API proxy instead of direct PDB access
+          const pdbUrl = `/api/pdb/${pdbId}`;
+
+          // Use URL fetch instead of pdb: protocol
           $3Dmol.download(pdbUrl, viewer, {}, function(model) {
             if (!model) {
               handleError(`Failed to load model: ${pdbId}`);

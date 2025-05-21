@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
 import { MultiTrackDomainVisualization } from '@/components/visualization/MultiTrackDomainVisualization'
-import { Eye, Download, BarChart3, Users } from 'lucide-react'
+import { Eye, Download, BarChart3, Users, Table, Grid } from 'lucide-react'
 
 // Enhanced API Response Type
 interface DomainsResponse {
@@ -37,36 +37,37 @@ export default function DashboardPage() {
     size: 50,
     total: 0
   })
-    // Update statistics state to match API response
-    const [statistics, setStatistics] = useState({
-      total_proteins: 0,
-      total_domains: 0,
-      classified_chains: 0,
-      unclassified_chains: 0,
-      avg_domain_coverage: 0
-    });
+
+  const [statistics, setStatistics] = useState({
+    total_proteins: 0,
+    total_domains: 0,
+    classified_chains: 0,
+    unclassified_chains: 0,
+    avg_domain_coverage: 0
+  });
+
   const [selectedDomain, setSelectedDomain] = useState<DomainSummary | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'visualization'>('table')
   const [visualizationMode, setVisualizationMode] = useState<'simple' | 'detailed'>('detailed')
   const [initialLoad, setInitialLoad] = useState(true)
 
   // Fetch dashboard stats
-const fetchDashboardStats = async () => {
-  setStatsLoading(true);
-  try {
-    const response = await fetch('/api/dashboard/stats');
-    if (response.ok) {
-      const data = await response.json();
-      setStatistics(data);
-    } else {
-      console.error('Failed to fetch dashboard stats:', response.statusText);
+  const fetchDashboardStats = async () => {
+    setStatsLoading(true);
+    try {
+      const response = await fetch('/api/dashboard/stats');
+      if (response.ok) {
+        const data = await response.json();
+        setStatistics(data);
+      } else {
+        console.error('Failed to fetch dashboard stats:', response.statusText);
+      }
+    } catch (err) {
+      console.error('Error fetching dashboard stats:', err);
+    } finally {
+      setStatsLoading(false);
     }
-  } catch (err) {
-    console.error('Error fetching dashboard stats:', err);
-  } finally {
-    setStatsLoading(false);
-  }
-};
+  };
 
   // Fetch domains data
   const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {
@@ -395,393 +396,402 @@ const fetchDashboardStats = async () => {
   )
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Domain Analysis Dashboard</h1>
-          <p className="text-gray-600 mt-1">
-            Analyze and compare putative domain boundaries with reference data
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant={viewMode === 'table' ? 'default' : 'outline'}
-            onClick={() => setViewMode('table')}
-          >
-            Table View
-          </Button>
-          <Button
-            variant={viewMode === 'visualization' ? 'default' : 'outline'}
-            onClick={() => setViewMode('visualization')}
-          >
-            Visualization
-          </Button>
-          {viewMode === 'visualization' && (
-            <div className="flex border rounded-md">
-              <Button
-                size="sm"
-                variant={visualizationMode === 'simple' ? 'default' : 'ghost'}
-                onClick={() => setVisualizationMode('simple')}
-                className="rounded-r-none"
-              >
-                Simple
-              </Button>
-              <Button
-                size="sm"
-                variant={visualizationMode === 'detailed' ? 'default' : 'ghost'}
-                onClick={() => setVisualizationMode('detailed')}
-                className="rounded-l-none"
-              >
-                Detailed
-              </Button>
-            </div>
-          )}
-          <Button variant="outline" onClick={handleExport}>
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </Button>
-        </div>
-      </div>
-
-      {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <StatCard
-            title="Total Proteins"
-            value={statistics.total_proteins ? statistics.total_proteins.toLocaleString() : '0'}
-            color="text-blue-600"
-            loading={statsLoading}
-          />
-          <StatCard
-            title="Total Domains"
-            value={statistics.total_domains ? statistics.total_domains.toLocaleString() : '0'}
-            color="text-green-600"
-            loading={statsLoading}
-          />
-          <StatCard
-            title="Classified Proteins"
-            value={statistics.classified_chains ?
-              `${statistics.classified_chains.toLocaleString()} (${
-                statistics.total_proteins ?
-                Math.round((statistics.classified_chains / statistics.total_proteins) * 100) : 0
-              }%)` : '0 (0%)'
-            }
-            color="text-purple-600"
-            loading={statsLoading}
-          />
-          <StatCard
-            title="Domain Coverage"
-            value={statistics.avg_domain_coverage ?
-              `${statistics.avg_domain_coverage.toFixed(1)}%` : '0%'
-            }
-            color="text-orange-600"
-            loading={statsLoading}
-            tooltip="Average percentage of protein length covered by domains"
-          />
-        </div>
-
-      {/* Enhanced Filters */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg">
-        <FilterPanel
-          filters={filters}
-          onFiltersChange={handleFiltersChange}
-          onReset={handleResetFilters}
-        />
-        {activeFilterCount > 0 && (
-          <div className="px-6 pb-4 text-sm text-blue-700">
-            💡 <strong>Tip:</strong> Click on classification badges in the table below to quickly add or remove filters!
-          </div>
-        )}
-      </div>
-
-      {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          {loading ? (
-            <Card className="p-8 text-center">
-              <LoadingSpinner />
-              <p className="mt-4 text-gray-600">Loading domains...</p>
-            </Card>
-          ) : error ? (
-            <Card className="p-8 text-center">
-              <div className="text-red-600 mb-4">Error: {error}</div>
-              <Button onClick={() => fetchDomains(pagination.page)}>Retry</Button>
-            </Card>
-          ) : domains.length === 0 ? (
-            <Card className="p-8 text-center">
-              <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <div className="text-gray-500 mb-4">No domains found</div>
-              <p className="text-sm text-gray-400">
-                Try adjusting your filters or check if data is available in the database.
+    <div className="min-h-screen bg-gray-50">
+      {/* Container with responsive max-width */}
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Domain Analysis Dashboard</h1>
+              <p className="text-gray-600 mt-1">
+                Analyze and compare putative domain boundaries with reference data
               </p>
-              <Button
-                onClick={() => fetchDomains(1)}
-                className="mt-4"
-                variant="outline"
-              >
-                Load Data
-              </Button>
-            </Card>
-          ) : viewMode === 'table' ? (
-            <div className="w-full min-w-0">
-              <DataTable
-                data={domains}
-                columns={columns}
-                pagination={pagination}
-                onPageChange={handlePageChange}
-                onRowClick={handleDomainClick}
-                loading={loading}
-              />
             </div>
-          ) : (
-            <div className="space-y-6">
-              {/* Group by protein for visualization */}
-              {Object.entries(
-                domains.reduce((acc, domain) => {
-                  const key = `${domain.pdb_id}_${domain.chain_id}`
-                  if (!acc[key]) acc[key] = []
-                  acc[key].push(domain)
-                  return acc
-                }, {} as Record<string, DomainSummary[]>)
-              ).map(([proteinKey, proteinDomains]) => {
-                const firstDomain = proteinDomains[0]
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={viewMode === 'table' ? 'default' : 'outline'}
+                onClick={() => setViewMode('table')}
+                className="flex items-center gap-2"
+              >
+                <Table className="w-4 h-4" />
+                Table View
+              </Button>
+              <Button
+                variant={viewMode === 'visualization' ? 'default' : 'outline'}
+                onClick={() => setViewMode('visualization')}
+                className="flex items-center gap-2"
+              >
+                <Grid className="w-4 h-4" />
+                Visualization
+              </Button>
+              {viewMode === 'visualization' && (
+                <div className="flex border rounded-md">
+                  <Button
+                    size="sm"
+                    variant={visualizationMode === 'simple' ? 'default' : 'ghost'}
+                    onClick={() => setVisualizationMode('simple')}
+                    className="rounded-r-none"
+                  >
+                    Simple
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={visualizationMode === 'detailed' ? 'default' : 'ghost'}
+                    onClick={() => setVisualizationMode('detailed')}
+                    className="rounded-l-none"
+                  >
+                    Detailed
+                  </Button>
+                </div>
+              )}
+              <Button variant="outline" onClick={handleExport} className="flex items-center gap-2">
+                <Download className="w-4 h-4" />
+                Export
+              </Button>
+            </div>
+          </div>
 
-                // Separate putative and reference domains
-                const putativeDomains = proteinDomains.filter(d =>
-                  d.domain_type === 'putative' || !d.domain_type
-                )
-                const referenceDomains = proteinDomains.filter(d =>
-                  d.domain_type === 'reference'
-                )
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="Total Proteins"
+              value={statistics.total_proteins ? statistics.total_proteins.toLocaleString() : '0'}
+              color="text-blue-600"
+              loading={statsLoading}
+            />
+            <StatCard
+              title="Total Domains"
+              value={statistics.total_domains ? statistics.total_domains.toLocaleString() : '0'}
+              color="text-green-600"
+              loading={statsLoading}
+            />
+            <StatCard
+              title="Classified Proteins"
+              value={statistics.classified_chains ?
+                `${statistics.classified_chains.toLocaleString()} (${
+                  statistics.total_proteins ?
+                  Math.round((statistics.classified_chains / statistics.total_proteins) * 100) : 0
+                }%)` : '0 (0%)'
+              }
+              color="text-purple-600"
+              loading={statsLoading}
+            />
+            <StatCard
+              title="Domain Coverage"
+              value={statistics.avg_domain_coverage ?
+                `${statistics.avg_domain_coverage.toFixed(1)}%` : '0%'
+              }
+              color="text-orange-600"
+              loading={statsLoading}
+            />
+          </div>
 
-                // Use actual sequence length from domain data, or estimate from ranges
-                let sequenceLength = firstDomain.protein_sequence_length
+          {/* Enhanced Filters */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg">
+            <FilterPanel
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              onReset={handleResetFilters}
+            />
+            {activeFilterCount > 0 && (
+              <div className="px-6 pb-4 text-sm text-blue-700">
+                💡 <strong>Tip:</strong> Click on classification badges in the table below to quickly add or remove filters!
+              </div>
+            )}
+          </div>
 
-                if (!sequenceLength) {
-                  // Fallback: estimate from maximum domain range
-                  sequenceLength = Math.max(
-                    ...proteinDomains.map(d => {
-                      const rangeParts = d.range?.split(',') || []
-                      let maxPos = 0
-                      for (const part of rangeParts) {
-                        const withoutChain = part.includes(':') ? part.split(':')[1] : part
-                        const endPos = parseInt(withoutChain.split('-')[1] || '0')
-                        if (!isNaN(endPos)) {
-                          maxPos = Math.max(maxPos, endPos)
-                        }
+          {/* Main Content Layout */}
+          <div className={`${selectedDomain ? 'grid grid-cols-1 xl:grid-cols-4 gap-6' : 'w-full'}`}>
+            {/* Main Content Area */}
+            <div className={selectedDomain ? 'xl:col-span-3' : 'w-full'}>
+              {loading ? (
+                <Card className="p-8 text-center">
+                  <LoadingSpinner />
+                  <p className="mt-4 text-gray-600">Loading domains...</p>
+                </Card>
+              ) : error ? (
+                <Card className="p-8 text-center">
+                  <div className="text-red-600 mb-4">Error: {error}</div>
+                  <Button onClick={() => fetchDomains(pagination.page)}>Retry</Button>
+                </Card>
+              ) : domains.length === 0 ? (
+                <Card className="p-8 text-center">
+                  <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                  <div className="text-gray-500 mb-4">No domains found</div>
+                  <p className="text-sm text-gray-400">
+                    Try adjusting your filters or check if data is available in the database.
+                  </p>
+                  <Button
+                    onClick={() => fetchDomains(1)}
+                    className="mt-4"
+                    variant="outline"
+                  >
+                    Load Data
+                  </Button>
+                </Card>
+              ) : viewMode === 'table' ? (
+                <div className="w-full">
+                  <DataTable
+                    data={domains}
+                    columns={columns}
+                    pagination={pagination}
+                    onPageChange={handlePageChange}
+                    onRowClick={handleDomainClick}
+                    loading={loading}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Visualization Content */}
+                  {Object.entries(
+                    domains.reduce((acc, domain) => {
+                      const key = `${domain.pdb_id}_${domain.chain_id}`
+                      if (!acc[key]) acc[key] = []
+                      acc[key].push(domain)
+                      return acc
+                    }, {} as Record<string, DomainSummary[]>)
+                  ).map(([proteinKey, proteinDomains]) => {
+                    const firstDomain = proteinDomains[0]
+
+                    // Separate putative and reference domains
+                    const putativeDomains = proteinDomains.filter(d =>
+                      d.domain_type === 'putative' || !d.domain_type
+                    )
+                    const referenceDomains = proteinDomains.filter(d =>
+                      d.domain_type === 'reference'
+                    )
+
+                    // Use actual sequence length from domain data, or estimate from ranges
+                    let sequenceLength = firstDomain.protein_sequence_length
+
+                    if (!sequenceLength) {
+                      // Fallback: estimate from maximum domain range
+                      sequenceLength = Math.max(
+                        ...proteinDomains.map(d => {
+                          const rangeParts = d.range?.split(',') || []
+                          let maxPos = 0
+                          for (const part of rangeParts) {
+                            const withoutChain = part.includes(':') ? part.split(':')[1] : part
+                            const endPos = parseInt(withoutChain.split('-')[1] || '0')
+                            if (!isNaN(endPos)) {
+                              maxPos = Math.max(maxPos, endPos)
+                            }
+                          }
+                          return maxPos
+                        })
+                      )
+
+                      // Add some padding to the estimated length
+                      if (sequenceLength > 0) {
+                        sequenceLength = Math.ceil(sequenceLength * 1.1)
                       }
-                      return maxPos
-                    })
-                  )
 
-                  // Add some padding to the estimated length
-                  if (sequenceLength > 0) {
-                    sequenceLength = Math.ceil(sequenceLength * 1.1)
-                  }
+                      // If we still don't have a length, use a default
+                      if (!sequenceLength || sequenceLength <= 0) {
+                        sequenceLength = 500
+                      }
+                    }
 
-                  // If we still don't have a length, use a default
-                  if (!sequenceLength || sequenceLength <= 0) {
-                    sequenceLength = 500
-                  }
-                }
+                    return visualizationMode === 'simple' ? (
+                      // Simple visualization - only putative domains
+                      <Card key={proteinKey} className="p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-4">
+                            <h3 className="text-lg font-semibold">
+                              Protein: {firstDomain.pdb_id}_{firstDomain.chain_id}
+                            </h3>
+                            <div className="text-sm text-gray-600">
+                              {putativeDomains.length} putative domain{putativeDomains.length !== 1 ? 's' : ''} | {sequenceLength} residues
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleViewProtein(firstDomain)}
+                          >
+                            <Eye className="w-4 h-4 mr-1" />
+                            View Details
+                          </Button>
+                        </div>
 
-                return visualizationMode === 'simple' ? (
-                  // Simple visualization - only putative domains
-                  <Card key={proteinKey} className="p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-4">
-                        <h3 className="text-lg font-semibold">
-                          Protein: {firstDomain.pdb_id}_{firstDomain.chain_id}
-                        </h3>
-                        <div className="text-sm text-gray-600">
-                          {putativeDomains.length} putative domain{putativeDomains.length !== 1 ? 's' : ''} | {sequenceLength} residues
+                        <BoundaryVisualization
+                          protein={{
+                            id: firstDomain.protein_id,
+                            pdb_id: firstDomain.pdb_id,
+                            chain_id: firstDomain.chain_id,
+                            sequence_length: sequenceLength
+                          }}
+                          domains={putativeDomains}
+                          onDomainClick={handleDomainClick}
+                        />
+
+                        {referenceDomains.length > 0 && (
+                          <div className="mt-3 text-sm text-gray-600 bg-blue-50 p-3 rounded">
+                            💡 This protein also has {referenceDomains.length} reference domains from ECOD used as supporting evidence.
+                          </div>
+                        )}
+                      </Card>
+                    ) : (
+                      // Detailed multi-track visualization
+                      <MultiTrackDomainVisualization
+                        key={proteinKey}
+                        protein={{
+                          id: firstDomain.protein_id,
+                          pdb_id: firstDomain.pdb_id,
+                          chain_id: firstDomain.chain_id,
+                          sequence_length: sequenceLength
+                        }}
+                        putativeDomains={putativeDomains}
+                        referenceDomains={referenceDomains}
+                        onDomainClick={handleDomainClick}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Side Panel - Domain Details */}
+            {selectedDomain && (
+              <div className="xl:col-span-1">
+                <Card className="p-6 sticky top-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">Domain Details</h3>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setSelectedDomain(null)}
+                    >
+                      ✕
+                    </Button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Basic Information */}
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Protein</label>
+                      <div className="text-sm font-mono">{selectedDomain.pdb_id}_{selectedDomain.chain_id}</div>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Domain Number</label>
+                      <div className="text-sm">{selectedDomain.domain_number}</div>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Range</label>
+                      <div className="text-sm font-mono">{selectedDomain.range}</div>
+                    </div>
+
+                    {/* Quality Metrics */}
+                    <div className="border-t pt-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Quality Metrics</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Confidence:</span>
+                          <span className={`text-sm font-medium ${
+                            selectedDomain.confidence && selectedDomain.confidence >= 0.8 ? 'text-green-600' :
+                            selectedDomain.confidence && selectedDomain.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'
+                          }`}>
+                            {selectedDomain.confidence ? selectedDomain.confidence.toFixed(3) : 'N/A'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Evidence Count:</span>
+                          <span className="text-sm font-medium">{selectedDomain.evidence_count}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Evidence Types:</span>
+                          <span className="text-sm">{selectedDomain.evidence_types}</span>
                         </div>
                       </div>
+                    </div>
+
+                    {/* Classification */}
+                    <div className="border-t pt-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Classification</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">T-Group:</span>
+                          <span className={`text-sm px-2 py-1 rounded ${
+                            selectedDomain.t_group ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {selectedDomain.t_group || 'Not assigned'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">H-Group:</span>
+                          <span className={`text-sm px-2 py-1 rounded ${
+                            selectedDomain.h_group ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {selectedDomain.h_group || 'Not assigned'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">X-Group:</span>
+                          <span className={`text-sm px-2 py-1 rounded ${
+                            selectedDomain.x_group ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {selectedDomain.x_group || 'Not assigned'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">A-Group:</span>
+                          <span className={`text-sm px-2 py-1 rounded ${
+                            selectedDomain.a_group ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {selectedDomain.a_group || 'Not assigned'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Processing Information */}
+                    <div className="border-t pt-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Processing Info</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Batch:</span>
+                          <span className="text-sm">{selectedDomain.batch_id || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Reference:</span>
+                          <span className="text-sm">{selectedDomain.reference_version || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Timestamp:</span>
+                          <span className="text-sm">
+                            {selectedDomain.timestamp ? new Date(selectedDomain.timestamp).toLocaleDateString() : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="border-t pt-4 space-y-2">
                       <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleViewProtein(firstDomain)}
+                        className="w-full"
+                        onClick={() => handleViewDomain(selectedDomain)}
                       >
-                        <Eye className="w-4 h-4 mr-1" />
-                        View Details
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Full Details
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => handleViewProtein(selectedDomain)}
+                      >
+                        <BarChart3 className="w-4 h-4 mr-2" />
+                        View Protein
                       </Button>
                     </div>
-
-                    <BoundaryVisualization
-                      protein={{
-                        id: firstDomain.protein_id,
-                        pdb_id: firstDomain.pdb_id,
-                        chain_id: firstDomain.chain_id,
-                        sequence_length: sequenceLength
-                      }}
-                      domains={putativeDomains}
-                      onDomainClick={handleDomainClick}
-                    />
-
-                    {referenceDomains.length > 0 && (
-                      <div className="mt-3 text-sm text-gray-600 bg-blue-50 p-3 rounded">
-                        💡 This protein also has {referenceDomains.length} reference domains from ECOD used as supporting evidence.
-                      </div>
-                    )}
-                  </Card>
-                ) : (
-                  // Detailed multi-track visualization
-                  <MultiTrackDomainVisualization
-                    key={proteinKey}
-                    protein={{
-                      id: firstDomain.protein_id,
-                      pdb_id: firstDomain.pdb_id,
-                      chain_id: firstDomain.chain_id,
-                      sequence_length: sequenceLength
-                    }}
-                    putativeDomains={putativeDomains}
-                    referenceDomains={referenceDomains}
-                    onDomainClick={handleDomainClick}
-                  />
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Side Panel - Domain Details */}
-        {selectedDomain && (
-          <div className="lg:col-span-1">
-            <Card className="p-6 sticky top-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Domain Details</h3>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSelectedDomain(null)}
-                >
-                  ✕
-                </Button>
+                  </div>
+                </Card>
               </div>
-
-              <div className="space-y-4">
-                {/* Basic Information */}
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Protein</label>
-                  <div className="text-sm font-mono">{selectedDomain.pdb_id}_{selectedDomain.chain_id}</div>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Domain Number</label>
-                  <div className="text-sm">{selectedDomain.domain_number}</div>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Range</label>
-                  <div className="text-sm font-mono">{selectedDomain.range}</div>
-                </div>
-
-                {/* Quality Metrics */}
-                <div className="border-t pt-4">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Quality Metrics</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Confidence:</span>
-                      <span className={`text-sm font-medium ${
-                        selectedDomain.confidence && selectedDomain.confidence >= 0.8 ? 'text-green-600' :
-                        selectedDomain.confidence && selectedDomain.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'
-                      }`}>
-                        {selectedDomain.confidence ? selectedDomain.confidence.toFixed(3) : 'N/A'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Evidence Count:</span>
-                      <span className="text-sm font-medium">{selectedDomain.evidence_count}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Evidence Types:</span>
-                      <span className="text-sm">{selectedDomain.evidence_types}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Classification */}
-                <div className="border-t pt-4">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Classification</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">T-Group:</span>
-                      <span className={`text-sm px-2 py-1 rounded ${
-                        selectedDomain.t_group ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {selectedDomain.t_group || 'Not assigned'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">H-Group:</span>
-                      <span className={`text-sm px-2 py-1 rounded ${
-                        selectedDomain.h_group ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {selectedDomain.h_group || 'Not assigned'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">X-Group:</span>
-                      <span className={`text-sm px-2 py-1 rounded ${
-                        selectedDomain.x_group ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {selectedDomain.x_group || 'Not assigned'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">A-Group:</span>
-                      <span className={`text-sm px-2 py-1 rounded ${
-                        selectedDomain.a_group ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {selectedDomain.a_group || 'Not assigned'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Processing Information */}
-                <div className="border-t pt-4">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Processing Info</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Batch:</span>
-                      <span className="text-sm">{selectedDomain.batch_id || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Reference:</span>
-                      <span className="text-sm">{selectedDomain.reference_version || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Timestamp:</span>
-                      <span className="text-sm">
-                        {selectedDomain.timestamp ? new Date(selectedDomain.timestamp).toLocaleDateString() : 'N/A'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="border-t pt-4 space-y-2">
-                  <Button
-                    className="w-full"
-                    onClick={() => handleViewDomain(selectedDomain)}
-                  >
-                    <Eye className="w-4 h-4 mr-2" />
-                    View Full Details
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => handleViewProtein(selectedDomain)}
-                  >
-                    <BarChart3 className="w-4 h-4 mr-2" />
-                    View Protein
-                  </Button>
-                </div>
-              </div>
-            </Card>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

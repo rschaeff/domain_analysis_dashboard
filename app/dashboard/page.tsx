@@ -37,17 +37,36 @@ export default function DashboardPage() {
     size: 50,
     total: 0
   })
-  const [statistics, setStatistics] = useState({
-    totalDomains: 0,
-    classifiedDomains: 0,
-    highConfidenceDomains: 0,
-    avgConfidence: 0,
-    domainsWithEvidence: 0
-  })
+    // Update statistics state to match API response
+    const [statistics, setStatistics] = useState({
+      total_proteins: 0,
+      total_domains: 0,
+      classified_chains: 0,
+      unclassified_chains: 0,
+      avg_domain_coverage: 0
+    });
   const [selectedDomain, setSelectedDomain] = useState<DomainSummary | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'visualization'>('table')
   const [visualizationMode, setVisualizationMode] = useState<'simple' | 'detailed'>('detailed')
   const [initialLoad, setInitialLoad] = useState(true)
+
+  // Fetch dashboard stats
+const fetchDashboardStats = async () => {
+  setStatsLoading(true);
+  try {
+    const response = await fetch('/api/dashboard/stats');
+    if (response.ok) {
+      const data = await response.json();
+      setStatistics(data);
+    } else {
+      console.error('Failed to fetch dashboard stats:', response.statusText);
+    }
+  } catch (err) {
+    console.error('Error fetching dashboard stats:', err);
+  } finally {
+    setStatsLoading(false);
+  }
+};
 
   // Fetch domains data
   const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {
@@ -114,6 +133,8 @@ export default function DashboardPage() {
       setLoading(false)
       setStatsLoading(false)
     }
+
+    await fetchDashboardStats();
   }
 
   // Initial load and filter changes
@@ -424,32 +445,33 @@ export default function DashboardPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard
-          title="Total Domains"
-          value={statistics.totalDomains}
-          color="text-blue-600"
-          loading={statsLoading}
-        />
-        <StatCard
-          title="Classified"
-          value={`${statistics.classifiedDomains} (${statistics.totalDomains > 0 ? Math.round((statistics.classifiedDomains / statistics.totalDomains) * 100) : 0}%)`}
-          color="text-green-600"
-          loading={statsLoading}
-        />
-        <StatCard
-          title="High Confidence (≥0.8)"
-          value={statistics.highConfidenceDomains}
-          color="text-purple-600"
-          loading={statsLoading}
-        />
-        <StatCard
-          title="Average Confidence"
-          value={statistics.avgConfidence ? statistics.avgConfidence.toFixed(3) : 'N/A'}
-          color="text-orange-600"
-          loading={statsLoading}
-        />
-      </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <StatCard
+            title="Total Proteins"
+            value={statistics.total_proteins.toLocaleString()}
+            color="text-blue-600"
+            loading={statsLoading}
+          />
+          <StatCard
+            title="Total Domains"
+            value={statistics.total_domains.toLocaleString()}
+            color="text-green-600"
+            loading={statsLoading}
+          />
+          <StatCard
+            title="Classified Proteins"
+            value={`${statistics.classified_chains.toLocaleString()} (${statistics.total_proteins > 0 ? Math.round((statistics.classified_chains / statistics.total_proteins) * 100) : 0}%)`}
+            color="text-purple-600"
+            loading={statsLoading}
+          />
+          <StatCard
+            title="Domain Coverage"
+            value={`${statistics.avg_domain_coverage.toFixed(1)}%`}
+            color="text-orange-600"
+            loading={statsLoading}
+            tooltip="Average percentage of protein length covered by domains"
+          />
+        </div>
 
       {/* Enhanced Filters */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg">

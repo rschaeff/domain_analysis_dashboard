@@ -24,17 +24,21 @@ export function StructureViewer({
 }: MolStarViewerProps) {
   const [isViewerReady, setIsViewerReady] = useState(false)
   const [selectedDomain, setSelectedDomain] = useState<number | null>(null)
+  const [viewerError, setViewerError] = useState<string | null>(null)
   const viewerRef = useRef<any>(null)
 
   // Map domains to ThreeDMolViewer format
-  const mappedDomains: Domain[] = domains.map((domain, index) => ({
-    id: String(index + 1),
-    chainId: chain_id || 'A',
-    start: domain.start,
-    end: domain.end,
-    color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
-    label: domain.label || `Domain ${index + 1}`
-  }))
+    const mappedDomains: Domain[] = domains.map((domain, index) => ({
+      id: String(index + 1),
+      chainId: chain_id || 'A',
+      // Use PDB positions if available, fall back to sequence positions if not
+      start: domain.pdb_start || domain.start,
+      end: domain.pdb_end || domain.end,
+      // For selection string, use pdb_range if available
+      selectionString: domain.pdb_range,
+      color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+      label: domain.label || `Domain ${index + 1}`
+    }))
 
   // Log domain data for debugging
   useEffect(() => {
@@ -46,34 +50,37 @@ export function StructureViewer({
   const handleViewerReady = () => {
     console.log('[StructureViewer] 3D viewer ready');
     setIsViewerReady(true)
+    setViewerError(null)
   }
 
-    // Replace the handleHighlightDomain function with this:
-    const handleHighlightDomain = (domain: Domain, index: number, e?: React.MouseEvent) => {
-      // Stop event propagation if event is provided
-      if (e) {
-        e.stopPropagation();
-      }
+  const handleViewerError = (error: string) => {
+    console.error('[StructureViewer] Error:', error);
+    setViewerError(error)
+  }
 
-      setSelectedDomain(index);
-
-      // Focus on the domain in the viewer
-      if (viewerRef.current && viewerRef.current.current) {
-        try {
-          // Call the highlightDomain method exposed via ref
-          viewerRef.current.current.highlightDomain(index);
-        } catch (error) {
-          console.error('Error highlighting domain:', error);
-        }
-      }
-
-      // REMOVE THIS SECTION - this is causing navigation away from the page
-      // if (onDomainClick) {
-      //   onDomainClick(domain)
-      // }
+  const handleHighlightDomain = (domain: Domain, index: number, e?: React.MouseEvent) => {
+    // Stop event propagation if event is provided
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
     }
 
+    console.log(`[StructureViewer] Highlighting domain ${index}: ${domain.start}-${domain.end}`);
+    setSelectedDomain(index)
+
+    // Focus on the domain in the viewer
+    if (viewerRef.current && viewerRef.current.current) {
+      try {
+        // Call the highlightDomain method exposed via ref
+        viewerRef.current.current.highlightDomain(index);
+      } catch (error) {
+        console.error('[StructureViewer] Error highlighting domain:', error);
+      }
+    }
+  }
+
   const handleReset = () => {
+    console.log('[StructureViewer] Resetting view');
     setSelectedDomain(null)
 
     // Reset the viewer
@@ -81,7 +88,7 @@ export function StructureViewer({
       try {
         viewerRef.current.current.reset();
       } catch (error) {
-        console.error('Error resetting view:', error);
+        console.error('[StructureViewer] Error resetting view:', error);
       }
     }
   }
@@ -100,7 +107,7 @@ export function StructureViewer({
           document.body.removeChild(link);
         }
       } catch (error) {
-        console.error('Error exporting image:', error);
+        console.error('[StructureViewer] Error exporting image:', error);
       }
     }
   }
@@ -143,9 +150,19 @@ export function StructureViewer({
             domains={mappedDomains}
             height="400px"
             onStructureLoaded={handleViewerReady}
+            onError={handleViewerError}
             showControls={true}
             className="rounded-lg overflow-hidden border border-gray-200"
           />
+
+          {viewerError && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
+              <div className="text-red-600 text-center p-4">
+                <p className="font-semibold">Error loading structure</p>
+                <p className="text-sm mt-1">{viewerError}</p>
+              </div>
+            </div>
+          )}
 
           {/* Domain controls overlay */}
           {mappedDomains.length > 0 && (
@@ -164,7 +181,7 @@ export function StructureViewer({
                         style={{ backgroundColor: domain.color }}
                       ></div>
                       <button
-                        onClick={() => handleHighlightDomain(domain, index)}
+                        onClick={(e) => handleHighlightDomain(domain, index, e)}
                         className={`text-left ${
                           selectedDomain === index
                             ? 'text-blue-600 font-medium'
@@ -189,7 +206,7 @@ export function StructureViewer({
               {mappedDomains.map((domain, index) => (
                 <button
                   key={domain.id}
-                  onClick={() => handleHighlightDomain(domain, index)}
+                  onClick={(e) => handleHighlightDomain(domain, index, e)}
                   className={`px-3 py-1 text-sm border rounded-full ${
                     selectedDomain === index
                       ? 'bg-gray-100'

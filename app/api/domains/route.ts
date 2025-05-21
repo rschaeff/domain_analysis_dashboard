@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
       filters.max_confidence = parseFloat(searchParams.get('max_confidence')!)
     }
 
-    // Build the query using the updated view
+    // Build the query using the updated view with properly qualified column names
     let baseQuery = `
       SELECT
         pds.id,
@@ -80,49 +80,49 @@ export async function GET(request: NextRequest) {
       LEFT JOIN pdb_analysis.protein p ON pds.pdb_id = p.pdb_id AND pds.chain_id = p.chain_id
     `
 
-    // Build WHERE clause
+    // Build WHERE clause with qualified column names
     const whereConditions: string[] = []
     const queryParams: any[] = []
     let paramIndex = 1
 
     if (filters.pdb_id) {
-      whereConditions.push(`pdb_id = $${paramIndex}`)
+      whereConditions.push(`pds.pdb_id = $${paramIndex}`)
       queryParams.push(filters.pdb_id)
       paramIndex++
     }
 
     if (filters.chain_id) {
-      whereConditions.push(`chain_id = $${paramIndex}`)
+      whereConditions.push(`pds.chain_id = $${paramIndex}`)
       queryParams.push(filters.chain_id)
       paramIndex++
     }
 
     if (filters.t_group && filters.t_group.length > 0) {
-      whereConditions.push(`t_group = ANY($${paramIndex})`)
+      whereConditions.push(`pds.t_group = ANY($${paramIndex})`)
       queryParams.push(filters.t_group)
       paramIndex++
     }
 
     if (filters.h_group && filters.h_group.length > 0) {
-      whereConditions.push(`h_group = ANY($${paramIndex})`)
+      whereConditions.push(`pds.h_group = ANY($${paramIndex})`)
       queryParams.push(filters.h_group)
       paramIndex++
     }
 
     if (filters.x_group && filters.x_group.length > 0) {
-      whereConditions.push(`x_group = ANY($${paramIndex})`)
+      whereConditions.push(`pds.x_group = ANY($${paramIndex})`)
       queryParams.push(filters.x_group)
       paramIndex++
     }
 
     if (filters.min_confidence !== undefined) {
-      whereConditions.push(`confidence >= $${paramIndex}`)
+      whereConditions.push(`pds.confidence >= $${paramIndex}`)
       queryParams.push(filters.min_confidence)
       paramIndex++
     }
 
     if (filters.max_confidence !== undefined) {
-      whereConditions.push(`confidence <= $${paramIndex}`)
+      whereConditions.push(`pds.confidence <= $${paramIndex}`)
       queryParams.push(filters.max_confidence)
       paramIndex++
     }
@@ -131,18 +131,18 @@ export async function GET(request: NextRequest) {
       baseQuery += ' WHERE ' + whereConditions.join(' AND ')
     }
 
-    // Add ORDER BY
-    baseQuery += ' ORDER BY pdb_id, chain_id, domain_number'
+    // Add ORDER BY with qualified column names
+    baseQuery += ' ORDER BY pds.pdb_id, pds.chain_id, pds.domain_number'
 
-    // Calculate statistics for filtered dataset
+    // Calculate statistics for filtered dataset with qualified column names
     const statsQuery = `
       SELECT
         COUNT(*) as total_domains,
-        COUNT(CASE WHEN t_group IS NOT NULL THEN 1 END) as classified_domains,
-        COUNT(CASE WHEN confidence >= 0.8 THEN 1 END) as high_confidence_domains,
-        AVG(CASE WHEN confidence IS NOT NULL THEN confidence END) as avg_confidence,
-        COUNT(CASE WHEN evidence_count > 0 THEN 1 END) as domains_with_evidence
-      FROM pdb_analysis.partition_domain_summary
+        COUNT(CASE WHEN pds.t_group IS NOT NULL THEN 1 END) as classified_domains,
+        COUNT(CASE WHEN pds.confidence >= 0.8 THEN 1 END) as high_confidence_domains,
+        AVG(CASE WHEN pds.confidence IS NOT NULL THEN pds.confidence END) as avg_confidence,
+        COUNT(CASE WHEN pds.evidence_count > 0 THEN 1 END) as domains_with_evidence
+      FROM pdb_analysis.partition_domain_summary pds
       ${whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : ''}
     `
 

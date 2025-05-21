@@ -384,7 +384,7 @@ export function StructureViewer({
                           <span className="flex items-center gap-1">
                             {domain.label}
 
-                              href={`http://prodata.swmed.edu/ecod/complete/domain/${originalDomain.domain_id}`}
+                             <a href={`http://prodata.swmed.edu/ecod/complete/domain/${originalDomain.domain_id}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="ml-1"

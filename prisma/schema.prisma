@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["multiSchema"]
 }
 
@@ -9,163 +9,629 @@ datasource db {
   schemas  = ["pdb_analysis"]
 }
 
-// Existing schema tables
 model PartitionProteins {
-  id                       Int      @id @default(autoincrement())
-  pdb_id                   String
-  chain_id                 String
-  batch_id                 Int?
-  timestamp                DateTime @default(now())
-  reference_version        String?
-  is_classified            Boolean  @default(false)
-  sequence_length          Int      @default(0)
-  coverage                 Float    @default(0)
-  residues_assigned        Int      @default(0)
-  domains_with_evidence    Int      @default(0)
-  fully_classified_domains Int      @default(0)
-  source_file_id           Int?
-  process_version          String?
+  id                           Int                            @id @default(autoincrement())
+  pdb_id                       String                         @db.VarChar
+  chain_id                     String                         @db.VarChar
+  batch_id                     Int?
+  timestamp                    DateTime?                      @default(now()) @db.Timestamp(6)
+  reference_version            String?                        @db.VarChar
+  is_classified                Boolean?                       @default(false)
+  sequence_length              Int?                           @default(0)
+  coverage                     Float?                         @default(0)
+  residues_assigned            Int?                           @default(0)
+  domains_with_evidence        Int?                           @default(0)
+  fully_classified_domains     Int?                           @default(0)
+  source_file_id               Int?
+  process_version              String?                        @db.VarChar
+  partition_comparison_metrics partition_comparison_metrics[]
+  domains                      PartitionDomains[]
+  references                   PartitionProteinReferences[]
 
-  // Relations
-  domains       PartitionDomains[]
-  references    PartitionProteinReferences[]
-  modifications DomainModifications[]
-
-  @@unique([pdb_id, chain_id, batch_id, timestamp])
+  @@unique([pdb_id, chain_id, batch_id, timestamp], map: "unique_partition_version")
+  @@index([batch_id], map: "idx_partition_proteins_batch_id")
+  @@index([pdb_id, chain_id], map: "idx_partition_proteins_pdb_chain")
   @@map("partition_proteins")
   @@schema("pdb_analysis")
 }
 
 model PartitionDomains {
-  id           Int     @id @default(autoincrement())
-  protein_id   Int
-  domain_number Int
-  domain_id    String?
-  start_pos    Int
-  end_pos      Int
-  range        String
-  source       String?
-  source_id    String?
-  confidence   Float?
-  t_group      String?
-  h_group      String?
-  x_group      String?
-  a_group      String?
-  is_manual_rep Boolean @default(false)
-  is_f70       Boolean @default(false)
-  is_f40       Boolean @default(false)
-  is_f99       Boolean @default(false)
-  created_at   DateTime @default(now())
+  id            Int                 @id @default(autoincrement())
+  protein_id    Int?
+  domain_number Int?
+  domain_id     String?             @db.VarChar
+  start_pos     Int
+  end_pos       Int
+  range         String              @db.VarChar
+  source        String?             @db.VarChar
+  source_id     String?             @db.VarChar
+  confidence    Float?
+  t_group       String?             @db.VarChar
+  h_group       String?             @db.VarChar
+  x_group       String?             @db.VarChar
+  a_group       String?             @db.VarChar
+  is_manual_rep Boolean?            @default(false)
+  is_f70        Boolean?            @default(false)
+  is_f40        Boolean?            @default(false)
+  is_f99        Boolean?            @default(false)
+  created_at    DateTime?           @default(now()) @db.Timestamp(6)
+  comparisons   DomainComparisons[]
+  evidence      DomainEvidence[]
+  protein       PartitionProteins?  @relation(fields: [protein_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  // Relations
-  protein      PartitionProteins     @relation(fields: [protein_id], references: [id], onDelete: Cascade)
-  evidence     DomainEvidence[]
-  comparisons  DomainComparisons[]
-  modifications DomainModifications[]
-
-  @@unique([protein_id, domain_number])
+  @@unique([protein_id, domain_number], map: "unique_domain_in_partition")
+  @@index([h_group], map: "idx_partition_domains_h_group")
+  @@index([protein_id], map: "idx_partition_domains_protein_id")
+  @@index([t_group], map: "idx_partition_domains_t_group")
   @@map("partition_domains")
   @@schema("pdb_analysis")
 }
 
 model DomainEvidence {
-  id               Int      @id @default(autoincrement())
-  domain_id        Int
-  evidence_type    String
-  source_id        String?
-  domain_ref_id    String?
-  hit_id           String?
-  pdb_id           String?
-  chain_id         String?
+  id               Int               @id @default(autoincrement())
+  domain_id        Int?
+  evidence_type    String            @db.VarChar
+  source_id        String?           @db.VarChar
+  domain_ref_id    String?           @db.VarChar
+  hit_id           String?           @db.VarChar
+  pdb_id           String?           @db.VarChar
+  chain_id         String?           @db.VarChar
   confidence       Float?
   probability      Float?
   evalue           Float?
   score            Float?
   hsp_count        Int?
-  is_discontinuous Boolean  @default(false)
-  t_group          String?
-  h_group          String?
-  x_group          String?
-  a_group          String?
-  query_range      String?
-  hit_range        String?
-  created_at       DateTime @default(now())
+  is_discontinuous Boolean?          @default(false)
+  t_group          String?           @db.VarChar
+  h_group          String?           @db.VarChar
+  x_group          String?           @db.VarChar
+  a_group          String?           @db.VarChar
+  query_range      String?           @db.VarChar
+  hit_range        String?           @db.VarChar
+  created_at       DateTime?         @default(now()) @db.Timestamp(6)
+  domain           PartitionDomains? @relation(fields: [domain_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  // Relations
-  domain PartitionDomains @relation(fields: [domain_id], references: [id], onDelete: Cascade)
-
+  @@index([domain_id], map: "idx_domain_evidence_domain_id")
   @@map("domain_evidence")
   @@schema("pdb_analysis")
 }
 
 model DomainComparisons {
-  id                     Int      @id @default(autoincrement())
-  partition_domain_id    Int
-  reference_type         String
-  reference_domain_id    String?
-  reference_domain_range String?
+  id                     Int               @id @default(autoincrement())
+  partition_domain_id    Int?
+  reference_type         String            @db.VarChar
+  reference_domain_id    String?           @db.VarChar
+  reference_domain_range String?           @db.VarChar
   jaccard_similarity     Float?
   overlap_residues       Int?
   union_residues         Int?
   precision              Float?
   recall                 Float?
   f1_score               Float?
-  t_group_match          Boolean  @default(false)
-  h_group_match          Boolean  @default(false)
-  x_group_match          Boolean  @default(false)
-  a_group_match          Boolean  @default(false)
-  created_at             DateTime @default(now())
+  t_group_match          Boolean?          @default(false)
+  h_group_match          Boolean?          @default(false)
+  x_group_match          Boolean?          @default(false)
+  a_group_match          Boolean?          @default(false)
+  created_at             DateTime?         @default(now()) @db.Timestamp(6)
+  partition_domain       PartitionDomains? @relation(fields: [partition_domain_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  // Relations
-  partition_domain PartitionDomains @relation(fields: [partition_domain_id], references: [id])
-
+  @@index([partition_domain_id], map: "idx_domain_comparisons_domain_id")
   @@map("domain_comparisons")
   @@schema("pdb_analysis")
 }
 
-// New tables for dashboard functionality
-model DomainModifications {
-  id             Int      @id @default(autoincrement())
-  protein_id     Int
-  domain_id      Int?
-  modification_type String // 'boundary_edit', 'reassignment', 'split', 'merge', 'create', 'delete'
-  original_start Int?
-  original_end   Int?
-  new_start      Int?
-  new_end        Int?
-  original_classification String?
-  new_classification String?
-  reason         String?
-  created_by     String   @default("system")
-  created_at     DateTime @default(now())
-  applied        Boolean  @default(false)
-
-  // Relations
-  protein PartitionProteins @relation(fields: [protein_id], references: [id])
-  domain  PartitionDomains? @relation(fields: [domain_id], references: [id])
-
-  @@map("domain_modifications")
-  @@schema("pdb_analysis")
-}
-
 model PartitionProteinReferences {
-  id                  Int      @id @default(autoincrement())
-  protein_id          Int
-  sequence_md5        String
-  swissprot_id        String?
-  proteomes_id        String?
-  reference_pdb_id    String?
-  reference_chain_id  String?
-  is_exact_match      Boolean  @default(true)
-  match_quality       Float?
-  created_at          DateTime @default(now())
-
-  // Relations
-  protein PartitionProteins @relation(fields: [protein_id], references: [id], onDelete: Cascade)
+  id                 Int                @id @default(autoincrement())
+  protein_id         Int?
+  sequence_md5       String             @db.VarChar
+  swissprot_id       String?            @db.VarChar
+  proteomes_id       String?            @db.VarChar
+  reference_pdb_id   String?            @db.VarChar
+  reference_chain_id String?            @db.VarChar
+  is_exact_match     Boolean?           @default(true)
+  match_quality      Float?
+  created_at         DateTime?          @default(now()) @db.Timestamp(6)
+  protein            PartitionProteins? @relation(fields: [protein_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@map("partition_protein_references")
   @@schema("pdb_analysis")
 }
 
-// View for dashboard summary (we'll create this as a view)
-// This would typically be defined as a PostgreSQL view
+model alt_protein_profiles {
+  id                          Int                          @id @default(autoincrement())
+  protein_id                  Int?                         @unique
+  a3m_path                    String                       @db.VarChar(255)
+  hmm_path                    String                       @db.VarChar(255)
+  hhsearch_path               String                       @db.VarChar(255)
+  has_ss_pred                 Boolean?                     @default(false)
+  has_complete_hits           Boolean?                     @default(false)
+  created_at                  DateTime?                    @default(now()) @db.Timestamp(6)
+  alt_representative_proteins alt_representative_proteins? @relation(fields: [protein_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@schema("pdb_analysis")
+}
+
+model alt_representative_proteins {
+  id                        Int                   @id @default(autoincrement())
+  protein_id                String                @unique @db.VarChar(10)
+  pdb_id                    String                @db.VarChar(4)
+  chain_id                  String                @db.VarChar(5)
+  batch_id                  Int
+  sequence_md5              String                @db.VarChar(32)
+  sequence_length           Int
+  profile_status            String                @default("pending") @db.VarChar(20)
+  clustering_source         String?               @db.VarChar(20)
+  clustering_representative Boolean?              @default(false)
+  related_proteins          String?
+  created_at                DateTime?             @default(now()) @db.Timestamp(6)
+  sequence                  String?
+  alt_protein_profiles      alt_protein_profiles?
+
+  @@index([batch_id], map: "idx_alt_proteins_batch")
+  @@index([profile_status], map: "idx_alt_proteins_status")
+  @@schema("pdb_analysis")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model blast_batches {
+  id              Int      @id @default(autoincrement())
+  batch_id        String   @unique @db.VarChar
+  batch_directory String   @db.VarChar
+  creation_date   DateTime @default(now()) @db.Timestamp(6)
+  num_sequences   Int?     @default(0)
+  status          String?  @default("created") @db.VarChar
+
+  @@schema("pdb_analysis")
+}
+
+model blast_job_sequences {
+  id            Int         @id @default(autoincrement())
+  job_id        Int?
+  sequence_file String      @db.VarChar
+  status        String?     @default("pending") @db.VarChar
+  result_file   String?     @db.VarChar
+  blast_jobs    blast_jobs? @relation(fields: [job_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@schema("pdb_analysis")
+}
+
+model blast_jobs {
+  id                  Int                   @id @default(autoincrement())
+  job_type            String                @db.VarChar
+  slurm_job_id        String                @db.VarChar
+  batch_num           Int
+  num_sequences       Int
+  submission_time     DateTime?             @default(now()) @db.Timestamp(6)
+  status              String?               @default("submitted") @db.VarChar
+  completion_time     DateTime?             @db.Timestamp(6)
+  blast_job_sequences blast_job_sequences[]
+
+  @@schema("pdb_analysis")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model chain_processing_status {
+  id                           Int                            @id @default(autoincrement())
+  protein_id                   Int
+  batch_id                     Int
+  pdb_id                       String                         @db.VarChar
+  chain_id                     String                         @db.VarChar
+  relative_path                String                         @db.VarChar
+  is_representative            Boolean?                       @default(false)
+  sequence_cluster_70          String?                        @db.VarChar
+  sequence_cluster_95          String?                        @db.VarChar
+  current_stage                String                         @default("queued") @db.VarChar
+  status                       String                         @default("pending") @db.VarChar
+  error_message                String?
+  last_checked                 DateTime?                      @default(now()) @db.Timestamp(6)
+  created_at                   DateTime                       @default(now()) @db.Timestamp(6)
+  updated_at                   DateTime                       @default(now()) @db.Timestamp(6)
+  classification_batch         classification_batch           @relation(fields: [batch_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  protein                      protein                        @relation(fields: [protein_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  classification_file_registry classification_file_registry[]
+
+  @@index([batch_id], map: "idx_chain_processing_batch")
+  @@index([pdb_id, chain_id], map: "idx_chain_processing_pdb_chain")
+  @@index([protein_id], map: "idx_chain_processing_protein")
+  @@index([current_stage], map: "idx_chain_processing_stage")
+  @@index([status], map: "idx_chain_processing_status")
+  @@schema("pdb_analysis")
+}
+
+model chain_uniprot_mapping {
+  id                Int                @id @default(autoincrement())
+  protein_id        Int?
+  unp_acc           String             @db.VarChar
+  unp_start         Int?
+  unp_end           Int?
+  pdb_start         String?            @db.VarChar
+  pdb_end           String?            @db.VarChar
+  is_primary        Boolean?           @default(false)
+  protein_per_chain protein_per_chain? @relation(fields: [protein_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@schema("pdb_analysis")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model classification_batch {
+  id                              Int                               @id @default(autoincrement())
+  batch_name                      String                            @db.VarChar
+  created_at                      DateTime                          @default(now()) @db.Timestamp(6)
+  base_path                       String                            @db.VarChar
+  max_chains                      Int
+  status                          String                            @default("created") @db.VarChar
+  ref_version                     String?                           @db.VarChar
+  completed_chains                Int?                              @default(0)
+  total_chains                    Int
+  chain_processing_status         chain_processing_status[]
+  classification_chain_processing classification_chain_processing[]
+
+  @@schema("pdb_analysis")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model classification_chain_processing {
+  id                      Int                  @id @default(autoincrement())
+  batch_id                Int
+  chain_id                Int
+  status                  String?              @default("pending")
+  processing_started_at   DateTime?            @db.Timestamp(6)
+  processing_completed_at DateTime?            @db.Timestamp(6)
+  error_message           String?
+  created_at              DateTime?            @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?            @default(now()) @db.Timestamp(6)
+  classification_batch    classification_batch @relation(fields: [batch_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  pdb_chains              pdb_chains           @relation(fields: [chain_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([batch_id], map: "idx_chain_processing_batch_id")
+  @@index([chain_id], map: "idx_chain_processing_chain_id")
+  @@schema("pdb_analysis")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model classification_file_registry {
+  id                      Int                     @id @default(autoincrement())
+  chain_processing_id     Int
+  file_type               String                  @db.VarChar
+  file_path               String                  @db.VarChar
+  expected_size           Int?
+  actual_size             Int?
+  file_exists             Boolean?                @default(false)
+  last_checked            DateTime?               @default(now()) @db.Timestamp(6)
+  created_at              DateTime                @default(now()) @db.Timestamp(6)
+  chain_processing_status chain_processing_status @relation(fields: [chain_processing_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([chain_processing_id], map: "idx_file_registry_chain")
+  @@index([file_exists], map: "idx_file_registry_exists")
+  @@index([file_type], map: "idx_file_registry_type")
+  @@schema("pdb_analysis")
+}
+
+model domain {
+  id                   Int                    @id @default(autoincrement())
+  ecod_uid             Int?                   @unique
+  protein_id           Int?
+  domain_id            String                 @db.VarChar
+  ecod_domain_id       String?                @db.VarChar
+  range                String                 @db.VarChar
+  t_group              String?                @db.VarChar
+  h_group              String?                @db.VarChar
+  x_group              String?                @db.VarChar
+  a_group              String?                @db.VarChar
+  is_manual_rep        Boolean?               @default(false)
+  is_f70               Boolean?               @default(false)
+  is_f40               Boolean?               @default(false)
+  is_f99               Boolean?               @default(false)
+  hcount               Int?
+  scount               Int?
+  length               Int?
+  created_at           DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?              @default(now()) @db.Timestamp(6)
+  chain_id             String?                @db.VarChar
+  asym_id              String?                @db.VarChar
+  protein              protein?               @relation(fields: [protein_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  domain_chain_mapping domain_chain_mapping[] @ignore
+  domain_dssp_detail   domain_dssp_detail?
+  domain_sequence      domain_sequence?
+
+  @@index([asym_id], map: "idx_domain_asym_id")
+  @@index([chain_id], map: "idx_domain_chain_id")
+  @@index([domain_id], map: "idx_domain_domain_id")
+  @@index([h_group], map: "idx_domain_h_group")
+  @@index([protein_id], map: "idx_domain_protein_id")
+  @@index([t_group], map: "idx_domain_t_group")
+  @@schema("pdb_analysis")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model domain_chain_mapping {
+  domain_id         Int?
+  new_protein_id    Int?
+  domain            domain?            @relation(fields: [domain_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  protein_per_chain protein_per_chain? @relation(fields: [new_protein_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@ignore
+  @@schema("pdb_analysis")
+}
+
+model domain_dssp_detail {
+  id                         Int       @id @default(autoincrement())
+  domain_id                  Int?      @unique
+  asa                        Decimal?  @db.Decimal
+  helix_residues             String?
+  strand_residues            String?
+  helix_count                Int?
+  strand_count               Int?
+  secondary_structure_string String?
+  hbonds_total               Int?
+  created_at                 DateTime? @default(now()) @db.Timestamp(6)
+  domain                     domain?   @relation(fields: [domain_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@schema("pdb_analysis")
+}
+
+model domain_sequence {
+  id              Int       @id @default(autoincrement())
+  domain_id       Int?      @unique
+  sequence        String
+  sequence_length Int
+  sequence_md5    String?
+  original_range  String?
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  domain          domain?   @relation(fields: [domain_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([sequence_md5], map: "idx_domain_sequence_md5")
+  @@schema("pdb_analysis")
+}
+
+model ecod_reference_resources {
+  id            Int            @id @default(autoincrement())
+  version_id    Int?
+  resource_type String         @db.VarChar
+  resource_path String
+  format        String?        @db.VarChar
+  description   String?
+  created_at    DateTime?      @default(now()) @db.Timestamp(6)
+  ecod_versions ecod_versions? @relation(fields: [version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([version_id, resource_type])
+  @@schema("pdb_analysis")
+}
+
+model ecod_resource_types {
+  id          Int      @id @default(autoincrement())
+  type_name   String   @unique @db.VarChar
+  description String?
+  required    Boolean? @default(false)
+
+  @@schema("pdb_analysis")
+}
+
+model ecod_versions {
+  id                       Int                        @id @default(autoincrement())
+  version_name             String                     @unique @db.VarChar
+  release_date             DateTime?                  @db.Date
+  is_current               Boolean?                   @default(false)
+  description              String?
+  created_at               DateTime?                  @default(now()) @db.Timestamp(6)
+  ecod_reference_resources ecod_reference_resources[]
+
+  @@schema("pdb_analysis")
+}
+
+model h_classification {
+  id   Int     @id @default(autoincrement())
+  h_id String? @unique @db.VarChar
+  name String? @db.VarChar
+
+  @@schema("pdb_analysis")
+}
+
+model partition_comparison_metrics {
+  id                   Int               @id @default(autoincrement())
+  protein_id           Int
+  reference_type       String            @db.VarChar
+  average_jaccard      Float?
+  average_precision    Float?
+  average_recall       Float?
+  average_f1           Float?
+  domains_with_matches Int?
+  total_domains        Int?
+  match_rate           Float?
+  t_group_match_rate   Float?
+  h_group_match_rate   Float?
+  created_at           DateTime?         @default(now()) @db.Timestamp(6)
+  partition_proteins   PartitionProteins @relation(fields: [protein_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([protein_id], map: "idx_partition_comparison_metrics_protein_id")
+  @@schema("pdb_analysis")
+}
+
+model pdb_chain_tracking {
+  id              Int       @id @default(autoincrement())
+  pdb_id          String    @db.VarChar
+  chain_id        String    @db.VarChar
+  version         Int
+  entity_id       Int?
+  molecule_type   String?
+  sequence_length Int?
+  sequence_hash   String?
+  taxonomy_id     Int?
+  unp_acc         String?   @db.VarChar
+  in_ecod         Boolean?  @default(false)
+  ecod_version    String?   @db.VarChar
+  last_checked    DateTime? @default(now()) @db.Timestamp(6)
+
+  @@unique([pdb_id, chain_id, version])
+  @@schema("pdb_analysis")
+}
+
+model pdb_chains {
+  id                              Int                               @id @default(autoincrement())
+  pdb_entry_id                    Int?
+  source_id                       String                            @unique @db.VarChar
+  chain_id                        String                            @db.VarChar
+  asym_id                         String?                           @db.VarChar
+  entity_id                       Int?
+  polymer_type                    String?
+  unp_acc                         String?                           @db.VarChar
+  length                          Int?
+  tax_id                          Int?
+  created_at                      DateTime?                         @default(now()) @db.Timestamp(6)
+  updated_at                      DateTime?                         @default(now()) @db.Timestamp(6)
+  classification_chain_processing classification_chain_processing[]
+  pdb_entries                     pdb_entries?                      @relation(fields: [pdb_entry_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@schema("pdb_analysis")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model pdb_entries {
+  id                  Int          @id @default(autoincrement())
+  pdb_id              String       @unique @db.VarChar(4)
+  title               String?
+  experimental_method String?
+  resolution          Decimal?     @db.Decimal
+  r_factor            Decimal?     @db.Decimal
+  deposition_date     DateTime?    @db.Date
+  release_date        DateTime?    @db.Date
+  revision_date       DateTime?    @db.Date
+  version             Int?         @default(1)
+  status              String?
+  last_updated        DateTime?    @default(now()) @db.Timestamp(6)
+  pdb_chains          pdb_chains[]
+
+  @@schema("pdb_analysis")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model pdb_entry_tracking {
+  id                 Int       @id @default(autoincrement())
+  pdb_id             String    @unique @db.VarChar
+  current_version    Int
+  first_release_date DateTime? @db.Date
+  latest_update_date DateTime? @db.Date
+  obsolete           Boolean?  @default(false)
+  superseded_by      String?   @db.VarChar
+  last_checked       DateTime? @default(now()) @db.Timestamp(6)
+  status             String?
+
+  @@schema("pdb_analysis")
+}
+
+model protein {
+  id                             Int                              @id @default(autoincrement())
+  unp_acc                        String?                          @db.VarChar
+  source_id                      String                           @unique @db.VarChar
+  pdb_id                         String                           @db.VarChar
+  chain_id                       String                           @db.VarChar
+  name                           String?                          @db.VarChar
+  type                           String?                          @db.VarChar
+  tax_id                         Int?
+  length                         Int?
+  created_at                     DateTime?                        @default(now()) @db.Timestamp(6)
+  updated_at                     DateTime?                        @default(now()) @db.Timestamp(6)
+  sequence_length                Int?
+  is_nonident_rep                Boolean?                         @default(false)
+  chain_processing_status        chain_processing_status[]
+  domain                         domain[]
+  protein_sequence               protein_sequence[]
+  protein_structure              protein_structure[]
+  representative_protein_mapping representative_protein_mapping[]
+
+  @@index([pdb_id], map: "idx_protein_pdb_id")
+  @@index([sequence_length], map: "idx_protein_sequence_length")
+  @@index([source_id], map: "idx_protein_source_id")
+  @@index([tax_id], map: "idx_protein_tax_id")
+  @@index([unp_acc], map: "idx_protein_unp_acc")
+  @@schema("pdb_analysis")
+}
+
+model protein_per_chain {
+  id                    Int                     @id @default(autoincrement())
+  unp_acc               String?                 @db.VarChar
+  source_id             String                  @db.VarChar
+  pdb_id                String                  @db.VarChar
+  chain_id              String                  @db.VarChar
+  name                  String?                 @db.VarChar
+  type                  String?                 @db.VarChar
+  tax_id                Int?
+  length                Int?
+  created_at            DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?               @default(now()) @db.Timestamp(6)
+  asym_id               String?                 @db.VarChar
+  pdbx_strand_id        String?                 @db.VarChar
+  chain_uniprot_mapping chain_uniprot_mapping[]
+  domain_chain_mapping  domain_chain_mapping[]  @ignore
+
+  @@index([asym_id], map: "idx_protein_per_chain_asym_id")
+  @@index([pdbx_strand_id], map: "idx_protein_per_chain_pdbx_strand_id")
+  @@schema("pdb_analysis")
+}
+
+model protein_sequence {
+  id             Int       @id @default(autoincrement())
+  protein_id     Int?
+  sequence       String
+  sequence_md5   String?
+  fragment_start Int?
+  fragment_end   Int?
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  protein        protein?  @relation(fields: [protein_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([sequence_md5], map: "idx_protein_sequence_md5")
+  @@index([protein_id], map: "idx_protein_sequence_protein_id")
+  @@schema("pdb_analysis")
+}
+
+model protein_structure {
+  id                  Int       @id @default(autoincrement())
+  protein_id          Int?
+  resolution          Decimal?  @db.Decimal
+  experimental_method String?
+  deposition_date     DateTime? @db.Date
+  release_date        DateTime? @db.Date
+  r_factor            Decimal?  @db.Decimal
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  protein             protein?  @relation(fields: [protein_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@schema("pdb_analysis")
+}
+
+model rep_classification {
+  alt_rep_id     Int     @id
+  classification String? @db.VarChar(30)
+  ecod_match_id  Int?
+  action         String? @db.VarChar(30)
+
+  @@schema("pdb_analysis")
+}
+
+model representative_protein_mapping {
+  id                  Int       @id @default(autoincrement())
+  alt_protein_id      Int?
+  existing_protein_id Int?
+  sequence_identity   Float?
+  mapping_status      String?   @default("unmapped") @db.VarChar(20)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  protein             protein?  @relation(fields: [existing_protein_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([mapping_status], map: "idx_mapping_status")
+  @@schema("pdb_analysis")
+}
+
+model t_classification {
+  id   Int     @id @default(autoincrement())
+  t_id String? @unique @db.VarChar
+  name String? @db.VarChar
+
+  @@schema("pdb_analysis")
+}
+
+model x_classification {
+  id   Int     @id @default(autoincrement())
+  x_id String? @unique @db.VarChar
+  name String? @db.VarChar
+
+  @@schema("pdb_analysis")
+}

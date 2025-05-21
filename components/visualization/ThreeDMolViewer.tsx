@@ -6,15 +6,14 @@ import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } f
 export interface Domain {
   id: string;
   chainId: string;
-  // Keep original properties for backward compatibility
   start: number;
   end: number;
-  // Add PDB-specific fields
-  pdb_start?: string;
-  pdb_end?: string;
-  pdb_range?: string;  // This can handle discontinuous domains (e.g., "1-100,150-200")
   color: string;
   label?: string;
+  // Add PDB range properties
+  pdb_range?: string;
+  pdb_start?: string;
+  pdb_end?: string;
   classification?: {
     t_group?: string;
     h_group?: string;
@@ -123,79 +122,79 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
         }
         return null;
       },
-      highlightDomain: (domainIndex: number) => {
-        if (!viewerRef.current || domains.length <= domainIndex) return;
+highlightDomain: (domainIndex: number) => {
+  if (!viewerRef.current || domains.length <= domainIndex) return;
 
-        const domain = domains[domainIndex];
-        try {
-          debugLog(`Highlighting domain: ${domain.id}, range: ${domain.pdb_range}`);
+  const domain = domains[domainIndex];
+  try {
+    debugLog(`Highlighting domain: ${domain.id}, range: ${domain.start}-${domain.end}`);
 
-          // Create a selection to check if this range exists in the structure
-            // In highlightDomain function
-            const selection = {
-              chain: domain.chainId || chainId || 'A',
-              resi: domain.pdb_range || `${domain.start}-${domain.end}`
-            };
+    // Create a selection to check if this range exists in the structure
+    // Use pdb_range if available
+    const selection = {
+      chain: domain.chainId || chainId || 'A',
+      resi: domain.pdb_range || `${domain.start}-${domain.end}`
+    };
 
-          // Check if this selection has any atoms in the structure
-          const selectionExists = checkSelectionExists(viewerRef.current, selection);
+    // Check if this selection has any atoms in the structure
+    const selectionExists = checkSelectionExists(viewerRef.current, selection);
 
-          if (!selectionExists) {
-            debugLog('Domain selection appears invalid - no atoms found in this range');
+    if (!selectionExists) {
+      debugLog('Domain selection appears invalid - no atoms found in this range');
 
-            // Don't clear anything - just alert the user of the issue
-            if (typeof window !== 'undefined') {
-              const warningMsg = `Warning: No atoms found in range ${domain.start}-${domain.end} for domain ${domain.id}. This may be due to PDB numbering differences.`;
-              debugLog(warningMsg);
+      // Don't clear anything - just alert the user of the issue
+      if (typeof window !== 'undefined') {
+        const warningMsg = `Warning: No atoms found in range ${domain.pdb_range || `${domain.start}-${domain.end}`} for domain ${domain.id}. This may be due to PDB numbering differences.`;
+        debugLog(warningMsg);
 
-              // Reset to original view to ensure something is visible
-              applyDomainStyling(viewerRef.current);
-              viewerRef.current.zoomTo();
-              viewerRef.current.render();
-              return;
-            }
-          }
-
-          // Lower opacity of everything first
-          viewerRef.current.setStyle({}, { cartoon: { color: 'gray', opacity: 0.4 } });
-
-          // Highlight the specific chain
-          if (chainId) {
-            viewerRef.current.setStyle({chain: chainId}, {
-              cartoon: {
-                color: 'gray',
-                opacity: 0.7
-              }
-            });
-          }
-
-          // Highlight the specific domain with full opacity
-          viewerRef.current.setStyle(selection, {
-            cartoon: {
-              color: domain.color,
-              opacity: 1.0
-            }
-          });
-
-          // Zoom to the domain if it exists
-          if (selectionExists) {
-            viewerRef.current.zoomTo(selection);
-          }
-
-          viewerRef.current.render();
-        } catch (error) {
-          debugLog('Error highlighting domain:', error);
-
-          // Recovery: restore original styling
-          try {
-            applyDomainStyling(viewerRef.current);
-            viewerRef.current.zoomTo();
-            viewerRef.current.render();
-          } catch (recoveryError) {
-            debugLog('Failed to recover from highlighting error:', recoveryError);
-          }
-        }
+        // Reset to original view to ensure something is visible
+        applyDomainStyling(viewerRef.current);
+        viewerRef.current.zoomTo();
+        viewerRef.current.render();
+        return;
       }
+    }
+
+    // Lower opacity of everything first
+    viewerRef.current.setStyle({}, { cartoon: { color: 'gray', opacity: 0.4 } });
+
+    // Highlight the specific chain
+    if (chainId) {
+      viewerRef.current.setStyle({chain: chainId}, {
+        cartoon: {
+          color: 'gray',
+          opacity: 0.7
+        }
+      });
+    }
+
+    // Highlight the specific domain with full opacity
+    viewerRef.current.setStyle(selection, {
+      cartoon: {
+        color: domain.color,
+        opacity: 1.0
+      }
+    });
+
+    // Zoom to the domain if it exists
+    if (selectionExists) {
+      viewerRef.current.zoomTo(selection);
+    }
+
+    viewerRef.current.render();
+  } catch (error) {
+    debugLog('Error highlighting domain:', error);
+
+    // Recovery: restore original styling
+    try {
+      applyDomainStyling(viewerRef.current);
+      viewerRef.current.zoomTo();
+      viewerRef.current.render();
+    } catch (recoveryError) {
+      debugLog('Failed to recover from highlighting error:', recoveryError);
+    }
+  }
+}
     }
   }));
 
@@ -218,98 +217,94 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
   }
 
   // Apply the domain styling
-  const applyDomainStyling = (viewer: any) => {
-    if (!viewer) return;
+const applyDomainStyling = (viewer: any) => {
+  if (!viewer) return;
 
-    debugLog(`Applying styling for ${domains.length} domains`);
-    debugLog('Domain ranges:', domains.map(d => `${d.id}: ${d.start}-${d.end} (${d.chainId || chainId || 'A'})`));
-    if (domain.pdb_range) {
-      debugLog(`Using PDB range: ${domain.pdb_range} instead of sequence range: ${domain.start}-${domain.end}`);
-    }
+  debugLog(`Applying styling for ${domains.length} domains`);
+  debugLog('Domain ranges:', domains.map(d => `${d.id}: ${d.start}-${d.end} (${d.chainId || chainId || 'A'})`));
 
-    // And in the styling logic
-    if (domain.pdb_range && isDiscontinuousDomain(domain.pdb_range)) {
-      debugLog(`Domain ${domain.id} is discontinuous: ${domain.pdb_range}`);
-      // Potentially add special handling for discontinuous domains
-      // Such as different coloring or labeling
-    }
-    // Cache the domains we're applying styling for
-    lastAppliedDomainsRef.current = [...domains];
+  // Cache the domains we're applying styling for
+  lastAppliedDomainsRef.current = [...domains];
 
-    // Set base style for all atoms with reduced opacity
-    viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.4 } });
+  // Set base style for all atoms with reduced opacity
+  viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.4 } });
 
-    // Highlight specific chain if provided
-    if (chainId) {
-      debugLog(`Setting style for chain: ${chainId}`);
-      viewer.setStyle({chain: chainId}, {
-        cartoon: {
-          color: 'gray',
-          opacity: 0.7
+  // Highlight specific chain if provided
+  if (chainId) {
+    debugLog(`Setting style for chain: ${chainId}`);
+    viewer.setStyle({chain: chainId}, {
+      cartoon: {
+        color: 'gray',
+        opacity: 0.7
+      }
+    });
+  }
+
+  // Apply styling for each domain
+  if (domains.length > 0) {
+    domains.forEach((domain, index) => {
+      try {
+        // Validate domain range
+        if (domain.start > domain.end || domain.start <= 0) {
+          debugLog(`Invalid domain range: ${domain.start}-${domain.end}`, domain);
+          return;
         }
-      });
-    }
 
-    // Apply styling for each domain
-    if (domains.length > 0) {
-      domains.forEach((domain, index) => {
-        try {
-          // Validate domain range
-          if (domain.start > domain.end || domain.start <= 0) {
-            debugLog(`Invalid domain range: ${domain.start}-${domain.end}`, domain);
-            return;
-          }
-
-          // Ensure chain ID is valid
-          const domainChainId = domain.chainId || chainId || 'A';
-
-          // Create selection for this domain
-            const selection = {
-              chain: domainChainId,
-              resi: domain.pdb_range || `${domain.start}-${domain.end}`
-            };
-
-          // Check if selection exists
-          const selectionExists = checkSelectionExists(viewer, selection);
-          if (!selectionExists) {
-            debugLog(`Warning: Domain ${domain.id} (${domain.pdb_range}) may not match PDB numbering`);
-            // Continue anyway to apply styling - it won't break anything
-          }
-
-          debugLog(`Setting style for domain ${index}:`, selection);
-
-          // Apply style with full opacity for the domain
-          viewer.setStyle(selection, {
-            cartoon: {
-              color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
-              opacity: 1.0
-            }
-          });
-
-          // Add label if requested
-          if (showControls && domain.label) {
-            try {
-              viewer.addLabel(domain.label, {
-                position: { resi: Math.floor((domain.start + domain.end) / 2), chain: domainChainId },
-                backgroundColor: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
-                fontColor: "#ffffff",
-                fontSize: 12,
-                alignment: "center",
-                inFront: true
-              });
-            } catch (labelError) {
-              debugLog(`Label creation error for domain ${index}:`, labelError);
-            }
-          }
-        } catch (domainError) {
-          debugLog(`Error applying domain ${domain.id}:`, domainError);
+        // Check if domain has PDB range - this is now inside the loop
+        if (domain.pdb_range) {
+          debugLog(`Using PDB range: ${domain.pdb_range} instead of sequence range: ${domain.start}-${domain.end}`);
         }
-      });
-    }
 
-    // Final render
-    viewer.render();
-  };
+        // Ensure chain ID is valid
+        const domainChainId = domain.chainId || chainId || 'A';
+
+        // Create selection for this domain, using pdb_range if available
+        const selection = {
+          chain: domainChainId,
+          resi: domain.pdb_range || `${domain.start}-${domain.end}`
+        };
+
+        // Check if selection exists
+        const selectionExists = checkSelectionExists(viewer, selection);
+        if (!selectionExists) {
+          debugLog(`Warning: Domain ${domain.id} (${domain.start}-${domain.end}) may not match PDB numbering`);
+          // Continue anyway to apply styling - it won't break anything
+        }
+
+        debugLog(`Setting style for domain ${index}:`, selection);
+
+        // Apply style with full opacity for the domain
+        viewer.setStyle(selection, {
+          cartoon: {
+            color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+            opacity: 1.0
+          }
+        });
+
+        // Add label if requested
+        if (showControls && domain.label) {
+          try {
+            viewer.addLabel(domain.label, {
+              position: { resi: Math.floor((domain.start + domain.end) / 2), chain: domainChainId },
+              backgroundColor: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+              fontColor: "#ffffff",
+              fontSize: 12,
+              alignment: "center",
+              inFront: true
+            });
+          } catch (labelError) {
+            debugLog(`Label creation error for domain ${index}:`, labelError);
+          }
+        }
+      } catch (domainError) {
+        debugLog(`Error applying domain ${domain.id}:`, domainError);
+      }
+    });
+  }
+
+  // Final render
+  viewer.render();
+};
 
   // Initialize and load structure
   useEffect(() => {
@@ -530,7 +525,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
               fontSize: '12px'
             }}
           >
-            Reset View
+            Reset Viewa
           </button>
           <button
             onClick={() => {

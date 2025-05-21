@@ -10,7 +10,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { id } = params;
+  const { id } = await params;
 
   // Validate ID format - basic check
   if (!id.match(/^[a-zA-Z0-9]{4}$/)) {

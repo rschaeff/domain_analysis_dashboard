@@ -5,14 +5,14 @@ import { useRouter } from 'next/navigation'
 import { DomainFilters, DomainSummary, PaginationParams } from '@/lib/types'
 import { FilterPanel } from '@/components/filters/FilterPanel'
 import { DataTable } from '@/components/common/DataTable'
+import { ArchitectureGroupedTable } from '@/components/tables/ArchitectureGroupedTable'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
 import { MultiTrackDomainVisualization } from '@/components/visualization/MultiTrackDomainVisualization'
-import { Eye, Download, BarChart3, Users, Table, Grid } from 'lucide-react'
+import { Eye, Download, BarChart3, Users, Table, Grid, Layers, List } from 'lucide-react'
 
-// Enhanced API Response Type
 interface DomainsResponse {
   data: DomainSummary[]
   pagination: PaginationParams
@@ -25,9 +25,38 @@ interface DomainsResponse {
   }
 }
 
+interface ArchitectureGroup {
+  architecture_id: string
+  pattern_name: string
+  domain_count: number
+  t_groups: string[]
+  frequency: number
+  avg_confidence: number
+  classification_completeness: number
+  proteins: ProteinWithDomains[]
+  pagination?: {
+    page: number
+    size: number
+    total: number
+  }
+}
+
+interface ProteinWithDomains {
+  protein_id: string
+  pdb_id: string
+  chain_id: string
+  sequence_length: number
+  processing_date: string
+  best_confidence: number
+  avg_confidence: number
+  classification_completeness: number
+  domains: DomainSummary[]
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const [domains, setDomains] = useState<DomainSummary[]>([])
+  const [architectureGroups, setArchitectureGroups] = useState<ArchitectureGroup[]>([])
   const [loading, setLoading] = useState(false)
   const [statsLoading, setStatsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +76,7 @@ export default function DashboardPage() {
   });
 
   const [selectedDomain, setSelectedDomain] = useState<DomainSummary | null>(null)
-  const [viewMode, setViewMode] = useState<'table' | 'visualization'>('table')
+  const [viewMode, setViewMode] = useState<'table' | 'architecture' | 'visualization'>('architecture')
   const [visualizationMode, setVisualizationMode] = useState<'simple' | 'detailed'>('detailed')
   const [initialLoad, setInitialLoad] = useState(true)
 
@@ -69,7 +98,56 @@ export default function DashboardPage() {
     }
   };
 
-  // Fetch domains data
+  // Fetch architecture-grouped data
+  const fetchArchitectureData = async (newFilters?: DomainFilters) => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const filtersToUse = newFilters !== undefined ? newFilters : filters
+
+      const params = new URLSearchParams()
+
+      // Add filters to URL params with proper mapping
+      Object.entries(filtersToUse).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          if (Array.isArray(value) && value.length > 0) {
+            // Map frontend filter names to API parameter names
+            let paramKey = key
+            if (key === 't_group') paramKey = 't_groups'
+            else if (key === 'h_group') paramKey = 'h_groups'
+            else if (key === 'x_group') paramKey = 'x_groups'
+
+            params.set(paramKey, value.join(','))
+          } else if (!Array.isArray(value)) {
+            params.set(key, value.toString())
+          }
+        }
+      })
+
+      const response = await fetch(`/api/proteins/by-architecture?${params}`)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`Failed to fetch architecture data: ${response.status} ${errorText}`)
+      }
+
+      const data = await response.json()
+
+      setArchitectureGroups(data.architectures || [])
+
+      // Update statistics from architecture data
+      if (data.statistics) {
+        setStatistics(data.statistics)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch domains data (for table view)
   const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {
     if (initialLoad) setInitialLoad(false)
     setLoading(true)
@@ -138,17 +216,34 @@ export default function DashboardPage() {
     await fetchDashboardStats();
   }
 
-  // Initial load and filter changes
+  // Initial load
   useEffect(() => {
-    fetchDomains(1)
-  }, [])
-
-  // Handle filter changes separately
-  useEffect(() => {
-    if (!initialLoad) {
+    if (viewMode === 'architecture') {
+      fetchArchitectureData()
+    } else {
       fetchDomains(1)
     }
+  }, [])
+
+  // Handle filter changes
+  useEffect(() => {
+    if (!initialLoad) {
+      if (viewMode === 'architecture') {
+        fetchArchitectureData()
+      } else {
+        fetchDomains(1)
+      }
+    }
   }, [filters, initialLoad])
+
+  // Handle view mode changes
+  useEffect(() => {
+    if (viewMode === 'architecture') {
+      fetchArchitectureData()
+    } else if (viewMode === 'table') {
+      fetchDomains(1)
+    }
+  }, [viewMode])
 
   // Handle filter changes
   const handleFiltersChange = (newFilters: DomainFilters) => {
@@ -163,6 +258,14 @@ export default function DashboardPage() {
   const handlePageChange = (page: number) => {
     setPagination(prev => ({ ...prev, page }))
     fetchDomains(page)
+  }
+
+  // Handle architecture group pagination
+  const handleArchitecturePageChange = (architectureId: string, page: number) => {
+    // In a real implementation, this would update the specific architecture group
+    console.log(`Architecture ${architectureId} page change to ${page}`)
+    // You would call an API endpoint like:
+    // fetchArchitectureGroupPage(architectureId, page)
   }
 
   // Handle domain selection
@@ -246,22 +349,46 @@ export default function DashboardPage() {
         }
       })
 
-      const response = await fetch(`/api/domains?${params}`)
+      const endpoint = viewMode === 'architecture' ? '/api/proteins/by-architecture' : '/api/domains'
+      const response = await fetch(`${endpoint}?${params}`)
       const data = await response.json()
 
-      const csvData = data.data.map((domain: DomainSummary) => ({
-        pdb_id: domain.pdb_id,
-        chain_id: domain.chain_id,
-        domain_number: domain.domain_number,
-        range: domain.range,
-        confidence: domain.confidence,
-        t_group: domain.t_group,
-        h_group: domain.h_group,
-        evidence_count: domain.evidence_count,
-        evidence_types: domain.evidence_types
-      }))
+      let csvData: any[] = []
 
-      downloadAsCSV(csvData, `domains_export_${new Date().toISOString().split('T')[0]}.csv`)
+      if (viewMode === 'architecture') {
+        // Export architecture data
+        csvData = data.architectures.flatMap((group: ArchitectureGroup) =>
+          group.proteins.flatMap((protein: ProteinWithDomains) =>
+            protein.domains.map((domain: DomainSummary) => ({
+              architecture_id: group.architecture_id,
+              pattern_name: group.pattern_name,
+              pdb_id: domain.pdb_id,
+              chain_id: domain.chain_id,
+              domain_number: domain.domain_number,
+              range: domain.range,
+              confidence: domain.confidence,
+              t_group: domain.t_group,
+              h_group: domain.h_group,
+              evidence_count: domain.evidence_count,
+              evidence_types: domain.evidence_types
+            }))
+          )
+        )
+      } else {
+        csvData = data.data.map((domain: DomainSummary) => ({
+          pdb_id: domain.pdb_id,
+          chain_id: domain.chain_id,
+          domain_number: domain.domain_number,
+          range: domain.range,
+          confidence: domain.confidence,
+          t_group: domain.t_group,
+          h_group: domain.h_group,
+          evidence_count: domain.evidence_count,
+          evidence_types: domain.evidence_types
+        }))
+      }
+
+      downloadAsCSV(csvData, `${viewMode}_export_${new Date().toISOString().split('T')[0]}.csv`)
     } catch (error) {
       console.error('Export failed:', error)
     }
@@ -276,7 +403,7 @@ export default function DashboardPage() {
     return value !== undefined && value !== null && value !== ''
   }).length
 
-  // Table columns configuration
+  // Table columns configuration (for table view)
   const columns = [
     {
       key: 'pdb_id',
@@ -405,16 +532,24 @@ export default function DashboardPage() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Domain Analysis Dashboard</h1>
               <p className="text-gray-600 mt-1">
-                Analyze and compare putative domain boundaries with reference data
+                Analyze protein domain architectures and classification patterns
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button
+                variant={viewMode === 'architecture' ? 'default' : 'outline'}
+                onClick={() => setViewMode('architecture')}
+                className="flex items-center gap-2"
+              >
+                <Layers className="w-4 h-4" />
+                Architecture View
+              </Button>
               <Button
                 variant={viewMode === 'table' ? 'default' : 'outline'}
                 onClick={() => setViewMode('table')}
                 className="flex items-center gap-2"
               >
-                <Table className="w-4 h-4" />
+                <List className="w-4 h-4" />
                 Table View
               </Button>
               <Button
@@ -496,7 +631,7 @@ export default function DashboardPage() {
             />
             {activeFilterCount > 0 && (
               <div className="px-6 pb-4 text-sm text-blue-700">
-                💡 <strong>Tip:</strong> Click on classification badges in the table below to quickly add or remove filters!
+                💡 <strong>Tip:</strong> Click on classification badges to quickly add or remove filters!
               </div>
             )}
           </div>
@@ -508,42 +643,53 @@ export default function DashboardPage() {
               {loading ? (
                 <Card className="p-8 text-center">
                   <LoadingSpinner />
-                  <p className="mt-4 text-gray-600">Loading domains...</p>
+                  <p className="mt-4 text-gray-600">Loading data...</p>
                 </Card>
               ) : error ? (
                 <Card className="p-8 text-center">
                   <div className="text-red-600 mb-4">Error: {error}</div>
-                  <Button onClick={() => fetchDomains(pagination.page)}>Retry</Button>
+                  <Button onClick={() => viewMode === 'architecture' ? fetchArchitectureData() : fetchDomains(pagination.page)}>Retry</Button>
                 </Card>
-              ) : domains.length === 0 ? (
-                <Card className="p-8 text-center">
-                  <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <div className="text-gray-500 mb-4">No domains found</div>
-                  <p className="text-sm text-gray-400">
-                    Try adjusting your filters or check if data is available in the database.
-                  </p>
-                  <Button
-                    onClick={() => fetchDomains(1)}
-                    className="mt-4"
-                    variant="outline"
-                  >
-                    Load Data
-                  </Button>
-                </Card>
+              ) : viewMode === 'architecture' ? (
+                <ArchitectureGroupedTable
+                  architectureGroups={architectureGroups}
+                  onProteinClick={handleViewProtein}
+                  onDomainClick={handleDomainClick}
+                  onArchitecturePageChange={handleArchitecturePageChange}
+                  renderClassificationBadge={renderClassificationBadge}
+                  loading={loading}
+                />
               ) : viewMode === 'table' ? (
-                <div className="w-full">
-                  <DataTable
-                    data={domains}
-                    columns={columns}
-                    pagination={pagination}
-                    onPageChange={handlePageChange}
-                    onRowClick={handleDomainClick}
-                    loading={loading}
-                  />
-                </div>
+                domains.length === 0 ? (
+                  <Card className="p-8 text-center">
+                    <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                    <div className="text-gray-500 mb-4">No domains found</div>
+                    <p className="text-sm text-gray-400">
+                      Try adjusting your filters or check if data is available in the database.
+                    </p>
+                    <Button
+                      onClick={() => fetchDomains(1)}
+                      className="mt-4"
+                      variant="outline"
+                    >
+                      Load Data
+                    </Button>
+                  </Card>
+                ) : (
+                  <div className="w-full">
+                    <DataTable
+                      data={domains}
+                      columns={columns}
+                      pagination={pagination}
+                      onPageChange={handlePageChange}
+                      onRowClick={handleDomainClick}
+                      loading={loading}
+                    />
+                  </div>
+                )
               ) : (
                 <div className="space-y-6">
-                  {/* Visualization Content */}
+                  {/* Visualization Content - keeping existing implementation */}
                   {Object.entries(
                     domains.reduce((acc, domain) => {
                       const key = `${domain.pdb_id}_${domain.chain_id}`

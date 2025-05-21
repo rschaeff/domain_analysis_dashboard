@@ -5,7 +5,19 @@ import { DomainFilters } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card } from '@/components/ui/Card'
-import { ChevronDown, ChevronUp, Filter, X, Search, Loader } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronUp,
+  Filter,
+  X,
+  Search,
+  Loader,
+  Star,
+  Target,
+  Layers,
+  Hash,
+  RotateCcw
+} from 'lucide-react'
 
 interface FilterPanelProps {
   filters: DomainFilters
@@ -28,7 +40,47 @@ interface AutocompleteProps {
   label: string
 }
 
-// Autocomplete component for classification groups
+// Preset filter configurations
+const FILTER_PRESETS = [
+  {
+    id: 'high_quality',
+    name: 'High Quality',
+    icon: Star,
+    description: 'High confidence, well-classified domains',
+    filters: {
+      min_confidence: 0.8
+    }
+  },
+  {
+    id: 'needs_review',
+    name: 'Needs Review',
+    icon: Target,
+    description: 'Low confidence or unclear domains',
+    filters: {
+      max_confidence: 0.5
+    }
+  },
+  {
+    id: 'multi_domain',
+    name: 'Multi-Domain',
+    icon: Layers,
+    description: 'Proteins with multiple domains',
+    filters: {
+      // This would need backend support to filter by domain count per protein
+    }
+  },
+  {
+    id: 'blast_supported',
+    name: 'BLAST Evidence',
+    icon: Hash,
+    description: 'Domains with BLAST support',
+    filters: {
+      evidence_types: 'blast'
+    }
+  }
+]
+
+// Autocomplete component for classification groups (keeping existing functionality)
 function ClassificationAutocomplete({ type, value, onChange, placeholder, label }: AutocompleteProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -115,10 +167,10 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
 
   return (
     <div ref={containerRef} className="relative">
-      <label className="block text-sm font-medium mb-2">
+      <label className="block text-sm font-medium mb-2 text-gray-700">
         {label}
         {value.length > 0 && (
-          <span className="ml-2 text-xs text-gray-500">
+          <span className="ml-2 text-xs text-blue-600 font-normal">
             ({value.length} selected)
           </span>
         )}
@@ -219,6 +271,7 @@ export function FilterPanel({
   className = ''
 }: FilterPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [activePreset, setActivePreset] = useState<string | null>(null)
 
   const updateFilter = useCallback(<K extends keyof DomainFilters>(
     key: K,
@@ -228,13 +281,25 @@ export function FilterPanel({
       ...filters,
       [key]: value
     })
+    // Clear active preset when manually changing filters
+    setActivePreset(null)
   }, [filters, onFiltersChange])
 
   const removeFilter = useCallback((key: keyof DomainFilters) => {
     const newFilters = { ...filters }
     delete newFilters[key]
     onFiltersChange(newFilters)
+    setActivePreset(null)
   }, [filters, onFiltersChange])
+
+  // Apply preset filter
+  const applyPreset = (preset: typeof FILTER_PRESETS[0]) => {
+    onFiltersChange({
+      ...filters,
+      ...preset.filters
+    })
+    setActivePreset(preset.id)
+  }
 
   const activeFilterCount = Object.keys(filters).filter(key => {
     const value = filters[key as keyof DomainFilters]
@@ -250,6 +315,7 @@ export function FilterPanel({
     delete newFilters.min_confidence
     delete newFilters.max_confidence
     onFiltersChange(newFilters)
+    setActivePreset(null)
   }
 
   const clearClassificationFilters = () => {
@@ -259,18 +325,21 @@ export function FilterPanel({
     delete newFilters.x_group
     delete newFilters.a_group
     onFiltersChange(newFilters)
+    setActivePreset(null)
   }
 
   return (
-    <Card className={`p-6 ${className}`}>
-      <div className="space-y-6">
-        {/* Header */}
+    <Card className={`overflow-hidden ${className}`}>
+      {/* Header */}
+      <div className="px-6 py-4 bg-white border-b border-gray-200">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Filter className="w-5 h-5 text-gray-500" />
-            <h3 className="text-lg font-medium">Filters</h3>
+            <div className="flex items-center gap-2">
+              <Filter className="w-5 h-5 text-gray-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
+            </div>
             {activeFilterCount > 0 && (
-              <span className="px-3 py-1 text-sm bg-blue-100 text-blue-800 rounded-full font-medium">
+              <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-medium">
                 {activeFilterCount} active
               </span>
             )}
@@ -281,9 +350,9 @@ export function FilterPanel({
                 variant="outline"
                 size="sm"
                 onClick={onReset}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-gray-600"
               >
-                <X className="w-4 h-4 mr-1" />
+                <RotateCcw className="w-4 h-4 mr-1" />
                 Clear All
               </Button>
             )}
@@ -295,186 +364,218 @@ export function FilterPanel({
               {isExpanded ? (
                 <>
                   <ChevronUp className="w-4 h-4 mr-1" />
-                  Less Filters
+                  Less
                 </>
               ) : (
                 <>
                   <ChevronDown className="w-4 h-4 mr-1" />
-                  More Filters
+                  More
                 </>
               )}
             </Button>
           </div>
         </div>
 
-        {/* Primary filters */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">PDB ID</label>
+        {/* Quick Search - Always Visible */}
+        <div className="mt-4 flex gap-3">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
-              placeholder="e.g., 1abc"
+              placeholder="Search by PDB ID (e.g., 1abc)"
               value={filters.pdb_id || ''}
               onChange={(e) => updateFilter('pdb_id', e.target.value || undefined)}
+              className="pl-10"
             />
           </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Chain ID</label>
+          <div className="w-24">
             <Input
-              placeholder="e.g., A"
+              placeholder="Chain"
               value={filters.chain_id || ''}
               onChange={(e) => updateFilter('chain_id', e.target.value || undefined)}
               maxLength={1}
             />
           </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Domain Number</label>
+          <div className="w-32">
             <Input
               type="number"
               min="1"
-              placeholder="e.g., 1"
+              placeholder="Domain #"
               value={filters.domain_number ?? ''}
               onChange={(e) => updateFilter('domain_number', e.target.value ? parseInt(e.target.value) : undefined)}
             />
           </div>
         </div>
+      </div>
 
-        {/* Confidence range */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-sm font-medium">Confidence Range</label>
-            {(filters.min_confidence !== undefined || filters.max_confidence !== undefined) && (
-              <button
-                onClick={clearConfidenceFilters}
-                className="text-xs text-gray-500 hover:text-gray-700"
-                type="button"
-              >
-                Clear
-              </button>
-            )}
+      {/* Quick Preset Filters - When Collapsed */}
+      {!isExpanded && (
+        <div className="px-6 py-4 bg-gray-50">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm font-medium text-gray-700">Quick Filters:</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex-1">
-              <Input
-                type="number"
-                min="0"
-                max="1"
-                step="0.1"
-                placeholder="Min (0.0)"
-                value={filters.min_confidence ?? ''}
-                onChange={(e) => updateFilter('min_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
-              />
-            </div>
-            <span className="text-gray-500">to</span>
-            <div className="flex-1">
-              <Input
-                type="number"
-                min="0"
-                max="1"
-                step="0.1"
-                placeholder="Max (1.0)"
-                value={filters.max_confidence ?? ''}
-                onChange={(e) => updateFilter('max_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
-              />
-            </div>
-            {/* Quick preset buttons */}
-            <div className="flex gap-1">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  updateFilter('min_confidence', 0.8)
-                  updateFilter('max_confidence', undefined)
-                }}
-                className="px-2 py-1 text-xs"
-              >
-                High (≥0.8)
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  updateFilter('min_confidence', 0.5)
-                  updateFilter('max_confidence', 0.8)
-                }}
-                className="px-2 py-1 text-xs"
-              >
-                Medium
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  updateFilter('min_confidence', undefined)
-                  updateFilter('max_confidence', 0.5)
-                }}
-                className="px-2 py-1 text-xs"
-              >
-                Low (&lt;0.5)
-              </Button>
-            </div>
+          <div className="flex flex-wrap gap-2">
+            {FILTER_PRESETS.map((preset) => {
+              const IconComponent = preset.icon
+              const isActive = activePreset === preset.id
+
+              return (
+                <button
+                  key={preset.id}
+                  onClick={() => applyPreset(preset)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                    isActive
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                  }`}
+                  title={preset.description}
+                >
+                  <IconComponent className="w-4 h-4" />
+                  {preset.name}
+                </button>
+              )
+            })}
           </div>
         </div>
+      )}
 
-        {/* ECOD Classification - always visible with autocomplete */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-md font-medium text-gray-700">ECOD Classification</h4>
-            {(filters.t_group?.length || filters.h_group?.length || filters.x_group?.length || filters.a_group?.length) && (
-              <button
-                onClick={clearClassificationFilters}
-                className="text-xs text-gray-500 hover:text-gray-700"
-                type="button"
-              >
-                Clear All Classification
-              </button>
-            )}
+      {/* Expanded Filters */}
+      {isExpanded && (
+        <div className="px-6 py-6 space-y-6 bg-white">
+          {/* Quality & Confidence Section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-gray-900">Quality & Confidence</h4>
+              {(filters.min_confidence !== undefined || filters.max_confidence !== undefined) && (
+                <button
+                  onClick={clearConfidenceFilters}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                  type="button"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <Input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  placeholder="Min confidence"
+                  value={filters.min_confidence ?? ''}
+                  onChange={(e) => updateFilter('min_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
+                />
+              </div>
+              <span className="text-gray-500 text-sm">to</span>
+              <div className="flex-1">
+                <Input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  placeholder="Max confidence"
+                  value={filters.max_confidence ?? ''}
+                  onChange={(e) => updateFilter('max_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
+                />
+              </div>
+
+              {/* Quick preset buttons */}
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    updateFilter('min_confidence', 0.8)
+                    updateFilter('max_confidence', undefined)
+                  }}
+                  className="px-2 py-1 text-xs whitespace-nowrap"
+                >
+                  High (≥0.8)
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    updateFilter('min_confidence', 0.5)
+                    updateFilter('max_confidence', 0.8)
+                  }}
+                  className="px-2 py-1 text-xs whitespace-nowrap"
+                >
+                  Medium
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    updateFilter('min_confidence', undefined)
+                    updateFilter('max_confidence', 0.5)
+                  }}
+                  className="px-2 py-1 text-xs whitespace-nowrap"
+                >
+                  Low (&lt;0.5)
+                </Button>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ClassificationAutocomplete
-              type="x_group"
-              value={filters.x_group || []}
-              onChange={(value) => updateFilter('x_group', value.length > 0 ? value : undefined)}
-              placeholder="Search X-Groups (Possible Homology)..."
-              label="X-Groups (Possible Homology)"
-            />
-
-            <ClassificationAutocomplete
-              type="h_group"
-              value={filters.h_group || []}
-              onChange={(value) => updateFilter('h_group', value.length > 0 ? value : undefined)}
-              placeholder="Search H-Groups (Homology)..."
-              label="H-Groups (Homology)"
-            />
-
-            <ClassificationAutocomplete
-              type="t_group"
-              value={filters.t_group || []}
-              onChange={(value) => updateFilter('t_group', value.length > 0 ? value : undefined)}
-              placeholder="Search T-Groups (Topology)..."
-              label="T-Groups (Topology)"
-            />
-
-            <ClassificationAutocomplete
-              type="a_group"
-              value={filters.a_group || []}
-              onChange={(value) => updateFilter('a_group', value.length > 0 ? value : undefined)}
-              placeholder="Search A-Groups (Architecture)..."
-              label="A-Groups (Architecture)"
-            />
-          </div>
-        </div>
-
-        {/* Advanced filters - expandable */}
-        {isExpanded && (
-          <div className="border-t pt-6 space-y-4">
-            <h4 className="text-md font-medium text-gray-700">Additional Filters</h4>
+          {/* ECOD Classification Section */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-sm font-semibold text-gray-900">ECOD Classification</h4>
+              {(filters.t_group?.length || filters.h_group?.length || filters.x_group?.length || filters.a_group?.length) && (
+                <button
+                  onClick={clearClassificationFilters}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                  type="button"
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ClassificationAutocomplete
+                type="h_group"
+                value={filters.h_group || []}
+                onChange={(value) => updateFilter('h_group', value.length > 0 ? value : undefined)}
+                placeholder="Search H-Groups..."
+                label="H-Groups (Homology)"
+              />
+
+              <ClassificationAutocomplete
+                type="t_group"
+                value={filters.t_group || []}
+                onChange={(value) => updateFilter('t_group', value.length > 0 ? value : undefined)}
+                placeholder="Search T-Groups..."
+                label="T-Groups (Topology)"
+              />
+
+              <ClassificationAutocomplete
+                type="x_group"
+                value={filters.x_group || []}
+                onChange={(value) => updateFilter('x_group', value.length > 0 ? value : undefined)}
+                placeholder="Search X-Groups..."
+                label="X-Groups (Possible Homology)"
+              />
+
+              <ClassificationAutocomplete
+                type="a_group"
+                value={filters.a_group || []}
+                onChange={(value) => updateFilter('a_group', value.length > 0 ? value : undefined)}
+                placeholder="Search A-Groups..."
+                label="A-Groups (Architecture)"
+              />
+            </div>
+          </div>
+
+          {/* Additional Filters Section */}
+          <div>
+            <h4 className="text-sm font-semibold text-gray-900 mb-3">Additional Filters</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-2">Min Sequence Length</label>
+                <label className="block text-sm font-medium mb-2 text-gray-700">Min Sequence Length</label>
                 <Input
                   type="number"
                   min="1"
@@ -485,7 +586,7 @@ export function FilterPanel({
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Max Sequence Length</label>
+                <label className="block text-sm font-medium mb-2 text-gray-700">Max Sequence Length</label>
                 <Input
                   type="number"
                   min="1"
@@ -496,7 +597,7 @@ export function FilterPanel({
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Min Evidence Count</label>
+                <label className="block text-sm font-medium mb-2 text-gray-700">Min Evidence Count</label>
                 <Input
                   type="number"
                   min="0"
@@ -507,7 +608,7 @@ export function FilterPanel({
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Evidence Types</label>
+                <label className="block text-sm font-medium mb-2 text-gray-700">Evidence Types</label>
                 <Input
                   placeholder="e.g., blast,hhsearch"
                   value={filters.evidence_types || ''}
@@ -519,60 +620,60 @@ export function FilterPanel({
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Active filters summary */}
-        {activeFilterCount > 0 && (
-          <div className="border-t pt-4">
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(filters).map(([key, value]) => {
-                if (value === undefined || value === null || value === '') return null
-                if (Array.isArray(value) && value.length === 0) return null
+      {/* Active filters summary */}
+      {activeFilterCount > 0 && (
+        <div className="px-6 py-4 border-t bg-blue-50">
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(filters).map(([key, value]) => {
+              if (value === undefined || value === null || value === '') return null
+              if (Array.isArray(value) && value.length === 0) return null
 
-                let displayValue: string
-                if (Array.isArray(value)) {
-                  displayValue = value.length === 1 ? value[0] : `${value.length} selected`
-                } else {
-                  displayValue = String(value)
-                }
+              let displayValue: string
+              if (Array.isArray(value)) {
+                displayValue = value.length === 1 ? value[0] : `${value.length} selected`
+              } else {
+                displayValue = String(value)
+              }
 
-                const keyLabels: Record<string, string> = {
-                  pdb_id: 'PDB',
-                  chain_id: 'Chain',
-                  domain_number: 'Domain #',
-                  t_group: 'T-Groups',
-                  h_group: 'H-Groups',
-                  x_group: 'X-Groups',
-                  a_group: 'A-Groups',
-                  min_confidence: 'Min Confidence',
-                  max_confidence: 'Max Confidence',
-                  sequence_length_min: 'Min Length',
-                  sequence_length_max: 'Max Length',
-                  min_evidence_count: 'Min Evidence',
-                  evidence_types: 'Evidence Types'
-                }
+              const keyLabels: Record<string, string> = {
+                pdb_id: 'PDB',
+                chain_id: 'Chain',
+                domain_number: 'Domain #',
+                t_group: 'T-Groups',
+                h_group: 'H-Groups',
+                x_group: 'X-Groups',
+                a_group: 'A-Groups',
+                min_confidence: 'Min Confidence',
+                max_confidence: 'Max Confidence',
+                sequence_length_min: 'Min Length',
+                sequence_length_max: 'Max Length',
+                min_evidence_count: 'Min Evidence',
+                evidence_types: 'Evidence Types'
+              }
 
-                return (
-                  <span
-                    key={key}
-                    className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-800 rounded-full text-sm border border-blue-200"
+              return (
+                <span
+                  key={key}
+                  className="inline-flex items-center gap-2 px-3 py-1 bg-white text-blue-800 rounded-full text-sm border border-blue-200 shadow-sm"
+                >
+                  <span className="font-medium">{keyLabels[key] || key}:</span>
+                  <span>{displayValue}</span>
+                  <button
+                    onClick={() => removeFilter(key as keyof DomainFilters)}
+                    className="ml-1 hover:text-blue-900 hover:bg-blue-100 rounded-full p-0.5"
+                    type="button"
                   >
-                    <span className="font-medium">{keyLabels[key] || key}:</span>
-                    <span>{displayValue}</span>
-                    <button
-                      onClick={() => removeFilter(key as keyof DomainFilters)}
-                      className="ml-1 hover:text-blue-900 hover:bg-blue-200 rounded-full p-0.5"
-                      type="button"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                )
-              })}
-            </div>
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )
+            })}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </Card>
   )
 }

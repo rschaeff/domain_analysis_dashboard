@@ -27,23 +27,29 @@ export function StructureViewer({
   const [viewerError, setViewerError] = useState<string | null>(null)
   const viewerRef = useRef<any>(null)
 
-  // Map domains to ThreeDMolViewer format
-    const mappedDomains: Domain[] = domains.map((domain, index) => ({
-      id: String(index + 1),
-      chainId: chain_id || 'A',
-      // Use PDB positions if available, fall back to sequence positions if not
-      start: domain.pdb_start || domain.start,
-      end: domain.pdb_end || domain.end,
-      // For selection string, use pdb_range if available
-      selectionString: domain.pdb_range,
-      color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
-      label: domain.label || `Domain ${index + 1}`
-    }))
+  // Map domains to ThreeDMolViewer format with PDB ranges
+  const mappedDomains: Domain[] = domains.map((domain, index) => ({
+    id: String(index + 1),
+    chainId: chain_id || 'A',
+    // Keep original start/end for backward compatibility
+    start: domain.start_pos || domain.start,
+    end: domain.end_pos || domain.end,
+    // Add PDB range information for accurate 3D selection
+    pdb_range: domain.pdb_range,
+    pdb_start: domain.pdb_start,
+    pdb_end: domain.pdb_end,
+    color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+    label: domain.label || `Domain ${index + 1}`,
+    classification: domain.classification
+  }))
 
   // Log domain data for debugging
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
       console.log('[StructureViewer] Rendering with domains:', mappedDomains);
+      console.log('[StructureViewer] PDB ranges:', mappedDomains.map(d =>
+        `${d.id}: ${d.start}-${d.end} (PDB: ${d.pdb_range || 'not available'})`
+      ));
     }
   }, [mappedDomains]);
 
@@ -65,7 +71,7 @@ export function StructureViewer({
       e.stopPropagation();
     }
 
-    console.log(`[StructureViewer] Highlighting domain ${index}: ${domain.start}-${domain.end}`);
+    console.log(`[StructureViewer] Highlighting domain ${index}: ${domain.start}-${domain.end}${domain.pdb_range ? ` (PDB: ${domain.pdb_range})` : ''}`);
     setSelectedDomain(index)
 
     // Focus on the domain in the viewer

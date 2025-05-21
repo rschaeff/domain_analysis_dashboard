@@ -448,25 +448,32 @@ const fetchDashboardStats = async () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <StatCard
             title="Total Proteins"
-            value={statistics.total_proteins.toLocaleString()}
+            value={statistics.total_proteins ? statistics.total_proteins.toLocaleString() : '0'}
             color="text-blue-600"
             loading={statsLoading}
           />
           <StatCard
             title="Total Domains"
-            value={statistics.total_domains.toLocaleString()}
+            value={statistics.total_domains ? statistics.total_domains.toLocaleString() : '0'}
             color="text-green-600"
             loading={statsLoading}
           />
           <StatCard
             title="Classified Proteins"
-            value={`${statistics.classified_chains.toLocaleString()} (${statistics.total_proteins > 0 ? Math.round((statistics.classified_chains / statistics.total_proteins) * 100) : 0}%)`}
+            value={statistics.classified_chains ?
+              `${statistics.classified_chains.toLocaleString()} (${
+                statistics.total_proteins ?
+                Math.round((statistics.classified_chains / statistics.total_proteins) * 100) : 0
+              }%)` : '0 (0%)'
+            }
             color="text-purple-600"
             loading={statsLoading}
           />
           <StatCard
             title="Domain Coverage"
-            value={`${statistics.avg_domain_coverage.toFixed(1)}%`}
+            value={statistics.avg_domain_coverage ?
+              `${statistics.avg_domain_coverage.toFixed(1)}%` : '0%'
+            }
             color="text-orange-600"
             loading={statsLoading}
             tooltip="Average percentage of protein length covered by domains"

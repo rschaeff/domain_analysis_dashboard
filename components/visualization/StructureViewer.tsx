@@ -28,14 +28,17 @@ export function StructureViewer({
   const viewerRef = useRef<any>(null)
 
   // Map domains to ThreeDMolViewer format
-  const mappedDomains: Domain[] = domains.map((domain, index) => ({
-    id: String(index + 1),
-    chainId: chain_id || 'A',
-    start: domain.start,
-    end: domain.end,
-    color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
-    label: domain.label || `Domain ${index + 1}`
-  }))
+    const mappedDomains: Domain[] = domains.map((domain, index) => ({
+      id: String(index + 1),
+      chainId: chain_id || 'A',
+      // Use PDB positions if available, fall back to sequence positions if not
+      start: domain.pdb_start || domain.start,
+      end: domain.pdb_end || domain.end,
+      // For selection string, use pdb_range if available
+      selectionString: domain.pdb_range,
+      color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+      label: domain.label || `Domain ${index + 1}`
+    }))
 
   // Log domain data for debugging
   useEffect(() => {

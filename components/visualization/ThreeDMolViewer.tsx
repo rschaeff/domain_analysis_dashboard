@@ -2,12 +2,17 @@
 
 import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 
-// Domain type definition
+// Updated Domain interface
 export interface Domain {
   id: string;
   chainId: string;
+  // Keep original properties for backward compatibility
   start: number;
   end: number;
+  // Add PDB-specific fields
+  pdb_start?: string;
+  pdb_end?: string;
+  pdb_range?: string;  // This can handle discontinuous domains (e.g., "1-100,150-200")
   color: string;
   label?: string;
   classification?: {
@@ -66,20 +71,36 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
   };
 
   // Check if a domain selection exists in the structure
-  const checkSelectionExists = (viewer: any, selection: any): boolean => {
-    if (!viewer) return false;
+    // Enhanced checkSelectionExists
+    const checkSelectionExists = (viewer: any, selection: any): boolean => {
+      if (!viewer) return false;
 
-    try {
-      const atoms = viewer.selectedAtoms(selection);
-      const exists = atoms && atoms.length > 0;
-      debugLog(`Selection ${JSON.stringify(selection)} has ${atoms?.length || 0} atoms`);
-      return exists;
-    } catch (err) {
-      debugLog('Error checking selection:', err);
-      return false;
-    }
-  };
+      try {
+        // For discontinuous domains, check each segment separately
+        if (selection.resi && selection.resi.includes(',')) {
+          const segments = selection.resi.split(',');
+          let totalAtoms = 0;
 
+          for (const segment of segments) {
+            const segmentSelection = { ...selection, resi: segment };
+            const atoms = viewer.selectedAtoms(segmentSelection);
+            totalAtoms += atoms?.length || 0;
+            debugLog(`Selection segment ${segment} has ${atoms?.length || 0} atoms`);
+          }
+
+          return totalAtoms > 0;
+        } else {
+          // Regular continuous domain
+          const atoms = viewer.selectedAtoms(selection);
+          const exists = atoms && atoms.length > 0;
+          debugLog(`Selection ${JSON.stringify(selection)} has ${atoms?.length || 0} atoms`);
+          return exists;
+        }
+      } catch (err) {
+        debugLog('Error checking selection:', err);
+        return false;
+      }
+    };
   // Expose the viewer methods via ref
   useImperativeHandle(ref, () => ({
     current: {
@@ -107,13 +128,14 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
 
         const domain = domains[domainIndex];
         try {
-          debugLog(`Highlighting domain: ${domain.id}, range: ${domain.start}-${domain.end}`);
+          debugLog(`Highlighting domain: ${domain.id}, range: ${domain.pdb_range}`);
 
           // Create a selection to check if this range exists in the structure
-          const selection = {
-            chain: domain.chainId || chainId || 'A',
-            resi: `${domain.start}-${domain.end}`
-          };
+            // In highlightDomain function
+            const selection = {
+              chain: domain.chainId || chainId || 'A',
+              resi: domain.pdb_range || `${domain.start}-${domain.end}`
+            };
 
           // Check if this selection has any atoms in the structure
           const selectionExists = checkSelectionExists(viewerRef.current, selection);
@@ -191,13 +213,26 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     }
   };
 
+  const isDiscontinuousDomain = (range: string): boolean => {
+    return range?.includes(',') || false;
+  }
+
   // Apply the domain styling
   const applyDomainStyling = (viewer: any) => {
     if (!viewer) return;
 
     debugLog(`Applying styling for ${domains.length} domains`);
     debugLog('Domain ranges:', domains.map(d => `${d.id}: ${d.start}-${d.end} (${d.chainId || chainId || 'A'})`));
+    if (domain.pdb_range) {
+      debugLog(`Using PDB range: ${domain.pdb_range} instead of sequence range: ${domain.start}-${domain.end}`);
+    }
 
+    // And in the styling logic
+    if (domain.pdb_range && isDiscontinuousDomain(domain.pdb_range)) {
+      debugLog(`Domain ${domain.id} is discontinuous: ${domain.pdb_range}`);
+      // Potentially add special handling for discontinuous domains
+      // Such as different coloring or labeling
+    }
     // Cache the domains we're applying styling for
     lastAppliedDomainsRef.current = [...domains];
 
@@ -229,15 +264,15 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
           const domainChainId = domain.chainId || chainId || 'A';
 
           // Create selection for this domain
-          const selection = {
-            chain: domainChainId,
-            resi: `${domain.start}-${domain.end}`
-          };
+            const selection = {
+              chain: domainChainId,
+              resi: domain.pdb_range || `${domain.start}-${domain.end}`
+            };
 
           // Check if selection exists
           const selectionExists = checkSelectionExists(viewer, selection);
           if (!selectionExists) {
-            debugLog(`Warning: Domain ${domain.id} (${domain.start}-${domain.end}) may not match PDB numbering`);
+            debugLog(`Warning: Domain ${domain.id} (${domain.pdb_range}) may not match PDB numbering`);
             // Continue anyway to apply styling - it won't break anything
           }
 

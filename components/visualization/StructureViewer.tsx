@@ -2,10 +2,13 @@
 
 import React, { useState, useRef, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { MolStarViewerProps } from '@/lib/types'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { RotateCcw, Download } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { RotateCcw, Download, Eye, Info } from 'lucide-react'
+import { Badge } from '@/components/ui/Badge'
+import { Tooltip } from '@/components/ui/Tooltip'
 
 // Domain type
 import { Domain } from '@/components/visualization/ThreeDMolViewer'
@@ -13,88 +16,153 @@ import { Domain } from '@/components/visualization/ThreeDMolViewer'
 // Dynamically import ThreeDMolViewer with no SSR
 const ThreeDMolViewer = dynamic(
   () => import('@/components/visualization/ThreeDMolViewer'),
-  { ssr: false, loading: () => <div>Loading 3D viewer...</div> }
+  { ssr: false, loading: () => <div className="h-[400px] flex items-center justify-center">Loading 3D viewer...</div> }
 )
+
+// Domain colors with high initial contrast for N-to-C terminal coloring
+const DOMAIN_COLORS = [
+  '#FF0000', // Red
+  '#0000FF', // Blue
+  '#00CC00', // Green
+  '#FF00FF', // Magenta
+  '#FFCC00', // Gold
+  '#00FFFF', // Cyan
+  '#FF6600', // Orange
+  '#9900CC', // Purple
+  '#669900', // Olive
+  '#FF99CC', // Pink
+  '#666666', // Gray
+  '#336699', // Steel Blue
+]
+
+interface StructureViewerProps {
+  pdb_id: string
+  chain_id: string
+  domains?: any[]
+  onDomainClick?: (domain: any) => void
+}
 
 export function StructureViewer({
   pdb_id,
   chain_id,
   domains = [],
   onDomainClick
-}: MolStarViewerProps) {
+}: StructureViewerProps) {
   const [isViewerReady, setIsViewerReady] = useState(false)
   const [selectedDomain, setSelectedDomain] = useState<number | null>(null)
   const [viewerError, setViewerError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<string>('putative')
   const viewerRef = useRef<any>(null)
 
-  // Map domains to ThreeDMolViewer format with PDB ranges
-  const mappedDomains: Domain[] = domains.map((domain, index) => ({
-    id: String(index + 1),
-    chainId: chain_id || 'A',
-    // Keep original start/end for backward compatibility
-    start: domain.start_pos || domain.start,
-    end: domain.end_pos || domain.end,
-    // Add PDB range information for accurate 3D selection
-    pdb_range: domain.pdb_range,
-    pdb_start: domain.pdb_start,
-    pdb_end: domain.pdb_end,
-    color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
-    label: domain.label || `Domain ${index + 1}`,
-    classification: domain.classification
-  }))
+  // Split domains by type
+  const putativeDomains = domains.filter(d => d.domain_type === 'putative')
+  const referenceDomains = domains.filter(d => d.domain_type === 'reference')
+
+  // Map domains to ThreeDMolViewer format with proper coloring by N-to-C position
+  const mapDomains = (domainsToMap: any[]): Domain[] => {
+    return domainsToMap.map((domain, index) => ({
+      id: String(domain.id || index),
+      chainId: chain_id,
+      // Use all available position data
+      start: domain.start_pos || parseInt(domain.range?.split('-')[0]),
+      end: domain.end_pos || parseInt(domain.range?.split('-')[1]),
+      // Use PDB range if available
+      pdb_range: domain.pdb_range,
+      pdb_start: domain.pdb_start,
+      pdb_end: domain.pdb_end,
+      // Use position-based coloring for N to C terminal visualization
+      color: DOMAIN_COLORS[index % DOMAIN_COLORS.length],
+      label: domain.domain_id || `Domain ${domain.domain_number || index + 1}`,
+      classification: {
+        t_group: domain.t_group,
+        h_group: domain.h_group,
+        x_group: domain.x_group,
+        a_group: domain.a_group
+      }
+    }))
+  }
+
+  const mappedPutativeDomains = mapDomains(putativeDomains)
+  const mappedReferenceDomains = mapDomains(referenceDomains)
+
+  // For 3D visualization, combine putative and reference domains
+  // but prioritize showing putative domains
+  const activeDomainsForViewer = activeTab === 'putative'
+    ? mappedPutativeDomains
+    : mappedReferenceDomains
 
   // Log domain data for debugging
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
-      console.log('[StructureViewer] Rendering with domains:', mappedDomains);
-      console.log('[StructureViewer] PDB ranges:', mappedDomains.map(d =>
-        `${d.id}: ${d.start}-${d.end} (PDB: ${d.pdb_range || 'not available'})`
-      ));
+      console.log('[StructureViewer] Putative domains:', putativeDomains.length)
+      console.log('[StructureViewer] Reference domains:', referenceDomains.length)
     }
-  }, [mappedDomains]);
+  }, [putativeDomains, referenceDomains])
 
   const handleViewerReady = () => {
-    console.log('[StructureViewer] 3D viewer ready');
+    console.log('[StructureViewer] 3D viewer ready')
     setIsViewerReady(true)
     setViewerError(null)
   }
 
   const handleViewerError = (error: string) => {
-    console.error('[StructureViewer] Error:', error);
+    console.error('[StructureViewer] Error:', error)
     setViewerError(error)
   }
 
   const handleHighlightDomain = (domain: Domain, index: number, e?: React.MouseEvent) => {
     // Stop event propagation if event is provided
     if (e) {
-      e.preventDefault();
-      e.stopPropagation();
+      e.preventDefault()
+      e.stopPropagation()
     }
 
-    console.log(`[StructureViewer] Highlighting domain ${index}: ${domain.start}-${domain.end}${domain.pdb_range ? ` (PDB: ${domain.pdb_range})` : ''}`);
+    console.log(`[StructureViewer] Highlighting domain ${index}: ${domain.start}-${domain.end}`)
     setSelectedDomain(index)
 
     // Focus on the domain in the viewer
     if (viewerRef.current && viewerRef.current.current) {
       try {
         // Call the highlightDomain method exposed via ref
-        viewerRef.current.current.highlightDomain(index);
+        viewerRef.current.current.highlightDomain(index)
       } catch (error) {
-        console.error('[StructureViewer] Error highlighting domain:', error);
+        console.error('[StructureViewer] Error highlighting domain:', error)
+      }
+    }
+
+    // If the domain is clicked and there's a click handler, call it
+    if (onDomainClick && !e) {
+      const originalDomain = activeTab === 'putative'
+        ? putativeDomains[index]
+        : referenceDomains[index]
+      onDomainClick(originalDomain)
+    }
+  }
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value)
+    setSelectedDomain(null)
+
+    // Reset view when switching tabs
+    if (viewerRef.current && viewerRef.current.current) {
+      try {
+        viewerRef.current.current.reset()
+      } catch (error) {
+        console.error('[StructureViewer] Error resetting view:', error)
       }
     }
   }
 
   const handleReset = () => {
-    console.log('[StructureViewer] Resetting view');
+    console.log('[StructureViewer] Resetting view')
     setSelectedDomain(null)
 
     // Reset the viewer
     if (viewerRef.current && viewerRef.current.current) {
       try {
-        viewerRef.current.current.reset();
+        viewerRef.current.current.reset()
       } catch (error) {
-        console.error('[StructureViewer] Error resetting view:', error);
+        console.error('[StructureViewer] Error resetting view:', error)
       }
     }
   }
@@ -103,19 +171,35 @@ export function StructureViewer({
     // Export an image
     if (viewerRef.current && viewerRef.current.current) {
       try {
-        const dataUrl = viewerRef.current.current.exportImage();
+        const dataUrl = viewerRef.current.current.exportImage()
         if (dataUrl) {
-          const link = document.createElement('a');
-          link.href = dataUrl;
-          link.download = `${pdb_id}${chain_id ? '_' + chain_id : ''}${selectedDomain !== null ? `_domain${selectedDomain+1}` : ''}.png`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
+          const link = document.createElement('a')
+          link.href = dataUrl
+          link.download = `${pdb_id}${chain_id ? '_' + chain_id : ''}${selectedDomain !== null ? `_domain${selectedDomain+1}` : ''}.png`
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
         }
       } catch (error) {
-        console.error('[StructureViewer] Error exporting image:', error);
+        console.error('[StructureViewer] Error exporting image:', error)
       }
     }
+  }
+
+  // Format classification display
+  const formatClassification = (domain: any) => {
+    if (!domain?.classification) return null
+
+    const { t_group, h_group } = domain.classification
+
+    if (!t_group && !h_group) return null
+
+    return (
+      <div className="text-xs text-gray-600 mt-1">
+        {t_group && <span className="mr-2">T: {t_group}</span>}
+        {h_group && <span>H: {h_group}</span>}
+      </div>
+    )
   }
 
   return (
@@ -123,7 +207,7 @@ export function StructureViewer({
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold">
-            Structure Viewer - {pdb_id}{chain_id ? `_${chain_id}` : ''}
+            Structure: {pdb_id}{chain_id ? `_${chain_id}` : ''}
           </h3>
           <div className="flex gap-2">
             <Button
@@ -147,85 +231,191 @@ export function StructureViewer({
           </div>
         </div>
 
-        {/* 3DMol viewer */}
-        <div className="relative">
-          <ThreeDMolViewer
-            ref={viewerRef}
-            pdbId={pdb_id}
-            chainId={chain_id}
-            domains={mappedDomains}
-            height="400px"
-            onStructureLoaded={handleViewerReady}
-            onError={handleViewerError}
-            showControls={true}
-            className="rounded-lg overflow-hidden border border-gray-200"
-          />
+        {/* Domain visualization tabs */}
+        <Tabs defaultValue="putative" onValueChange={handleTabChange}>
+          <TabsList className="mb-4">
+            <TabsTrigger value="putative">
+              Putative Domains ({putativeDomains.length})
+            </TabsTrigger>
+            <TabsTrigger value="reference">
+              Reference Domains ({referenceDomains.length})
+            </TabsTrigger>
+          </TabsList>
 
-          {viewerError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
-              <div className="text-red-600 text-center p-4">
-                <p className="font-semibold">Error loading structure</p>
-                <p className="text-sm mt-1">{viewerError}</p>
-              </div>
-            </div>
-          )}
+          <TabsContent value="putative" className="space-y-4">
+            {/* 3DMol viewer */}
+            <div className="relative">
+              <ThreeDMolViewer
+                ref={viewerRef}
+                pdbId={pdb_id}
+                chainId={chain_id}
+                domains={activeDomainsForViewer}
+                height="400px"
+                onStructureLoaded={handleViewerReady}
+                onError={handleViewerError}
+                showControls={true}
+                className="rounded-lg overflow-hidden border border-gray-200"
+              />
 
-          {/* Domain controls overlay */}
-          {mappedDomains.length > 0 && (
-            <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg">
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Visualization Controls</div>
-                <div className="space-y-1 text-xs">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-gray-500 rounded"></div>
-                    <span>Chain {chain_id || 'A'}</span>
+              {viewerError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
+                  <div className="text-red-600 text-center p-4">
+                    <p className="font-semibold">Error loading structure</p>
+                    <p className="text-sm mt-1">{viewerError}</p>
                   </div>
-                  {mappedDomains.map((domain, index) => (
-                    <div key={domain.id} className="flex items-center gap-2">
-                      <div
-                        className="w-3 h-3 rounded"
-                        style={{ backgroundColor: domain.color }}
-                      ></div>
-                      <button
-                        onClick={(e) => handleHighlightDomain(domain, index, e)}
-                        className={`text-left ${
-                          selectedDomain === index
-                            ? 'text-blue-600 font-medium'
-                            : 'hover:text-blue-600'
-                        } transition-colors`}
-                      >
-                        {domain.label} ({domain.start}-{domain.end})
-                      </button>
-                    </div>
-                  ))}
+                </div>
+              )}
+
+              {!isViewerReady && !viewerError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
+                  <LoadingSpinner />
+                  <p className="ml-2">Loading structure...</p>
+                </div>
+              )}
+            </div>
+
+            {/* Domain selection buttons */}
+            {mappedPutativeDomains.length > 0 && (
+              <div className="border-t pt-4">
+                <h4 className="text-sm font-medium mb-3">Putative Domains</h4>
+                <div className="flex flex-wrap gap-2">
+                  {mappedPutativeDomains.map((domain, index) => {
+                    const originalDomain = putativeDomains[index]
+                    return (
+                      <Tooltip key={domain.id} content={
+                        <div className="text-xs">
+                          <div>{domain.label}</div>
+                          <div>Range: {domain.start}-{domain.end}</div>
+                          {originalDomain.source && (
+                            <div>Source: {originalDomain.source}</div>
+                          )}
+                          {originalDomain.confidence && (
+                            <div>Confidence: {originalDomain.confidence.toFixed(2)}</div>
+                          )}
+                        </div>
+                      }>
+                        <button
+                          onClick={(e) => handleHighlightDomain(domain, index, e)}
+                          className={`px-3 py-1 text-sm border rounded-full ${
+                            selectedDomain === index
+                              ? 'bg-gray-100'
+                              : 'hover:bg-gray-50'
+                          } transition-colors`}
+                          style={{ borderColor: domain.color }}
+                        >
+                          <span className="flex items-center gap-1">
+                            {domain.label}
+                            {originalDomain.t_group && (
+                              <Badge variant="outline" className="text-xs">
+                                {originalDomain.t_group}
+                              </Badge>
+                            )}
+                          </span>
+                        </button>
+                      </Tooltip>
+                    )
+                  })}
                 </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </TabsContent>
 
-        {/* Domain selection buttons */}
-        {mappedDomains.length > 0 && (
-          <div className="border-t pt-4">
-            <h4 className="text-sm font-medium mb-3">Domain Selection</h4>
-            <div className="flex flex-wrap gap-2">
-              {mappedDomains.map((domain, index) => (
-                <button
-                  key={domain.id}
-                  onClick={(e) => handleHighlightDomain(domain, index, e)}
-                  className={`px-3 py-1 text-sm border rounded-full ${
-                    selectedDomain === index
-                      ? 'bg-gray-100'
-                      : 'hover:bg-gray-50'
-                  } transition-colors`}
-                  style={{ borderColor: domain.color }}
-                >
-                  {domain.label}
-                </button>
-              ))}
+          <TabsContent value="reference" className="space-y-4">
+            {/* 3DMol viewer (same instance) */}
+            <div className="relative">
+              <ThreeDMolViewer
+                ref={viewerRef}
+                pdbId={pdb_id}
+                chainId={chain_id}
+                domains={activeDomainsForViewer}
+                height="400px"
+                onStructureLoaded={handleViewerReady}
+                onError={handleViewerError}
+                showControls={true}
+                className="rounded-lg overflow-hidden border border-gray-200"
+              />
+
+              {viewerError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
+                  <div className="text-red-600 text-center p-4">
+                    <p className="font-semibold">Error loading structure</p>
+                    <p className="text-sm mt-1">{viewerError}</p>
+                  </div>
+                </div>
+              )}
+
+              {!isViewerReady && !viewerError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
+                  <LoadingSpinner />
+                  <p className="ml-2">Loading structure...</p>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+
+            {/* Reference domain selection buttons */}
+            {mappedReferenceDomains.length > 0 && (
+              <div className="border-t pt-4">
+                <h4 className="text-sm font-medium mb-3">Reference Domains</h4>
+                <div className="flex flex-wrap gap-2">
+                  {mappedReferenceDomains.map((domain, index) => {
+                    const originalDomain = referenceDomains[index]
+                    return (
+                      <Tooltip key={domain.id} content={
+                        <div className="text-xs">
+                          <div>{domain.label}</div>
+                          <div>Range: {domain.start}-{domain.end}</div>
+                          {originalDomain.source && (
+                            <div>Source: {originalDomain.source}</div>
+                          )}
+                          {originalDomain.t_group && (
+                            <div>Classification: {originalDomain.t_group}</div>
+                          )}
+                        </div>
+                      }>
+                        <button
+                          onClick={(e) => handleHighlightDomain(domain, index, e)}
+                          className={`px-3 py-1 text-sm border rounded-full ${
+                            selectedDomain === index
+                              ? 'bg-gray-100'
+                              : 'hover:bg-gray-50'
+                          } transition-colors`}
+                          style={{ borderColor: domain.color }}
+                        >
+                          <span className="flex items-center gap-1">
+                            {domain.label}
+
+                              href={`http://prodata.swmed.edu/ecod/complete/domain/${originalDomain.domain_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Eye className="w-3 h-3" />
+                            </a>
+                          </span>
+                        </button>
+                      </Tooltip>
+                    )
+                  })}
+                </div>
+
+                {/* ECOD Reference info */}
+                {mappedReferenceDomains.length > 0 && (
+                  <div className="text-xs text-gray-500 mt-4 flex items-center">
+                    <Info className="w-3 h-3 mr-1" />
+                    Reference domains link to the ECOD database for more information
+                  </div>
+                )}
+              </div>
+            )}
+
+            {mappedReferenceDomains.length === 0 && (
+              <div className="text-center py-6 text-gray-500">
+                No reference domains found for this protein
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     </Card>
   )

@@ -56,6 +56,45 @@ export default function ProteinsPage() {
     avgSequenceLength: 0
   })
   const [initialLoad, setInitialLoad] = useState(true)
+  const [showUnclassified, setShowUnclassified] = useState(true)
+
+  // Add this component to app/protein/page.tsx
+    const UnclassifiedReason = ({ reason }: { reason: string }) => {
+      let label = 'Unknown'
+      let color = 'bg-gray-100 text-gray-800'
+      let description = 'No classification information available'
+
+      switch (reason) {
+        case 'too_short':
+          label = 'Too Short'
+          color = 'bg-amber-100 text-amber-800'
+          description = 'Peptide-length sequence (< 30 residues)'
+          break
+        case 'unstructured':
+          label = 'Unstructured'
+          color = 'bg-purple-100 text-purple-800'
+          description = 'Unstructured or disordered region'
+          break
+        case 'poly_sequence':
+          label = 'Poly-Sequence'
+          color = 'bg-blue-100 text-blue-800'
+          description = 'Repetitive poly-X or poly-A sequence'
+          break
+        case 'technical_issue':
+          label = 'Technical Issue'
+          color = 'bg-red-100 text-red-800'
+          description = 'Technical issue prevented classification'
+          break
+      }
+
+      return (
+        <Tooltip content={description}>
+          <span className={`px-2 py-1 rounded text-xs font-medium ${color}`}>
+            {label}
+          </span>
+        </Tooltip>
+      )
+    }
 
   // Fetch proteins data
   const fetchProteins = async (page = 1, newFilters?: ProteinFilters, search?: string) => {
@@ -116,6 +155,8 @@ export default function ProteinsPage() {
             params.set(key, value.toString())
           }
         })
+
+        params.set('include_unclassified', showUnclassified.toString())
 
         const response = await fetch(`/api/proteins?${params}`)
 
@@ -317,6 +358,17 @@ export default function ProteinsPage() {
           </Button>
         </div>
       )
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      render: (value: any, protein: ProteinOverview) => (
+      protein.is_classified ?
+      <span className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
+        Classified
+      </span> :
+      <UnclassifiedReason reason={protein.unclassified_reason || 'unknown'} />
+      )
     }
   ]
 
@@ -418,6 +470,14 @@ export default function ProteinsPage() {
                   className="pl-10"
                 />
               </div>
+            </div>
+            <div className="flex items-center space-x-2 ml-4">
+              <Switch
+                id="show-unclassified"
+                checked={showUnclassified}
+                onCheckedChange={setShowUnclassified}
+              />
+              <Label htmlFor="show-unclassified">Show unclassified proteins</Label>
             </div>
             <Button onClick={handleSearch}>
               Search

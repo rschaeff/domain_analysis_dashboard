@@ -23,7 +23,7 @@ export default function ProteinDetailPage() {
   const [domains, setDomains] = useState<DomainSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'sequence' | 'structure'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'sequence' | 'structure'>('structure')
 
   // Fetch protein details
   useEffect(() => {

@@ -417,24 +417,294 @@ export function HitLevelEvidenceValidator({
         </div>
       )}
 
-      {activeTab === 'hit_validation' && (
-        <div className="space-y-6">
-          {/* Hit validation content would go here */}
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-4">Hit-Level Validation Results</h3>
-            <p className="text-gray-600">
-              This section shows detailed coordinate validation and usability assessment for individual evidence hits.
-            </p>
-            {hitValidations.length > 0 && (
-              <div className="mt-4">
-                <p className="text-sm text-gray-600">
-                  {hitValidations.length} evidence hits analyzed, {hitValidations.filter(h => h.validation_results.is_usable_for_boundaries).length} usable for boundaries
-                </p>
-              </div>
-            )}
-          </Card>
+// Replace the hit_validation tab section in HitLevelEvidenceValidator.tsx with this:
+
+{activeTab === 'hit_validation' && (
+  <div className="space-y-6">
+    {/* Summary Statistics */}
+    <Card className="p-6">
+      <h3 className="text-lg font-semibold mb-4">Hit Validation Summary</h3>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div className="text-center">
+          <div className="text-2xl font-bold text-blue-600">{hitValidations.length}</div>
+          <div className="text-gray-600">Total Hits</div>
         </div>
-      )}
+        <div className="text-center">
+          <div className="text-2xl font-bold text-green-600">
+            {hitValidations.filter(h => h.validation_results?.is_usable_for_boundaries).length}
+          </div>
+          <div className="text-gray-600">Usable for Boundaries</div>
+        </div>
+        <div className="text-center">
+          <div className="text-2xl font-bold text-purple-600">
+            {hitValidations.filter(h =>
+              h.validation_results?.coverage_quality === 'excellent' ||
+              h.validation_results?.coverage_quality === 'good'
+            ).length}
+          </div>
+          <div className="text-gray-600">High Quality</div>
+        </div>
+        <div className="text-center">
+          <div className="text-2xl font-bold text-red-600">
+            {hitValidations.filter(h => h.issues?.length > 0).length}
+          </div>
+          <div className="text-gray-600">With Issues</div>
+        </div>
+      </div>
+
+      {/* Quality Breakdown */}
+      <div className="mt-4 flex items-center gap-4 text-sm">
+        <span>
+          <Badge variant="default" className="mr-1">
+            {hitValidations.filter(h => h.validation_results?.coverage_quality === 'excellent').length}
+          </Badge>
+          Excellent
+        </span>
+        <span>
+          <Badge variant="secondary" className="mr-1">
+            {hitValidations.filter(h => h.validation_results?.coverage_quality === 'good').length}
+          </Badge>
+          Good
+        </span>
+        <span>
+          <Badge variant="destructive" className="mr-1">
+            {hitValidations.filter(h => h.validation_results?.coverage_quality === 'poor').length}
+          </Badge>
+          Poor
+        </span>
+        <span>
+          <Badge variant="outline" className="mr-1">
+            {hitValidations.filter(h => h.validation_results?.coverage_quality === 'fragment').length}
+          </Badge>
+          Fragments
+        </span>
+      </div>
+    </Card>
+
+    {/* Validation Results Table */}
+    {hitValidations.length > 0 ? (
+      <Card className="p-0 overflow-hidden">
+        <div className="p-4 border-b bg-gray-50">
+          <h4 className="font-medium">Detailed Hit Validation Results</h4>
+          <p className="text-sm text-gray-600 mt-1">
+            Coordinate validation and boundary usability assessment for each evidence hit
+          </p>
+        </div>
+
+        <DataTable
+          data={hitValidations}
+          columns={[
+            {
+              key: 'evidence_type',
+              label: 'Evidence Type',
+              render: (_: any, validation: any) => (
+                <Badge variant={
+                  validation.evidence_type === 'hhsearch' ? 'default' :
+                  validation.evidence_type === 'domain_blast' ? 'secondary' : 'outline'
+                }>
+                  {validation.evidence_type?.toUpperCase() || 'UNKNOWN'}
+                </Badge>
+              )
+            },
+            {
+              key: 'hit_id',
+              label: 'Hit ID',
+              render: (_: any, validation: any) => {
+                const hit = validation.hit
+                return (
+                  <div className="font-mono text-sm">
+                    {hit.type === 'hhsearch' ? hit.hit_id :
+                     hit.type === 'domain_blast' ? hit.domain_id :
+                     `${hit.pdb_id}_${hit.chain_id}`}
+                  </div>
+                )
+              }
+            },
+            {
+              key: 'query_range',
+              label: 'Query Range',
+              render: (_: any, validation: any) => (
+                <div className="font-mono text-sm">
+                  <div>{validation.hit.query_range}</div>
+                  <div className="text-xs text-gray-500">
+                    {validation.hit.alignment_length} residues
+                  </div>
+                </div>
+              )
+            },
+            {
+              key: 'coverage_metrics',
+              label: 'Coverage',
+              render: (_: any, validation: any) => (
+                <div className="text-sm">
+                  <div>Query: {(validation.hit.query_coverage * 100).toFixed(1)}%</div>
+                  <div>Reference: {(validation.hit.hit_coverage * 100).toFixed(1)}%</div>
+                </div>
+              )
+            },
+            {
+              key: 'significance',
+              label: 'Significance',
+              render: (_: any, validation: any) => {
+                const hit = validation.hit
+                if (hit.type === 'hhsearch') {
+                  return (
+                    <div className="text-sm">
+                      <div className="font-medium">P: {hit.probability?.toFixed(1) || 'N/A'}%</div>
+                      <div className="text-xs text-gray-500">E: {hit.evalue?.toExponential(1) || 'N/A'}</div>
+                    </div>
+                  )
+                } else {
+                  return (
+                    <div className="text-sm">
+                      <div className="font-medium">E: {hit.evalue?.toExponential(1) || 'N/A'}</div>
+                    </div>
+                  )
+                }
+              }
+            },
+            {
+              key: 'validation_status',
+              label: 'Validation Status',
+              render: (_: any, validation: any) => {
+                const isUsable = validation.validation_results?.is_usable_for_boundaries
+                return (
+                  <div className="flex items-center gap-2">
+                    {isUsable ? (
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                    ) : (
+                      <XCircle className="w-5 h-5 text-red-600" />
+                    )}
+                    <span className={`text-sm ${isUsable ? 'text-green-700' : 'text-red-700'}`}>
+                      {isUsable ? 'Usable' : 'Not Usable'}
+                    </span>
+                  </div>
+                )
+              }
+            },
+            {
+              key: 'quality',
+              label: 'Quality',
+              render: (_: any, validation: any) => {
+                const quality = validation.validation_results?.coverage_quality || 'unknown'
+                return (
+                  <Badge variant={
+                    quality === 'excellent' ? 'default' :
+                    quality === 'good' ? 'secondary' :
+                    quality === 'poor' ? 'destructive' : 'outline'
+                  }>
+                    {quality.toUpperCase()}
+                  </Badge>
+                )
+              }
+            },
+            {
+              key: 'issues_count',
+              label: 'Issues',
+              render: (_: any, validation: any) => {
+                const issueCount = validation.issues?.length || 0
+                return (
+                  <div className="flex items-center gap-2">
+                    {issueCount > 0 && <AlertTriangle className="w-4 h-4 text-yellow-600" />}
+                    <span className={`text-sm ${issueCount > 0 ? 'text-yellow-700' : 'text-gray-500'}`}>
+                      {issueCount} {issueCount === 1 ? 'issue' : 'issues'}
+                    </span>
+                  </div>
+                )
+              }
+            },
+            {
+              key: 'actions',
+              label: 'Details',
+              render: (_: any, validation: any, index: number) => (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelectedHit(selectedHit === index ? null : index)}
+                >
+                  <Eye className="w-4 h-4" />
+                </Button>
+              )
+            }
+          ]}
+          showPagination={true}
+          pageSize={20}
+          onRowClick={(validation, index) => setSelectedHit(selectedHit === index ? null : index)}
+        />
+
+        {/* Selected Hit Details */}
+        {selectedHit !== null && hitValidations[selectedHit] && (
+          <div className="border-t bg-gray-50 p-4">
+            <h5 className="font-medium mb-3">Validation Details</h5>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Validation Results */}
+              <div>
+                <h6 className="text-sm font-medium text-gray-700 mb-2">Validation Results</h6>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Sequence Indexing:</span>
+                    <span className="font-medium">
+                      {hitValidations[selectedHit].validation_results?.sequence_indexing || 'N/A'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Query Coverage:</span>
+                    <span className="font-medium">
+                      {((hitValidations[selectedHit].validation_results?.query_coverage || 0) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Reference Coverage:</span>
+                    <span className="font-medium">
+                      {((hitValidations[selectedHit].validation_results?.reference_coverage || 0) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Boundary Quality:</span>
+                    <span className="font-medium">
+                      {hitValidations[selectedHit].boundary_impact?.boundary_quality || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Issues and Recommendations */}
+              <div>
+                <h6 className="text-sm font-medium text-gray-700 mb-2">Issues & Recommendations</h6>
+                <div className="space-y-2">
+                  {hitValidations[selectedHit].issues?.length > 0 ? (
+                    hitValidations[selectedHit].issues.map((issue: any, i: number) => (
+                      <div key={i} className="text-sm text-red-600 bg-red-50 p-2 rounded">
+                        <span className="font-medium">{issue.type}:</span> {issue.message}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-green-600 bg-green-50 p-2 rounded">
+                      No issues detected
+                    </div>
+                  )}
+
+                  {hitValidations[selectedHit].boundary_impact?.recommended_action && (
+                    <div className="text-sm text-blue-600 bg-blue-50 p-2 rounded">
+                      <span className="font-medium">Recommendation:</span>{' '}
+                      {hitValidations[selectedHit].boundary_impact.recommended_action}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+    ) : (
+      <Card className="p-6 text-center">
+        <div className="text-gray-500">
+          No hit validation data available. Run Coverage Analysis first to generate validation results.
+        </div>
+      </Card>
+    )}
+  </div>
+)}
 
       {activeTab === 'coverage_analysis' && (
         <DomainSummaryParser

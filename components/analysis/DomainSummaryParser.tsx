@@ -467,6 +467,79 @@ export function DomainSummaryParser({
     })
   }
 
+      // Check significance
+      if (hit.type === 'hhsearch') {
+        const hhHit = hit as HHSearchHit
+        if (hhHit.probability < 50) {
+          issues.push(`Very low probability (${hhHit.probability.toFixed(1)}%)`)
+          if (quality === 'excellent') quality = 'poor'
+          else if (quality === 'good') quality = 'poor'
+        } else if (hhHit.probability < 80) {
+          issues.push(`Low probability (${hhHit.probability.toFixed(1)}%)`)
+          if (quality === 'excellent') quality = 'good'
+        }
+        if (hhHit.evalue > 1e-3) {
+          issues.push(`High E-value (${hhHit.evalue.toExponential(2)})`)
+        }
+      } else {
+        if (hit.evalue > 1e-3) {
+          issues.push(`High E-value (${hit.evalue.toExponential(2)})`)
+          if (quality === 'excellent') quality = 'good'
+        } else if (hit.evalue > 1e-10) {
+          issues.push(`Moderate E-value (${hit.evalue.toExponential(2)})`)
+        }
+      }
+
+      // Check if this hit supports any current domain
+      for (const domain of currentDomains) {
+        const domainStart = domain.start_pos || domain.start
+        const domainEnd = domain.end_pos || domain.end
+
+        if (!domainStart || !domainEnd) continue
+
+        // Check for overlap
+        const overlapStart = Math.max(hit.query_start, domainStart)
+        const overlapEnd = Math.min(hit.query_end, domainEnd)
+
+        if (overlapStart <= overlapEnd) {
+          const overlapLength = overlapEnd - overlapStart + 1
+          const domainLength = domainEnd - domainStart + 1
+          const overlapRatio = overlapLength / domainLength
+
+          if (overlapRatio > 0.5) {
+            supportsCurrentDomains = true
+            recommendations.push(`Supports current domain ${domain.domain_number || domain.domain_id}`)
+            break
+          } else if (overlapRatio > 0.2) {
+            recommendations.push(`Partial overlap with domain ${domain.domain_number || domain.domain_id}`)
+          }
+        }
+      }
+
+      // Additional recommendations based on evidence type
+      if (hit.type === 'domain_blast' && quality === 'excellent') {
+        recommendations.push('High-quality domain evidence - good for boundary definition')
+      } else if (hit.type === 'chain_blast' && hit.query_coverage > 0.8) {
+        recommendations.push('Extensive chain match - may indicate single-domain protein')
+      } else if (hit.type === 'hhsearch' && quality === 'excellent') {
+        recommendations.push('High-confidence HHSearch hit - reliable classification')
+      }
+
+      if (!supportsCurrentDomains && quality === 'excellent') {
+        recommendations.push('High-quality evidence not used in current domains - investigate')
+      }
+
+      return {
+        hit,
+        coverage_quality: quality,
+        issues,
+        recommendations,
+        is_fragment: isFragment,
+        supports_current_domains: supportsCurrentDomains
+      }
+    })
+  }
+
   // Parse domain summary file
   const parseDomainSummaryFile = async () => {
     setParsing(true)

@@ -49,8 +49,11 @@ export async function GET(
     `
 
     const proteinResult = await prisma.$queryRawUnsafe(proteinQuery, pdbId, chainId)
+    const serializedProteinResult = JSON.parse(JSON.stringify(proteinResult, (key, value) =>
+      typeof value === 'bigint' ? Number(value) : value
+    ))
 
-    if (!proteinResult || (proteinResult as any[]).length === 0) {
+    if (!serializedProteinResult || serializedProteinResult.length === 0) {
       return NextResponse.json(
         { error: `Protein not found in pipeline: ${id}` },
         { status: 404 }
@@ -114,14 +117,14 @@ export async function GET(
     const evidence = await prisma.$queryRawUnsafe(evidenceQuery, pdbId, chainId)
 
     // Group evidence by domain
-    const evidenceByDomain = (evidence as any[]).reduce((acc, ev) => {
+    const evidenceByDomain = evidence.reduce((acc, ev) => {
       if (!acc[ev.domain_id]) acc[ev.domain_id] = []
       acc[ev.domain_id].push(ev)
       return acc
     }, {})
 
     // Process domains with evidence
-    const processedDomains = (domains as any[]).map(domain => ({
+    const processedDomains = domains.map(domain => ({
       ...domain,
       evidence: evidenceByDomain[domain.id] || [],
       evidence_count: (evidenceByDomain[domain.id] || []).length

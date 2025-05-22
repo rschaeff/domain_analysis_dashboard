@@ -61,10 +61,19 @@ export async function GET(request: NextRequest) {
       prisma.$queryRawUnsafe(countQuery)
     ])
 
-    const total = Number((countResult as any[])[0]?.total || 0)
+    // Convert BigInt values to Numbers
+    const serializedResults = JSON.parse(JSON.stringify(results, (key, value) =>
+      typeof value === 'bigint' ? Number(value) : value
+    ))
+
+    const serializedCount = JSON.parse(JSON.stringify(countResult, (key, value) =>
+      typeof value === 'bigint' ? Number(value) : value
+    ))
+
+    const total = Number(serializedCount[0]?.total || 0)
 
     // Process results for frontend
-    const processedResults = (results as any[]).map(protein => ({
+    const processedResults = serializedResults.map(protein => ({
       ...protein,
       // Convert to numbers for consistency
       domain_count: Number(protein.domain_count),

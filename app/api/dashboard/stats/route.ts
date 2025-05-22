@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 export async function GET() {
   try {
     // Get comprehensive pipeline performance statistics
-    const pipelineStats = await prisma.$queryRawUnsafe(`
+    const rawStats = await prisma.$queryRawUnsafe(`
       SELECT
         -- Pipeline throughput
         COUNT(*) as total_proteins,
@@ -34,6 +34,11 @@ export async function GET() {
 
       FROM pdb_analysis.pipeline_performance_summary
     `);
+
+    // Convert BigInt values to Numbers
+    const pipelineStats = JSON.parse(JSON.stringify(rawStats, (key, value) =>
+      typeof value === 'bigint' ? Number(value) : value
+    ))
 
     if (!pipelineStats || !Array.isArray(pipelineStats) || pipelineStats.length === 0) {
       return NextResponse.json({

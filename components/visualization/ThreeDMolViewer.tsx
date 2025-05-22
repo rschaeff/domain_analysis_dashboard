@@ -375,71 +375,66 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     lastAppliedDomainsRef.current = [];
     structureInfoRef.current = null;
 
-    // Dynamically import 3DMol.js
-    const init3DMol = async () => {
+const init3DMol = async () => {
+  try {
+    // Import 3DMol dynamically to avoid SSR issues
+    const $3Dmol = await import('3dmol');
+    debugLog('3DMol library loaded');
+
+    // Clean up previous viewer if it exists
+    if (viewerRef.current) {
       try {
-        // Import 3DMol dynamically to avoid SSR issues
-        const $3Dmol = await import('3dmol');
-        debugLog('3DMol library loaded');
-
-        // Clean up previous viewer if it exists
-        if (viewerRef.current) {
-          try {
-            viewerRef.current.removeAllModels();
-            if (typeof viewerRef.current.destroy === 'function') {
-              viewerRef.current.destroy();
-            }
-          } catch (e) {
-            // Ignore cleanup errors
-          }
-          viewerRef.current = null;
+        viewerRef.current.removeAllModels();
+        if (typeof viewerRef.current.destroy === 'function') {
+          viewerRef.current.destroy();
         }
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+      viewerRef.current = null;
+    }
 
-        // Create a new viewer
-        const config = {
-          backgroundColor: backgroundColor || 'white',
-          id: containerRef.current.id
-        };
+    // Create a new viewer
+    const config = {
+      backgroundColor: backgroundColor || 'white',
+      id: containerRef.current.id
+    };
 
-        debugLog('Creating 3DMol viewer with config:', config);
-        const viewer = $3Dmol.createViewer(containerRef.current, config);
-        viewerRef.current = viewer;
+    debugLog('Creating 3DMol viewer with config:', config);
+    const viewer = $3Dmol.createViewer(containerRef.current, config);
+    viewerRef.current = viewer;
 
-        // Load structure - try multiple sources
-        debugLog(`Loading PDB ID: ${pdbId}`);
+    // Load structure - FIXED: Use callback-based error handling, not .catch()
+    debugLog(`Loading PDB ID: ${pdbId}`);
 
-        // First try the local API proxy
-        const pdbUrl = `/api/pdb/${pdbId}`;
+    // Try the local API first
+    const pdbUrl = `/api/pdb/${pdbId}`;
 
-        $3Dmol.download(pdbUrl, viewer, {}, function(model) {
-          if (model) {
-            debugLog('PDB model loaded successfully from local API');
+    // FIXED: Handle errors in the callback, not with .catch()
+    $3Dmol.download(pdbUrl, viewer, {}, function(model) {
+      if (model) {
+        debugLog('PDB model loaded successfully from local API');
+        processLoadedStructure(viewer);
+      } else {
+        debugLog('Local API failed, trying RCSB PDB direct');
+        // Fallback to RCSB direct
+        const rcsbUrl = `https://files.rcsb.org/download/${pdbId}.pdb`;
+
+        $3Dmol.download(rcsbUrl, viewer, {}, function(fallbackModel) {
+          if (fallbackModel) {
+            debugLog('PDB model loaded from RCSB');
             processLoadedStructure(viewer);
           } else {
-            debugLog('Local API failed, trying PDB directly');
-            // Fallback to PDB direct
-            viewer.addModel($3Dmol.download(`pdb:${pdbId}`, viewer), "pdb");
-            processLoadedStructure(viewer);
+            handleError(`Failed to load PDB ${pdbId} from all sources`);
           }
-        }).catch((error: any) => {
-          debugLog('fetch of ' + pdbUrl + ' failed: ' + error);
-          // Final fallback to RCSB PDB
-          debugLog('Trying RCSB PDB direct download');
-          const rcsb_url = `https://files.rcsb.org/download/${pdbId}.pdb`;
-          $3Dmol.download(rcsb_url, viewer, {}, function(model) {
-            if (model) {
-              debugLog('PDB model loaded from RCSB');
-              processLoadedStructure(viewer);
-            } else {
-              handleError(`Failed to load PDB ${pdbId} from all sources`);
-            }
-          });
         });
-
-      } catch (error) {
-        handleError(`Error initializing 3DMol.js: ${error instanceof Error ? error.message : String(error)}`);
       }
-    };
+    });
+
+  } catch (error) {
+    handleError(`Error initializing 3DMol.js: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
 
     // Process loaded structure
     const processLoadedStructure = (viewer: any) => {

@@ -157,58 +157,58 @@ export async function GET(
       protein.source_id = `${protein.pdb_id}_${protein.chain_id}`
     }
 
-    // FIXED: Query from partition_domains (not partition_domain_summary) to get PDB ranges
-    const putativeDomainsQuery = `
-      SELECT
-        pd.id,
-        pd.protein_id,
-        pd.domain_number,
-        pd.domain_id,
-        pd.start_pos,
-        pd.end_pos,
-        pd.range,
-        pd.source,
-        pd.source_id,
-        pd.confidence,
-        pd.t_group,
-        pd.h_group,
-        pd.x_group,
-        pd.a_group,
-        pd.is_manual_rep,
-        pd.is_f70,
-        pd.is_f40,
-        pd.is_f99,
-        pd.created_at,
-        pd.pdb_range,
-        pd.pdb_start,
-        pd.pdb_end,
-        pd.length,
-        'putative' as domain_type
-      FROM pdb_analysis.partition_domains pd
-      WHERE pd.protein_id = $1
-      ORDER BY pd.domain_number
-    `
+const putativeDomainsQuery = `
+  SELECT
+    pds.id,
+    pds.protein_id,
+    pds.pdb_id,
+    pds.chain_id,
+    pds.batch_id,
+    pds.reference_version,
+    pds.timestamp,
+    pds.domain_number,
+    pds.domain_id,
+    pds.start_pos,
+    pds.end_pos,
+    pds.range,
+    pds.pdb_range,
+    pds.pdb_start,
+    pds.pdb_end,
+    pds.source,
+    pds.source_id,
+    pds.confidence,
+    pds.t_group,
+    pds.h_group,
+    pds.x_group,
+    pds.a_group,
+    pds.evidence_count,
+    pds.evidence_types,
+    'putative' as domain_type
+  FROM pdb_analysis.partition_domain_summary pds
+  WHERE pds.pdb_id = $1 AND pds.chain_id = $2
+  ORDER BY pds.domain_number
+`
 
-    const putativeDomains = await prisma.$queryRawUnsafe(
-      putativeDomainsQuery,
-      protein.id  // Use protein.id, not pdb_id/chain_id
-    )
+const putativeDomains = await prisma.$queryRawUnsafe(
+  putativeDomainsQuery,
+  protein.pdb_id,
+  protein.chain_id
+)
 
-    console.log(`[PROTEIN API] Found ${(putativeDomains as any[]).length} putative domains for protein ID ${protein.id}`)
+console.log(`[PROTEIN API] Found ${(putativeDomains as any[]).length} putative domains for ${protein.pdb_id}_${protein.chain_id}`)
 
-    // Log first domain to verify PDB range data
-    if ((putativeDomains as any[]).length > 0) {
-      const firstDomain = (putativeDomains as any[])[0]
-      console.log(`[PROTEIN API] First domain PDB range data:`, {
-        id: firstDomain.id,
-        domain_id: firstDomain.domain_id,
-        range: firstDomain.range,
-        pdb_range: firstDomain.pdb_range,
-        pdb_start: firstDomain.pdb_start,
-        pdb_end: firstDomain.pdb_end
-      })
-    }
-
+// Log PDB range data
+if ((putativeDomains as any[]).length > 0) {
+  const firstDomain = (putativeDomains as any[])[0]
+  console.log(`[PROTEIN API] First domain PDB ranges:`, {
+    id: firstDomain.id,
+    domain_id: firstDomain.domain_id,
+    sequence_range: firstDomain.range,
+    pdb_range: firstDomain.pdb_range,
+    start_pos: firstDomain.start_pos,
+    end_pos: firstDomain.end_pos
+  })
+}
     // Fetch reference domains used as evidence
     // These come from the pdb_analysis.domain table (ECOD reference domains)
     const referenceDomainsQuery = `

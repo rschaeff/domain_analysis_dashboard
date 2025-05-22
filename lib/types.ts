@@ -132,3 +132,28 @@ export interface MolStarViewerProps {
   }>;
   onDomainClick?: (domain: any) => void;
 }
+
+export interface HitValidation {
+  hit: any
+  evidence_type: 'chain_blast' | 'domain_blast' | 'hhsearch'
+  validation_results: {
+    sequence_indexing: 'valid' | 'suspect' | 'invalid'
+    query_coverage: number
+    reference_coverage: number | null
+    coverage_quality: 'excellent' | 'good' | 'poor' | 'fragment'
+    is_usable_for_boundaries: boolean
+  }
+  issues: ValidationIssue[]
+  boundary_impact: {
+    would_create_fragment: boolean
+    boundary_quality: 'reliable' | 'questionable' | 'poor'
+    recommended_action: string
+  }
+}
+
+export interface ValidationIssue {
+  type: 'indexing' | 'coverage' | 'significance' | 'boundary'
+  severity: 'critical' | 'warning' | 'info'
+  message: string
+  suggestion: string
+}

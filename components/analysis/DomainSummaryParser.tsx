@@ -543,14 +543,17 @@ export function DomainSummaryParser({
     {
       key: 'type',
       label: 'Evidence Type',
-      render: (value: string, analysis: CoverageAnalysis) => (
-        <Badge variant={
-          value === 'hhsearch' ? 'default' :
-          value === 'domain_blast' ? 'secondary' : 'outline'
-        }>
-          {value.replace('_', ' ').toUpperCase()}
-        </Badge>
-      )
+      render: (_: any, analysis: CoverageAnalysis) => {
+        const type = analysis.hit.type
+        return (
+          <Badge variant={
+            type === 'hhsearch' ? 'default' :
+            type === 'domain_blast' ? 'secondary' : 'outline'
+          }>
+            {type?.replace('_', ' ').toUpperCase() || 'UNKNOWN'}
+          </Badge>
+        )
+      }
     },
     {
       key: 'reference_id',
@@ -631,28 +634,34 @@ export function DomainSummaryParser({
     {
       key: 'coverage_quality',
       label: 'Quality',
-      render: (value: string) => (
-        <Badge variant={
-          value === 'excellent' ? 'default' :
-          value === 'good' ? 'secondary' :
-          value === 'poor' ? 'destructive' : 'outline'
-        }>
-          {value.toUpperCase()}
-        </Badge>
-      )
+      render: (_: any, analysis: CoverageAnalysis) => {
+        const quality = analysis.coverage_quality
+        return (
+          <Badge variant={
+            quality === 'excellent' ? 'default' :
+            quality === 'good' ? 'secondary' :
+            quality === 'poor' ? 'destructive' : 'outline'
+          }>
+            {quality?.toUpperCase() || 'UNKNOWN'}
+          </Badge>
+        )
+      }
     },
     {
       key: 'supports_current_domains',
       label: 'Supports Current',
-      render: (value: boolean) => (
-        <div className="text-center">
-          {value ? (
-            <CheckCircle className="w-5 h-5 text-green-600 mx-auto" />
-          ) : (
-            <XCircle className="w-5 h-5 text-gray-400 mx-auto" />
-          )}
-        </div>
-      )
+      render: (_: any, analysis: CoverageAnalysis) => {
+        const supports = analysis.supports_current_domains
+        return (
+          <div className="text-center">
+            {supports ? (
+              <CheckCircle className="w-5 h-5 text-green-600 mx-auto" />
+            ) : (
+              <XCircle className="w-5 h-5 text-gray-400 mx-auto" />
+            )}
+          </div>
+        )
+      }
     },
     {
       key: 'actions',

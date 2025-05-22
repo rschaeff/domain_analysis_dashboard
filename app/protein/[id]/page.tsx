@@ -292,7 +292,7 @@ export default function ProteinDetailPage() {
           )}
 
           {activeTab === 'structure' && (
-            <EnhancedStructureViewer
+            <StructureViewer
               pdb_id={protein.pdb_id}
               chain_id={protein.chain_id}
               domains={

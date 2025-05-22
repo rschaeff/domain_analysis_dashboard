@@ -2,6 +2,20 @@
 
 import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 
+// Domain colors with high contrast
+const DOMAIN_COLORS = [
+  '#FF0000', // Red
+  '#0066FF', // Blue
+  '#00CC00', // Green
+  '#FF6600', // Orange
+  '#9900CC', // Purple
+  '#00CCCC', // Cyan
+  '#CC6600', // Brown
+  '#FF99CC', // Pink
+  '#666666', // Gray
+  '#336699', // Steel Blue
+];
+
 // Updated Domain interface with PDB-specific fields
 export interface Domain {
   id: string;
@@ -57,6 +71,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
   const viewerRef = useRef<any>(null);
   const loadedRef = useRef(false);
   const lastAppliedDomainsRef = useRef<Domain[]>([]);
+  const structureInfoRef = useRef<any>(null);
 
   // State
   const [isLoading, setIsLoading] = useState(true);
@@ -69,58 +84,88 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     }
   };
 
-  // Helper to check if a domain is discontinuous
-  const isDiscontinuousDomain = (range: string): boolean => {
-    return range?.includes(',') || false;
+  // Analyze structure to understand residue numbering
+  const analyzeStructure = (viewer: any, targetChain: string) => {
+    try {
+      const atoms = viewer.selectedAtoms({chain: targetChain});
+      if (atoms.length === 0) {
+        debugLog(`No atoms found for chain ${targetChain}`);
+        return null;
+      }
+
+      const residues = new Set<number>();
+      atoms.forEach((atom: any) => {
+        residues.add(parseInt(atom.resi));
+      });
+
+      const sortedResidues = Array.from(residues).sort((a, b) => a - b);
+      const info = {
+        minResidue: sortedResidues[0],
+        maxResidue: sortedResidues[sortedResidues.length - 1],
+        totalResidues: sortedResidues.length,
+        residueList: sortedResidues
+      };
+
+      debugLog(`Structure analysis for chain ${targetChain}:`, info);
+      return info;
+    } catch (error) {
+      debugLog('Error analyzing structure:', error);
+      return null;
+    }
   };
 
-  // Enhanced checkSelectionExists
+  // Enhanced coordinate mapping
+  const mapSequenceToStructure = (seqStart: number, seqEnd: number, structureInfo: any) => {
+    if (!structureInfo) return null;
+
+    // Try direct mapping first (common case)
+    if (seqStart >= structureInfo.minResidue && seqEnd <= structureInfo.maxResidue) {
+      return `${seqStart}-${seqEnd}`;
+    }
+
+    // Try offset mapping (sequence starts from 1, structure might start from different number)
+    const offset = structureInfo.minResidue - 1;
+    const mappedStart = seqStart + offset;
+    const mappedEnd = seqEnd + offset;
+
+    if (mappedStart >= structureInfo.minResidue && mappedEnd <= structureInfo.maxResidue) {
+      debugLog(`Mapped sequence ${seqStart}-${seqEnd} to structure ${mappedStart}-${mappedEnd}`);
+      return `${mappedStart}-${mappedEnd}`;
+    }
+
+    // Try relative mapping (sequence position relative to structure length)
+    const seqLength = seqEnd - seqStart + 1;
+    const structLength = structureInfo.totalResidues;
+
+    if (seqLength <= structLength) {
+      const relativeStart = Math.floor((seqStart - 1) / structLength * structureInfo.totalResidues);
+      const relativeEnd = Math.min(relativeStart + seqLength - 1, structureInfo.totalResidues - 1);
+
+      const actualStart = structureInfo.residueList[relativeStart];
+      const actualEnd = structureInfo.residueList[relativeEnd];
+
+      if (actualStart && actualEnd) {
+        debugLog(`Relative mapping ${seqStart}-${seqEnd} to ${actualStart}-${actualEnd}`);
+        return `${actualStart}-${actualEnd}`;
+      }
+    }
+
+    debugLog(`Could not map sequence range ${seqStart}-${seqEnd} to structure`);
+    return null;
+  };
+
+  // Check if selection exists with detailed feedback
   const checkSelectionExists = (viewer: any, selection: any): boolean => {
     if (!viewer) return false;
 
     try {
-      // For discontinuous domains, check each segment separately
-      if (selection.resi && selection.resi.includes(',')) {
-        const segments = selection.resi.split(',');
-        let totalAtoms = 0;
-
-        for (const segment of segments) {
-          const segmentSelection = { ...selection, resi: segment };
-          const atoms = viewer.selectedAtoms(segmentSelection);
-          totalAtoms += atoms?.length || 0;
-          debugLog(`Selection segment ${segment} has ${atoms?.length || 0} atoms`);
-        }
-
-        return totalAtoms > 0;
-      } else {
-        // Regular continuous domain
-        const atoms = viewer.selectedAtoms(selection);
-        const exists = atoms && atoms.length > 0;
-        debugLog(`Selection ${JSON.stringify(selection)} has ${atoms?.length || 0} atoms`);
-        return exists;
-      }
+      const atoms = viewer.selectedAtoms(selection);
+      const exists = atoms && atoms.length > 0;
+      debugLog(`Selection ${JSON.stringify(selection)} has ${atoms?.length || 0} atoms`);
+      return exists;
     } catch (err) {
       debugLog('Error checking selection:', err);
       return false;
-    }
-  };
-
-  // Get available residue numbers in the structure for debugging
-  const getAvailableResidues = (viewer: any, chain: string): number[] => {
-    if (!viewer) return [];
-    try {
-      const allAtoms = viewer.selectedAtoms({chain: chain});
-      const residueSet = new Set<number>();
-
-      // Extract unique residue numbers from structure
-      allAtoms.forEach((atom: any) => {
-        residueSet.add(parseInt(atom.resi));
-      });
-
-      return Array.from(residueSet).sort((a,b) => a-b);
-    } catch (e) {
-      debugLog('Error fetching available residues:', e);
-      return [];
     }
   };
 
@@ -160,57 +205,24 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
         try {
           debugLog(`Highlighting domain: ${domain.id}, range: ${domain.start}-${domain.end}`);
 
-          // Use pdb_range if available, otherwise fallback to sequence range
-          const resiValue = domain.pdb_range || `${domain.start}-${domain.end}`;
-          debugLog(`Using resi value: ${resiValue} for domain ${domain.id}`);
+          // Get mapped range
+          const mappedRange = getMappedRange(domain);
+          if (!mappedRange) {
+            debugLog('Could not map domain range for highlighting');
+            return;
+          }
 
-          // Create a selection to check if this range exists in the structure
           const selection = {
             chain: domain.chainId || chainId || 'A',
-            resi: resiValue
+            resi: mappedRange
           };
 
-          // Check if this selection has any atoms in the structure
-          const selectionExists = checkSelectionExists(viewerRef.current, selection);
+          // Set background to low opacity
+          const targetChain = domain.chainId || chainId || 'A';
+          viewerRef.current.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.3 } });
+          viewerRef.current.setStyle({chain: targetChain}, { cartoon: { color: 'gray', opacity: 0.5 } });
 
-          if (!selectionExists) {
-            debugLog('Domain selection appears invalid - no atoms found in this range');
-
-            // Show available residues for debugging
-            const availableResidues = getAvailableResidues(viewerRef.current, domain.chainId || chainId || 'A');
-
-            if (availableResidues.length > 0) {
-              debugLog('First 10 available residues:', availableResidues.slice(0, 10));
-              debugLog('Last 10 available residues:', availableResidues.slice(-10));
-            }
-
-            // Don't clear anything - just alert the user of the issue
-            if (typeof window !== 'undefined') {
-              const warningMsg = `Warning: No atoms found in range ${resiValue} for domain ${domain.id}. This may be due to PDB numbering differences.`;
-              debugLog(warningMsg);
-
-              // Reset to original view to ensure something is visible
-              applyDomainStyling(viewerRef.current);
-              viewerRef.current.zoomTo();
-              viewerRef.current.render();
-              return;
-            }
-          }
-
-          // Lower opacity of everything first
-          viewerRef.current.setStyle({}, { cartoon: { color: 'gray', opacity: 0.4 } });
-
-          // Highlight the specific chain
-          if (chainId) {
-            viewerRef.current.setStyle({chain: chainId}, {
-              cartoon: {
-                color: 'gray',
-                opacity: 0.7
-              }
-            });
-          }
-
-          // Highlight the specific domain with full opacity
+          // Highlight the specific domain
           viewerRef.current.setStyle(selection, {
             cartoon: {
               color: domain.color,
@@ -218,19 +230,14 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             }
           });
 
-          // Zoom to the domain if it exists
-          if (selectionExists) {
-            viewerRef.current.zoomTo(selection);
-          }
-
+          // Zoom to the domain
+          viewerRef.current.zoomTo(selection);
           viewerRef.current.render();
         } catch (error) {
           debugLog('Error highlighting domain:', error);
-
           // Recovery: restore original styling
           try {
             applyDomainStyling(viewerRef.current);
-            viewerRef.current.zoomTo();
             viewerRef.current.render();
           } catch (recoveryError) {
             debugLog('Failed to recover from highlighting error:', recoveryError);
@@ -239,6 +246,30 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
       }
     }
   }));
+
+  // Get mapped range for a domain
+  const getMappedRange = (domain: Domain): string | null => {
+    // Use PDB range if available
+    if (domain.pdb_range) {
+      return domain.pdb_range;
+    }
+
+    if (domain.pdb_start && domain.pdb_end) {
+      return `${domain.pdb_start}-${domain.pdb_end}`;
+    }
+
+    // Try to map sequence coordinates to structure
+    if (structureInfoRef.current && domain.start && domain.end) {
+      return mapSequenceToStructure(domain.start, domain.end, structureInfoRef.current);
+    }
+
+    // Fallback to sequence range
+    if (domain.start && domain.end) {
+      return `${domain.start}-${domain.end}`;
+    }
+
+    return null;
+  };
 
   // Safe error handler
   const handleError = (message: string) => {
@@ -254,168 +285,82 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     }
   };
 
-  // Apply the domain styling with improved range handling
+  // Apply domain styling with improved approach
   const applyDomainStyling = (viewer: any) => {
     if (!viewer) return;
 
-    debugLog(`Applying styling for ${domains.length} domains`);
+    const targetChain = chainId || 'A';
+    debugLog(`Applying styling for ${domains.length} domains on chain ${targetChain}`);
 
-    // Log each domain's range information for debugging
-    domains.forEach((domain, index) => {
-      debugLog(`Domain ${index} (${domain.id}):`, {
-        start: domain.start,
-        end: domain.end,
-        pdb_range: domain.pdb_range,
-        pdb_start: domain.pdb_start,
-        pdb_end: domain.pdb_end,
-        color: domain.color
-      });
+    // Step 1: Show the entire structure/chain in gray (unclassified regions)
+    viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.4 } });
+    viewer.setStyle({chain: targetChain}, {
+      cartoon: {
+        color: 'gray',
+        opacity: 0.8
+      }
     });
 
-    // Cache the domains we're applying styling for
-    lastAppliedDomainsRef.current = [...domains];
-
+    // Step 2: Apply domain colors on top of the gray background
     if (domains.length > 0) {
-      // When we have domains, style them individually and hide everything else
+      let successfulDomains = 0;
 
-      // First, hide all atoms with very low opacity
-      viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.1 } });
-
-      // Apply styling for each domain with bright colors
       domains.forEach((domain, index) => {
         try {
-          // Determine the best range to use for selection
-          let resiValue;
-          let start = domain.start;
-          let end = domain.end;
+          debugLog(`Processing domain ${index} (${domain.id}):`, {
+            start: domain.start,
+            end: domain.end,
+            pdb_range: domain.pdb_range,
+            pdb_start: domain.pdb_start,
+            pdb_end: domain.pdb_end,
+            color: domain.color
+          });
 
-          // Validate basic range
-          if (!start || !end || isNaN(start) || isNaN(end) || start <= 0 || end <= 0) {
-            debugLog(`Invalid sequence range for domain ${domain.id}: start=${start}, end=${end}`);
+          // Get the best range to use
+          const mappedRange = getMappedRange(domain);
 
-            // Try to use PDB range if sequence range is invalid
-            if (domain.pdb_range) {
-              resiValue = domain.pdb_range;
-              debugLog(`Using pdb_range fallback: ${resiValue}`);
-            } else if (domain.pdb_start && domain.pdb_end) {
-              resiValue = `${domain.pdb_start}-${domain.pdb_end}`;
-              debugLog(`Using pdb_start/pdb_end fallback: ${resiValue}`);
-            } else {
-              debugLog(`No valid range found for domain ${domain.id}, skipping`);
-              return;
-            }
-          } else {
-            // Use PDB range if available, otherwise use sequence range
-            if (domain.pdb_range) {
-              resiValue = domain.pdb_range;
-              debugLog(`Using pdb_range: ${resiValue} for domain ${domain.id}`);
-            } else if (domain.pdb_start && domain.pdb_end) {
-              resiValue = `${domain.pdb_start}-${domain.pdb_end}`;
-              debugLog(`Using pdb_start/pdb_end: ${resiValue} for domain ${domain.id}`);
-            } else {
-              resiValue = `${start}-${end}`;
-              debugLog(`Using sequence range: ${resiValue} for domain ${domain.id}`);
-            }
+          if (!mappedRange) {
+            debugLog(`Skipping domain ${domain.id} - no valid range`);
+            return;
           }
 
-          // Ensure chain ID is valid
-          const domainChainId = domain.chainId || chainId || 'A';
-
+          const domainChainId = domain.chainId || targetChain;
           const selection = {
             chain: domainChainId,
-            resi: resiValue
+            resi: mappedRange
           };
 
-          // Check if selection exists
+          // Check if this selection exists in the structure
           const selectionExists = checkSelectionExists(viewer, selection);
 
-          if (!selectionExists) {
-            debugLog(`Warning: Domain ${domain.id} range ${resiValue} not found in structure`);
+          if (selectionExists) {
+            // Apply domain color
+            const domainColor = domain.color || DOMAIN_COLORS[index % DOMAIN_COLORS.length];
 
-            // Show available residues for debugging
-            const availableResidues = getAvailableResidues(viewer, domainChainId);
-            if (availableResidues.length > 0) {
-              debugLog('Available residues range:', `${availableResidues[0]} to ${availableResidues[availableResidues.length-1]}`);
-
-              // Try to map sequence range to available residues if possible
-              if (!domain.pdb_range && start && end && availableResidues.length > 0) {
-                const mappedStart = availableResidues[0] + (start - 1);
-                const mappedEnd = availableResidues[0] + (end - 1);
-                if (mappedEnd <= availableResidues[availableResidues.length-1]) {
-                  const mappedSelection = {
-                    chain: domainChainId,
-                    resi: `${mappedStart}-${mappedEnd}`
-                  };
-                  const mappedExists = checkSelectionExists(viewer, mappedSelection);
-                  if (mappedExists) {
-                    debugLog(`Mapped range ${start}-${end} to ${mappedStart}-${mappedEnd} successfully`);
-                    resiValue = `${mappedStart}-${mappedEnd}`;
-                    selection.resi = resiValue;
-                  }
-                }
+            viewer.setStyle(selection, {
+              cartoon: {
+                color: domainColor,
+                opacity: 1.0
               }
-            }
+            });
+
+            successfulDomains++;
+            debugLog(`Successfully styled domain ${domain.id} with range ${mappedRange}`);
+          } else {
+            debugLog(`Warning: Domain ${domain.id} range ${mappedRange} not found in structure`);
           }
 
-          // Use hex colors instead of HSL - 3DMol seems to prefer these
-          const domainColor = domain.color || DOMAIN_COLORS[index % DOMAIN_COLORS.length];
-          debugLog(`Setting style for domain ${index} with color ${domainColor}:`, selection);
-
-          // Apply bright domain color with full opacity
-          const styleObj = {
-            cartoon: {
-              color: domainColor,
-              opacity: 1.0
-            }
-          };
-
-          viewer.setStyle(selection, styleObj);
-          debugLog(`Applied style:`, styleObj);
-
-          // Verify the style was applied by checking what 3DMol thinks is set
-          try {
-            const atoms = viewer.selectedAtoms(selection);
-            debugLog(`Domain ${index} has ${atoms.length} atoms after styling`);
-          } catch (e) {
-            debugLog(`Error checking styled atoms:`, e);
-          }
-
-          // Add label if requested
-          if (showControls && domain.label) {
-            try {
-              viewer.addLabel(domain.label, {
-                position: { resi: Math.floor((start + end) / 2), chain: domainChainId },
-                backgroundColor: domainColor,
-                fontColor: "#ffffff",
-                fontSize: 12,
-                alignment: "center",
-                inFront: true
-              });
-            } catch (labelError) {
-              debugLog(`Label creation error for domain ${index}:`, labelError);
-            }
-          }
         } catch (domainError) {
-          debugLog(`Error applying domain ${domain.id}:`, domainError);
+          debugLog(`Error processing domain ${domain.id}:`, domainError);
         }
       });
-    } else {
-      // No domains - just show the chain in a neutral color
-      if (chainId) {
-        debugLog(`No domains, showing chain ${chainId} in neutral color`);
-        viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.4 } });
-        viewer.setStyle({chain: chainId}, {
-          cartoon: {
-            color: 'gray',
-            opacity: 0.8
-          }
-        });
-      }
+
+      debugLog(`Successfully styled ${successfulDomains}/${domains.length} domains`);
     }
 
-    // Force a render after styling
-    debugLog('Forcing render after styling');
+    // Step 3: Force render
     viewer.render();
+    lastAppliedDomainsRef.current = [...domains];
   };
 
   // Initialize and load structure
@@ -428,6 +373,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     setErrorMessage(null);
     loadedRef.current = false;
     lastAppliedDomainsRef.current = [];
+    structureInfoRef.current = null;
 
     // Dynamically import 3DMol.js
     const init3DMol = async () => {
@@ -459,57 +405,81 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
         const viewer = $3Dmol.createViewer(containerRef.current, config);
         viewerRef.current = viewer;
 
-        // Load structure from PDB through local API proxy
+        // Load structure - try multiple sources
         debugLog(`Loading PDB ID: ${pdbId}`);
-        try {
-          // Use local API proxy instead of direct PDB access
-          const pdbUrl = `/api/pdb/${pdbId}`;
 
-          // Use URL fetch instead of pdb: protocol
-          $3Dmol.download(pdbUrl, viewer, {}, function(model) {
-            if (!model) {
-              handleError(`Failed to load model: ${pdbId}`);
-              return;
-            }
+        // First try the local API proxy
+        const pdbUrl = `/api/pdb/${pdbId}`;
 
-            debugLog('PDB model loaded successfully');
-
-            // Apply domain styling first
-            applyDomainStyling(viewer);
-
-            // Focus on the specific chain if provided, otherwise zoom to all
-            if (chainId) {
-              debugLog(`Focusing on chain: ${chainId}`);
-              try {
-                // Zoom to the specific chain
-                viewer.zoomTo({chain: chainId});
-              } catch (e) {
-                debugLog('Error zooming to chain, using default zoom:', e);
-                viewer.zoomTo();
-              }
+        $3Dmol.download(pdbUrl, viewer, {}, function(model) {
+          if (model) {
+            debugLog('PDB model loaded successfully from local API');
+            processLoadedStructure(viewer);
+          } else {
+            debugLog('Local API failed, trying PDB directly');
+            // Fallback to PDB direct
+            viewer.addModel($3Dmol.download(`pdb:${pdbId}`, viewer), "pdb");
+            processLoadedStructure(viewer);
+          }
+        }).catch((error: any) => {
+          debugLog('fetch of ' + pdbUrl + ' failed: ' + error);
+          // Final fallback to RCSB PDB
+          debugLog('Trying RCSB PDB direct download');
+          const rcsb_url = `https://files.rcsb.org/download/${pdbId}.pdb`;
+          $3Dmol.download(rcsb_url, viewer, {}, function(model) {
+            if (model) {
+              debugLog('PDB model loaded from RCSB');
+              processLoadedStructure(viewer);
             } else {
-              // Zoom to fit the entire model
-              viewer.zoomTo();
-            }
-
-            // Update loading state
-            setIsLoading(false);
-            loadedRef.current = true;
-
-            // Call onStructureLoaded callback
-            if (onStructureLoaded) {
-              try {
-                onStructureLoaded();
-              } catch (callbackError) {
-                debugLog('Error in onStructureLoaded callback:', callbackError);
-              }
+              handleError(`Failed to load PDB ${pdbId} from all sources`);
             }
           });
-        } catch (loadError) {
-          handleError(`Error loading or rendering structure: ${loadError instanceof Error ? loadError.message : String(loadError)}`);
-        }
+        });
+
       } catch (error) {
         handleError(`Error initializing 3DMol.js: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+
+    // Process loaded structure
+    const processLoadedStructure = (viewer: any) => {
+      try {
+        debugLog('Processing loaded structure');
+
+        // Analyze the structure to understand residue numbering
+        const targetChain = chainId || 'A';
+        structureInfoRef.current = analyzeStructure(viewer, targetChain);
+
+        // Apply domain styling
+        applyDomainStyling(viewer);
+
+        // Focus on the specific chain if provided
+        if (chainId) {
+          debugLog(`Focusing on chain: ${chainId}`);
+          try {
+            viewer.zoomTo({chain: chainId});
+          } catch (e) {
+            debugLog('Error zooming to chain, using default zoom:', e);
+            viewer.zoomTo();
+          }
+        } else {
+          viewer.zoomTo();
+        }
+
+        // Update loading state
+        setIsLoading(false);
+        loadedRef.current = true;
+
+        // Call onStructureLoaded callback
+        if (onStructureLoaded) {
+          try {
+            onStructureLoaded();
+          } catch (callbackError) {
+            debugLog('Error in onStructureLoaded callback:', callbackError);
+          }
+        }
+      } catch (processingError) {
+        handleError(`Error processing structure: ${processingError instanceof Error ? processingError.message : String(processingError)}`);
       }
     };
 
@@ -545,8 +515,8 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             d.chainId !== prevDomains[i].chainId;
         });
 
-      if (domainsChanged || chainId !== lastAppliedDomainsRef.current[0]?.chainId) {
-        debugLog('Domain or chain info changed, updating styling');
+      if (domainsChanged) {
+        debugLog('Domain info changed, updating styling');
         applyDomainStyling(viewerRef.current);
       }
     }

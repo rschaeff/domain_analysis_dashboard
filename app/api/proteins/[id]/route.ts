@@ -1,3 +1,7 @@
+// app/api/proteins/[id]/route.ts - FIXED VERSION
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/database'
+
 // Parse range string that may include chain prefixes like "A:1-100,A:150-200" or "B:539-716"
 function parseRangeCoverage(range: string): number {
   if (!range) return 0
@@ -62,10 +66,6 @@ function parseRange(range: string): { start: number; end: number; segments: Arra
     segments
   }
 }
-
-// Updated protein API with proper range parsing
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/database'
 
 // Custom JSON serializer to handle BigInt
 function serializeBigInt(obj: any): any {
@@ -157,41 +157,57 @@ export async function GET(
       protein.source_id = `${protein.pdb_id}_${protein.chain_id}`
     }
 
-    // Fetch putative domains from partition_domain_summary
+    // FIXED: Query from partition_domains (not partition_domain_summary) to get PDB ranges
     const putativeDomainsQuery = `
       SELECT
-        pds.id,
-        pds.protein_id,
-        pds.pdb_id,
-        pds.chain_id,
-        pds.batch_id,
-        pds.reference_version,
-        pds.timestamp,
-        pds.domain_number,
-        pds.domain_id,
-        pds.range,
-        pds.source,
-        pds.source_id,
-        pds.confidence,
-        pds.t_group,
-        pds.h_group,
-        pds.x_group,
-        pds.a_group,
-        pds.evidence_count,
-        pds.evidence_types,
+        pd.id,
+        pd.protein_id,
+        pd.domain_number,
+        pd.domain_id,
+        pd.start_pos,
+        pd.end_pos,
+        pd.range,
+        pd.source,
+        pd.source_id,
+        pd.confidence,
+        pd.t_group,
+        pd.h_group,
+        pd.x_group,
+        pd.a_group,
+        pd.is_manual_rep,
+        pd.is_f70,
+        pd.is_f40,
+        pd.is_f99,
+        pd.created_at,
+        pd.pdb_range,
+        pd.pdb_start,
+        pd.pdb_end,
+        pd.length,
         'putative' as domain_type
-      FROM pdb_analysis.partition_domain_summary pds
-      WHERE pds.pdb_id = $1 AND pds.chain_id = $2
-      ORDER BY pds.domain_number
+      FROM pdb_analysis.partition_domains pd
+      WHERE pd.protein_id = $1
+      ORDER BY pd.domain_number
     `
 
     const putativeDomains = await prisma.$queryRawUnsafe(
       putativeDomainsQuery,
-      protein.pdb_id,
-      protein.chain_id
+      protein.id  // Use protein.id, not pdb_id/chain_id
     )
 
-    console.log(`[PROTEIN API] Found ${(putativeDomains as any[]).length} putative domains for ${protein.pdb_id}_${protein.chain_id}`)
+    console.log(`[PROTEIN API] Found ${(putativeDomains as any[]).length} putative domains for protein ID ${protein.id}`)
+
+    // Log first domain to verify PDB range data
+    if ((putativeDomains as any[]).length > 0) {
+      const firstDomain = (putativeDomains as any[])[0]
+      console.log(`[PROTEIN API] First domain PDB range data:`, {
+        id: firstDomain.id,
+        domain_id: firstDomain.domain_id,
+        range: firstDomain.range,
+        pdb_range: firstDomain.pdb_range,
+        pdb_start: firstDomain.pdb_start,
+        pdb_end: firstDomain.pdb_end
+      })
+    }
 
     // Fetch reference domains used as evidence
     // These come from the pdb_analysis.domain table (ECOD reference domains)
@@ -211,22 +227,12 @@ export async function GET(
         d.is_f40,
         d.is_f99,
         d.length,
-        de.evidence_type,
-        de.confidence as evidence_confidence,
-        de.evalue,
-        de.probability,
-        de.query_range,
-        de.hit_range,
         'reference' as domain_type
-      FROM pdb_analysis.domain_evidence de
-      JOIN pdb_analysis.partition_domain_summary pds ON de.domain_id = pds.id
-      JOIN pdb_analysis.domain d ON (
-        de.source_id = d.ecod_domain_id OR
-        de.hit_id = d.ecod_domain_id OR
-        de.domain_ref_id = d.ecod_domain_id
-      )
-      WHERE pds.pdb_id = $1 AND pds.chain_id = $2
-      ORDER BY de.confidence DESC, d.ecod_domain_id
+      FROM pdb_analysis.domain d
+      JOIN pdb_analysis.protein p2 ON d.protein_id = p2.id
+      WHERE p2.pdb_id = $1 AND p2.chain_id = $2
+      ORDER BY d.ecod_domain_id
+      LIMIT 10
     `
 
     const referenceDomains = await prisma.$queryRawUnsafe(
@@ -254,26 +260,40 @@ export async function GET(
         classifiedDomains++
       }
 
-      // Count domains with evidence
-      if (domain.evidence_count > 0) {
-        domainsWithEvidence++
-      }
+      // Count domains with evidence (domains from partition_domains always have evidence)
+      domainsWithEvidence++
     }
 
     // Calculate coverage percentage
     const coverage = protein.sequence_length > 0 ? totalCoverage / protein.sequence_length : 0
 
-    // Get batch and reference information
-    const batchId = putativeDomainsArray.length > 0 ? putativeDomainsArray[0].batch_id : null
-    const referenceVersion = putativeDomainsArray.length > 0 ? putativeDomainsArray[0].reference_version : null
+    // Get batch and reference information from partition_proteins table
+    const partitionInfoQuery = `
+      SELECT batch_id, reference_version
+      FROM pdb_analysis.partition_proteins
+      WHERE pdb_id = $1 AND chain_id = $2
+      LIMIT 1
+    `
+
+    const partitionInfo = await prisma.$queryRawUnsafe(
+      partitionInfoQuery,
+      protein.pdb_id,
+      protein.chain_id
+    )
+
+    const batchId = (partitionInfo as any[])[0]?.batch_id || null
+    const referenceVersion = (partitionInfo as any[])[0]?.reference_version || null
 
     // Process domains to add parsed range information
     const processedPutativeDomains = putativeDomainsArray.map(domain => {
       const parsedRange = parseRange(domain.range)
       return {
         ...domain,
-        start_pos: parsedRange?.start || null,
-        end_pos: parsedRange?.end || null,
+        // Keep both the original fields and add parsed ones for compatibility
+        start: domain.start_pos,
+        end: domain.end_pos,
+        start_pos: parsedRange?.start || domain.start_pos,
+        end_pos: parsedRange?.end || domain.end_pos,
         segments: parsedRange?.segments || []
       }
     })

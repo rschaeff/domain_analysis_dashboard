@@ -1,77 +1,41 @@
-// app/api/dashboard/stats/route.ts
+// app/api/dashboard/stats/route.ts - FIXED VERSION
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// Helper function to convert BigInts to Numbers and handle null/undefined
-function serializable(obj: any): any {
-  if (obj === null || obj === undefined) {
-    return obj;
-  }
-
-  if (typeof obj === 'bigint') {
-    return Number(obj);
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map(serializable);
-  }
-
-  if (typeof obj === 'object') {
-    return Object.fromEntries(
-      Object.entries(obj).map(([key, value]) => [key, serializable(value)])
-    );
-  }
-
-  return obj;
-}
-
 export async function GET() {
   try {
-    // Get comprehensive dashboard statistics
-    const dashboardStats = await prisma.$queryRawUnsafe(`
-      WITH protein_stats AS (
-        SELECT
-          COUNT(DISTINCT p.id) as total_proteins,
-          COUNT(DISTINCT CASE WHEN pp.is_classified = true THEN p.id END) as classified_chains,
-          COUNT(DISTINCT CASE WHEN pp.is_classified = false THEN p.id END) as unclassified_chains,
-          AVG(CASE WHEN pp.coverage IS NOT NULL THEN pp.coverage ELSE 0 END) as avg_domain_coverage
-        FROM pdb_analysis.protein p
-        LEFT JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
-      ),
-      domain_stats AS (
-        SELECT
-          COUNT(*) as total_domains,
-          COUNT(CASE WHEN pd.t_group IS NOT NULL THEN 1 END) as classified_domains,
-          COUNT(CASE WHEN pd.t_group IS NULL THEN 1 END) as unclassified_domains,
-          AVG(CASE WHEN pd.confidence IS NOT NULL THEN pd.confidence ELSE 0 END) as avg_confidence
-        FROM pdb_analysis.partition_domains pd
-      ),
-      evidence_stats AS (
-        SELECT
-          COUNT(DISTINCT de.domain_id) as domains_with_evidence,
-          COUNT(*) as total_evidence_items
-        FROM pdb_analysis.domain_evidence de
-      )
+    // Get comprehensive pipeline performance statistics
+    const pipelineStats = await prisma.$queryRawUnsafe(`
       SELECT
-        ps.total_proteins,
-        ps.classified_chains,
-        ps.unclassified_chains,
-        ps.avg_domain_coverage,
-        ds.total_domains,
-        ds.classified_domains,
-        ds.unclassified_domains,
-        ds.avg_confidence,
-        es.domains_with_evidence,
-        es.total_evidence_items
-      FROM protein_stats ps
-      CROSS JOIN domain_stats ds
-      CROSS JOIN evidence_stats es
+        -- Pipeline throughput
+        COUNT(*) as total_proteins,
+        COUNT(CASE WHEN domains_found > 0 THEN 1 END) as classified_chains,
+        COUNT(CASE WHEN domains_found = 0 THEN 1 END) as unclassified_chains,
+
+        -- Domain discovery and classification
+        SUM(domains_found) as total_domains,
+        SUM(domains_classified) as classified_domains,
+        SUM(domains_found) - SUM(domains_classified) as unclassified_domains,
+
+        -- Quality metrics
+        AVG(coverage) as avg_domain_coverage,
+        AVG(best_domain_confidence) as avg_confidence,
+
+        -- Evidence generation
+        COUNT(CASE WHEN total_evidence_generated > 0 THEN 1 END) as domains_with_evidence,
+        SUM(total_evidence_generated) as total_evidence_items,
+
+        -- Pipeline performance indicators
+        COUNT(CASE WHEN classification_status = 'FULLY_CLASSIFIED' THEN 1 END) as fully_classified_proteins,
+        COUNT(CASE WHEN evidence_quality = 'RICH_EVIDENCE' THEN 1 END) as proteins_with_rich_evidence,
+        COUNT(CASE WHEN days_since_processing <= 7 THEN 1 END) as recent_processing
+
+      FROM pdb_analysis.pipeline_performance_summary
     `);
 
-    if (!dashboardStats || !Array.isArray(dashboardStats) || dashboardStats.length === 0) {
-      // Return safe defaults if no data
+    if (!pipelineStats || !Array.isArray(pipelineStats) || pipelineStats.length === 0) {
       return NextResponse.json({
         total_proteins: 0,
         total_domains: 0,
@@ -82,14 +46,14 @@ export async function GET() {
         avg_domain_coverage: 0,
         avg_confidence: 0,
         domains_with_evidence: 0,
-        total_evidence_items: 0
+        total_evidence_items: 0,
+        data_source: 'pipeline_performance_summary'
       });
     }
 
-    // Convert BigInt values and ensure all fields exist
-    const stats = serializable(dashboardStats[0]);
+    const stats = pipelineStats[0] as any;
 
-    // Ensure all expected fields exist with safe defaults
+    // Convert BigInt values and ensure all fields exist
     const safeStats = {
       total_proteins: Number(stats.total_proteins || 0),
       total_domains: Number(stats.total_domains || 0),
@@ -100,14 +64,28 @@ export async function GET() {
       avg_domain_coverage: Number(stats.avg_domain_coverage || 0),
       avg_confidence: Number(stats.avg_confidence || 0),
       domains_with_evidence: Number(stats.domains_with_evidence || 0),
-      total_evidence_items: Number(stats.total_evidence_items || 0)
+      total_evidence_items: Number(stats.total_evidence_items || 0),
+
+      // Additional pipeline performance metrics
+      fully_classified_proteins: Number(stats.fully_classified_proteins || 0),
+      proteins_with_rich_evidence: Number(stats.proteins_with_rich_evidence || 0),
+      recent_processing: Number(stats.recent_processing || 0),
+
+      // Success rates
+      classification_success_rate: stats.total_proteins > 0 ?
+        Math.round((Number(stats.classified_chains) / Number(stats.total_proteins)) * 100) : 0,
+      domain_classification_rate: stats.total_domains > 0 ?
+        Math.round((Number(stats.classified_domains) / Number(stats.total_domains)) * 100) : 0,
+
+      // Data source indicator
+      data_source: 'pipeline_performance_summary',
+      architecture: 'partition_native'
     };
 
     return NextResponse.json(safeStats);
   } catch (error) {
-    console.error('Error fetching dashboard stats:', error);
+    console.error('Error fetching pipeline performance stats:', error);
 
-    // Return safe defaults on error
     return NextResponse.json({
       total_proteins: 0,
       total_domains: 0,
@@ -119,7 +97,8 @@ export async function GET() {
       avg_confidence: 0,
       domains_with_evidence: 0,
       total_evidence_items: 0,
-      error: 'Failed to fetch dashboard statistics'
-    }, { status: 200 }); // Return 200 with defaults rather than 500
+      error: 'Failed to fetch pipeline performance statistics',
+      data_source: 'pipeline_performance_summary'
+    }, { status: 200 });
   }
 }

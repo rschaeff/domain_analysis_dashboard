@@ -1,197 +1,159 @@
+// app/api/proteins/[id]/domains/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
-
-// Custom JSON serializer to handle BigInt
-function serializeBigInt(obj: any): any {
-  return JSON.parse(JSON.stringify(obj, (key, value) =>
-    typeof value === 'bigint' ? Number(value) : value
-  ))
-}
-
-// Parse range string to get start and end positions
-function parseRange(range: string): { start: number; end: number } | null {
-  if (!range) return null
-
-  // Handle simple range like "A:1-100" or "1-100" (take first segment if multiple)
-  const firstSegment = range.split(',')[0].trim()
-
-  // Remove chain prefix if present (e.g., "A:1-100" -> "1-100")
-  const withoutChain = firstSegment.includes(':') ? firstSegment.split(':')[1] : firstSegment
-  const parts = withoutChain.split('-')
-
-  if (parts.length === 2) {
-    const start = parseInt(parts[0])
-    const end = parseInt(parts[1])
-    if (!isNaN(start) && !isNaN(end) && start <= end) {
-      return { start, end }
-    }
-  }
-
-  return null
-}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    // Await params before accessing properties (Next.js 15 requirement)
     const { id } = await params
 
     let pdbId: string
     let chainId: string
 
-    // Check if ID is in source_id format (e.g., "1914_A")
+    // Parse source_id format (e.g., "1914_A")
     if (id.includes('_')) {
       const parts = id.split('_')
-
       if (parts.length !== 2 || !parts[0] || !parts[1]) {
         return NextResponse.json(
           { error: 'Invalid source ID format. Expected format: PDB_CHAIN (e.g., 1914_A)' },
           { status: 400 }
         )
       }
-
       pdbId = parts[0]
       chainId = parts[1]
-
-    } else if (/^\d+$/.test(id)) {
-      // Handle numeric database ID for backward compatibility
-      const proteinId = parseInt(id)
-
-      // Get the pdb_id and chain_id for this protein
-      const proteinQuery = `
-        SELECT pdb_id, chain_id
-        FROM pdb_analysis.protein
-        WHERE id = $1
-      `
-
-      const proteinResult = await prisma.$queryRawUnsafe(proteinQuery, proteinId)
-
-      if (!proteinResult || (proteinResult as any[]).length === 0) {
-        return NextResponse.json(
-          { error: `Protein not found: ${id}` },
-          { status: 404 }
-        )
-      }
-
-      const protein = (proteinResult as any[])[0]
-      pdbId = protein.pdb_id
-      chainId = protein.chain_id
-
     } else {
       return NextResponse.json(
-        { error: 'Invalid protein ID format. Use either source_id (1914_A) or numeric ID.' },
+        { error: 'Invalid protein ID format. Use source_id format (1914_A).' },
         { status: 400 }
       )
     }
 
-    // Fetch putative domains for this protein
-    // Added pdb_range, pdb_start, and pdb_end fields
-    const putativeDomainsQuery = `
+    // Get protein processing record from partition system
+    const proteinQuery = `
       SELECT
-        pds.id,
-        pds.protein_id,
-        pds.pdb_id,
-        pds.chain_id,
-        pds.batch_id,
-        pds.reference_version,
-        pds.timestamp,
-        pds.domain_number,
-        pds.domain_id,
-        pds.range,
-        pds.pdb_range,
-        pds.pdb_start,
-        pds.pdb_end,
-        pds.source,
-        pds.source_id,
-        pds.confidence,
-        pds.t_group,
-        pds.h_group,
-        pds.x_group,
-        pds.a_group,
-        pds.evidence_count,
-        pds.evidence_types,
-        'putative' as domain_type
-      FROM pdb_analysis.partition_domain_summary pds
-      WHERE pds.pdb_id = $1 AND pds.chain_id = $2
-      ORDER BY pds.domain_number
+        processing_id,
+        pdb_id,
+        chain_id,
+        source_id,
+        batch_id,
+        reference_version,
+        processing_date,
+        sequence_length,
+        domains_found,
+        domains_classified,
+        classification_status
+      FROM pdb_analysis.pipeline_performance_summary
+      WHERE pdb_id = $1 AND chain_id = $2
     `
 
-    const putativeDomains = await prisma.$queryRawUnsafe(putativeDomainsQuery, pdbId, chainId)
+    const proteinResult = await prisma.$queryRawUnsafe(proteinQuery, pdbId, chainId)
 
-    // Fetch reference domains used as evidence
-    // Added pdb_range, pdb_start, and pdb_end fields from domain table
-// In app/api/proteins/[id]/domains/route.ts, around line 150-160
-const referenceDomainsQuery = `
-  SELECT DISTINCT
-    d.id,
-    NULL as protein_id,
-    $1 as pdb_id,
-    $2 as chain_id,
-    NULL as batch_id,
-    NULL as reference_version,
-    NULL as timestamp,
-    ROW_NUMBER() OVER (ORDER BY d.id) as domain_number,
-    d.ecod_domain_id as domain_id,
-    d.range,
-    NULL as pdb_range,    -- NULL instead of d.pdb_range
-    NULL as pdb_start,    -- NULL instead of d.pdb_start
-    NULL as pdb_end,      -- NULL instead of d.pdb_end
-    de.evidence_type as source,
-    COALESCE(de.source_id, de.hit_id, de.domain_ref_id) as source_id,
-    de.confidence,
-    d.t_group,
-    d.h_group,
-    d.x_group,
-    d.a_group,
-    1 as evidence_count,
-    de.evidence_type as evidence_types,
-    'reference' as domain_type
-  FROM pdb_analysis.domain_evidence de
-  JOIN pdb_analysis.partition_domain_summary pds ON de.domain_id = pds.id
-  JOIN pdb_analysis.domain d ON (
-    de.source_id = d.ecod_domain_id OR
-    de.hit_id = d.ecod_domain_id OR
-    de.domain_ref_id = d.ecod_domain_id
-  )
-  WHERE pds.pdb_id = $1 AND pds.chain_id = $2
-  ORDER BY d.id
-`
+    if (!proteinResult || (proteinResult as any[]).length === 0) {
+      return NextResponse.json(
+        { error: `Protein not found in pipeline: ${id}` },
+        { status: 404 }
+      )
+    }
 
+    const protein = (proteinResult as any[])[0]
 
-    const referenceDomains = await prisma.$queryRawUnsafe(referenceDomainsQuery, pdbId, chainId)
+    // Get domains directly from partition_domains
+    const domainsQuery = `
+      SELECT
+        pd.id,
+        pd.protein_id,
+        pd.domain_number,
+        pd.domain_id,
+        pd.start_pos,
+        pd.end_pos,
+        pd.range,
+        pd.pdb_range,
+        pd.pdb_start,
+        pd.pdb_end,
+        pd.source,
+        pd.source_id,
+        pd.confidence,
+        pd.t_group,
+        pd.h_group,
+        pd.x_group,
+        pd.a_group,
+        pd.is_manual_rep,
+        pd.is_f70,
+        pd.is_f40,
+        pd.is_f99,
+        pd.length,
+        'putative' as domain_type
+      FROM pdb_analysis.partition_domains pd
+      JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id
+      WHERE pp.pdb_id = $1 AND pp.chain_id = $2
+      ORDER BY pd.domain_number
+    `
 
-    // Process both types of domains
-    const allDomains = [
-      ...(putativeDomains as any[]),
-      ...(referenceDomains as any[])
-    ]
+    const domains = await prisma.$queryRawUnsafe(domainsQuery, pdbId, chainId)
 
-    const processedDomains = allDomains.map((domain, index) => {
-      // Parse range to get start_pos and end_pos (handles chain prefixes)
-      const parsedRange = parseRange(domain.range)
+    // Get evidence for these domains
+    const evidenceQuery = `
+      SELECT
+        de.domain_id,
+        de.evidence_type,
+        de.source_id,
+        de.confidence,
+        de.evalue,
+        de.probability,
+        de.query_range,
+        de.hit_range
+      FROM pdb_analysis.domain_evidence de
+      JOIN pdb_analysis.partition_domains pd ON de.domain_id = pd.id
+      JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id
+      WHERE pp.pdb_id = $1 AND pp.chain_id = $2
+      ORDER BY de.domain_id, de.confidence DESC
+    `
 
-      return {
-        ...domain,
-        // Add parsed positions for frontend compatibility
-        start_pos: parsedRange?.start || null,
-        end_pos: parsedRange?.end || null,
-        // Ensure domain_number is set
-        domain_number: domain.domain_number || (index + 1)
+    const evidence = await prisma.$queryRawUnsafe(evidenceQuery, pdbId, chainId)
+
+    // Group evidence by domain
+    const evidenceByDomain = (evidence as any[]).reduce((acc, ev) => {
+      if (!acc[ev.domain_id]) acc[ev.domain_id] = []
+      acc[ev.domain_id].push(ev)
+      return acc
+    }, {})
+
+    // Process domains with evidence
+    const processedDomains = (domains as any[]).map(domain => ({
+      ...domain,
+      evidence: evidenceByDomain[domain.id] || [],
+      evidence_count: (evidenceByDomain[domain.id] || []).length
+    }))
+
+    // Consistency check
+    const actualDomainCount = processedDomains.length
+    const expectedDomainCount = Number(protein.domains_found)
+
+    return NextResponse.json({
+      protein: {
+        ...protein,
+        consistency_check: {
+          expected_domains: expectedDomainCount,
+          actual_domains: actualDomainCount,
+          is_consistent: actualDomainCount === expectedDomainCount
+        }
+      },
+      domains: processedDomains,
+      metadata: {
+        source: 'partition_domains_direct',
+        data_architecture: 'pipeline_native',
+        total_domains: actualDomainCount,
+        total_evidence_items: Object.values(evidenceByDomain).flat().length
       }
     })
 
-    // Serialize the results to handle BigInt values
-    const serializedDomains = serializeBigInt(processedDomains)
-
-    return NextResponse.json(serializedDomains)
-
   } catch (error) {
-    console.error('Error fetching protein domains:', error)
+    console.error('Error fetching partition domains:', error)
     return NextResponse.json(
       {
-        error: 'Failed to fetch protein domains',
+        error: 'Failed to fetch partition domains',
         details: error instanceof Error ? error.message : String(error)
       },
       { status: 500 }

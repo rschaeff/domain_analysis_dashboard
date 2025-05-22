@@ -247,12 +247,22 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     }
   };
 
-  // Apply the domain styling
+  // Apply the domain styling with improved range handling
   const applyDomainStyling = (viewer: any) => {
     if (!viewer) return;
 
     debugLog(`Applying styling for ${domains.length} domains`);
-    debugLog('Domain ranges:', domains.map(d => `${d.id}: ${d.start}-${d.end} (${d.chainId || chainId || 'A'})`));
+
+    // Log each domain's range information for debugging
+    domains.forEach((domain, index) => {
+      debugLog(`Domain ${index} (${domain.id}):`, {
+        start: domain.start,
+        end: domain.end,
+        pdb_range: domain.pdb_range,
+        pdb_start: domain.pdb_start,
+        pdb_end: domain.pdb_end
+      });
+    });
 
     // Cache the domains we're applying styling for
     lastAppliedDomainsRef.current = [...domains];
@@ -275,15 +285,39 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     if (domains.length > 0) {
       domains.forEach((domain, index) => {
         try {
-          // Validate domain range
-          if (domain.start > domain.end || domain.start <= 0) {
-            debugLog(`Invalid domain range: ${domain.start}-${domain.end}`, domain);
-            return;
-          }
+          // Determine the best range to use for selection
+          let resiValue;
+          let start = domain.start;
+          let end = domain.end;
 
-          // Create selection for this domain, prioritizing PDB range over sequence range
-          const resiValue = domain.pdb_range || `${domain.start}-${domain.end}`;
-          debugLog(`Using resi value: ${resiValue} for domain ${domain.id}`);
+          // Validate basic range
+          if (!start || !end || isNaN(start) || isNaN(end) || start <= 0 || end <= 0) {
+            debugLog(`Invalid sequence range for domain ${domain.id}: start=${start}, end=${end}`);
+
+            // Try to use PDB range if sequence range is invalid
+            if (domain.pdb_range) {
+              resiValue = domain.pdb_range;
+              debugLog(`Using pdb_range fallback: ${resiValue}`);
+            } else if (domain.pdb_start && domain.pdb_end) {
+              resiValue = `${domain.pdb_start}-${domain.pdb_end}`;
+              debugLog(`Using pdb_start/pdb_end fallback: ${resiValue}`);
+            } else {
+              debugLog(`No valid range found for domain ${domain.id}, skipping`);
+              return;
+            }
+          } else {
+            // Use PDB range if available, otherwise use sequence range
+            if (domain.pdb_range) {
+              resiValue = domain.pdb_range;
+              debugLog(`Using pdb_range: ${resiValue} for domain ${domain.id}`);
+            } else if (domain.pdb_start && domain.pdb_end) {
+              resiValue = `${domain.pdb_start}-${domain.pdb_end}`;
+              debugLog(`Using pdb_start/pdb_end: ${resiValue} for domain ${domain.id}`);
+            } else {
+              resiValue = `${start}-${end}`;
+              debugLog(`Using sequence range: ${resiValue} for domain ${domain.id}`);
+            }
+          }
 
           // Ensure chain ID is valid
           const domainChainId = domain.chainId || chainId || 'A';
@@ -297,16 +331,31 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
           const selectionExists = checkSelectionExists(viewer, selection);
 
           if (!selectionExists) {
-            debugLog(`Warning: Domain ${domain.id} (${domain.start}-${domain.end}) may not match PDB numbering`);
+            debugLog(`Warning: Domain ${domain.id} range ${resiValue} not found in structure`);
 
             // Show available residues for debugging
             const availableResidues = getAvailableResidues(viewer, domainChainId);
             if (availableResidues.length > 0) {
-              debugLog('First 10 available residues:', availableResidues.slice(0, 10));
-              debugLog('Last 10 available residues:', availableResidues.slice(-10));
+              debugLog('Available residues range:', `${availableResidues[0]} to ${availableResidues[availableResidues.length-1]}`);
+
+              // Try to map sequence range to available residues if possible
+              if (!domain.pdb_range && start && end && availableResidues.length > 0) {
+                const mappedStart = availableResidues[0] + (start - 1);
+                const mappedEnd = availableResidues[0] + (end - 1);
+                if (mappedEnd <= availableResidues[availableResidues.length-1]) {
+                  const mappedSelection = {
+                    chain: domainChainId,
+                    resi: `${mappedStart}-${mappedEnd}`
+                  };
+                  const mappedExists = checkSelectionExists(viewer, mappedSelection);
+                  if (mappedExists) {
+                    debugLog(`Mapped range ${start}-${end} to ${mappedStart}-${mappedEnd} successfully`);
+                    resiValue = `${mappedStart}-${mappedEnd}`;
+                    selection.resi = resiValue;
+                  }
+                }
+              }
             }
-          } else {
-            debugLog(`Selection for domain ${domain.id} with resi "${resiValue}" has ${selectionExists ? 'atoms' : 'no atoms'}`);
           }
 
           debugLog(`Setting style for domain ${index}:`, selection);
@@ -323,7 +372,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
           if (showControls && domain.label) {
             try {
               viewer.addLabel(domain.label, {
-                position: { resi: Math.floor((domain.start + domain.end) / 2), chain: domainChainId },
+                position: { resi: Math.floor((start + end) / 2), chain: domainChainId },
                 backgroundColor: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
                 fontColor: "#ffffff",
                 fontSize: 12,

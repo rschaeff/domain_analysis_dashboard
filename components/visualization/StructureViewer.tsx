@@ -51,28 +51,33 @@ export function StructureViewer({
   const [isViewerReady, setIsViewerReady] = useState(false)
   const [selectedDomain, setSelectedDomain] = useState<number | null>(null)
   const [viewerError, setViewerError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<string>('putative')
+  const [activeTab, setActiveTab] = useState<string>('structure')
   const viewerRef = useRef<any>(null)
 
-  // Split domains by type
-  const putativeDomains = domains.filter(d => d.domain_type === 'putative')
-  const referenceDomains = domains.filter(d => d.domain_type === 'reference')
+  // Since we're only receiving putative domains now, we don't need to filter
+  // But we'll keep the structure for potential future use
+  const putativeDomains = domains.filter(d =>
+    d.domain_type === 'putative' || !d.domain_type
+  )
+
+  // Reference domains should only be informational
+  const referenceDomains: any[] = []
 
   // Map domains to ThreeDMolViewer format with proper coloring by N-to-C position
   const mapDomains = (domainsToMap: any[]): Domain[] => {
     return domainsToMap.map((domain, index) => ({
       id: String(domain.id || index),
-      chainId: chain_id,
+      chainId: domain.chainId || chain_id,
       // Use all available position data
-      start: domain.start_pos || parseInt(domain.range?.split('-')[0]),
-      end: domain.end_pos || parseInt(domain.range?.split('-')[1]),
+      start: domain.start || parseInt(domain.range?.split('-')[0]) || 0,
+      end: domain.end || parseInt(domain.range?.split('-')[1]) || 0,
       // Use PDB range if available
       pdb_range: domain.pdb_range,
       pdb_start: domain.pdb_start,
       pdb_end: domain.pdb_end,
       // Use position-based coloring for N to C terminal visualization
-      color: DOMAIN_COLORS[index % DOMAIN_COLORS.length],
-      label: domain.domain_id || `Domain ${domain.domain_number || index + 1}`,
+      color: domain.color || DOMAIN_COLORS[index % DOMAIN_COLORS.length],
+      label: domain.label || domain.domain_id || `Domain ${domain.domain_number || index + 1}`,
       classification: {
         t_group: domain.t_group,
         h_group: domain.h_group,
@@ -83,21 +88,18 @@ export function StructureViewer({
   }
 
   const mappedPutativeDomains = mapDomains(putativeDomains)
-  const mappedReferenceDomains = mapDomains(referenceDomains)
 
-  // For 3D visualization, combine putative and reference domains
-  // but prioritize showing putative domains
-  const activeDomainsForViewer = activeTab === 'putative'
-    ? mappedPutativeDomains
-    : mappedReferenceDomains
+  // For 3D visualization, use the putative domains
+  const activeDomainsForViewer = mappedPutativeDomains
 
   // Log domain data for debugging
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
-      console.log('[StructureViewer] Putative domains:', putativeDomains.length)
-      console.log('[StructureViewer] Reference domains:', referenceDomains.length)
+      console.log('[StructureViewer] Total domains received:', domains.length)
+      console.log('[StructureViewer] Putative domains (actual predictions):', putativeDomains.length)
+      console.log('[StructureViewer] Sample domain data:', domains[0])
     }
-  }, [putativeDomains, referenceDomains])
+  }, [domains, putativeDomains])
 
   const handleViewerReady = () => {
     console.log('[StructureViewer] 3D viewer ready')
@@ -132,24 +134,8 @@ export function StructureViewer({
 
     // If the domain is clicked and there's a click handler, call it
     if (onDomainClick && !e) {
-      const originalDomain = activeTab === 'putative'
-        ? putativeDomains[index]
-        : referenceDomains[index]
+      const originalDomain = putativeDomains[index]
       onDomainClick(originalDomain)
-    }
-  }
-
-  const handleTabChange = (value: string) => {
-    setActiveTab(value)
-    setSelectedDomain(null)
-
-    // Reset view when switching tabs
-    if (viewerRef.current && viewerRef.current.current) {
-      try {
-        viewerRef.current.current.reset()
-      } catch (error) {
-        console.error('[StructureViewer] Error resetting view:', error)
-      }
     }
   }
 
@@ -186,22 +172,6 @@ export function StructureViewer({
     }
   }
 
-  // Format classification display
-  const formatClassification = (domain: any) => {
-    if (!domain?.classification) return null
-
-    const { t_group, h_group } = domain.classification
-
-    if (!t_group && !h_group) return null
-
-    return (
-      <div className="text-xs text-gray-600 mt-1">
-        {t_group && <span className="mr-2">T: {t_group}</span>}
-        {h_group && <span>H: {h_group}</span>}
-      </div>
-    )
-  }
-
   return (
     <Card className="p-6">
       <div className="space-y-4">
@@ -231,191 +201,102 @@ export function StructureViewer({
           </div>
         </div>
 
-        {/* Domain visualization tabs */}
-        <Tabs defaultValue="putative" onValueChange={handleTabChange}>
-          <TabsList className="mb-4">
-            <TabsTrigger value="putative">
-              Putative Domains ({putativeDomains.length})
-            </TabsTrigger>
-            <TabsTrigger value="reference">
-              Reference Domains ({referenceDomains.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="putative" className="space-y-4">
-            {/* 3DMol viewer */}
-            <div className="relative">
-              <ThreeDMolViewer
-                ref={viewerRef}
-                pdbId={pdb_id}
-                chainId={chain_id}
-                domains={activeDomainsForViewer}
-                height="400px"
-                onStructureLoaded={handleViewerReady}
-                onError={handleViewerError}
-                showControls={true}
-                className="rounded-lg overflow-hidden border border-gray-200"
-              />
-
-              {viewerError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
-                  <div className="text-red-600 text-center p-4">
-                    <p className="font-semibold">Error loading structure</p>
-                    <p className="text-sm mt-1">{viewerError}</p>
-                  </div>
-                </div>
-              )}
-
-              {!isViewerReady && !viewerError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
-                  <LoadingSpinner />
-                  <p className="ml-2">Loading structure...</p>
-                </div>
-              )}
+        {/* Information about domain visualization */}
+        <div className="bg-blue-50 p-3 rounded-lg text-sm">
+          <div className="flex items-start gap-2">
+            <Info className="w-4 h-4 mt-0.5 text-blue-600" />
+            <div>
+              <strong>Domain Visualization:</strong> This shows predicted domain boundaries for this specific protein.
+              Reference domains from other proteins are not displayed on the structure as their coordinates
+              would not be meaningful for this protein.
             </div>
+          </div>
+        </div>
 
-            {/* Domain selection buttons */}
-            {mappedPutativeDomains.length > 0 && (
-              <div className="border-t pt-4">
-                <h4 className="text-sm font-medium mb-3">Putative Domains</h4>
-                <div className="flex flex-wrap gap-2">
-                  {mappedPutativeDomains.map((domain, index) => {
-                    const originalDomain = putativeDomains[index]
-                    return (
-                      <Tooltip key={domain.id} content={
-                        <div className="text-xs">
-                          <div>{domain.label}</div>
-                          <div>Range: {domain.start}-{domain.end}</div>
-                          {originalDomain.source && (
-                            <div>Source: {originalDomain.source}</div>
-                          )}
-                          {originalDomain.confidence && (
-                            <div>Confidence: {originalDomain.confidence.toFixed(2)}</div>
-                          )}
-                        </div>
-                      }>
-                        <button
-                          onClick={(e) => handleHighlightDomain(domain, index, e)}
-                          className={`px-3 py-1 text-sm border rounded-full ${
-                            selectedDomain === index
-                              ? 'bg-gray-100'
-                              : 'hover:bg-gray-50'
-                          } transition-colors`}
-                          style={{ borderColor: domain.color }}
-                        >
-                          <span className="flex items-center gap-1">
-                            {domain.label}
-                            {originalDomain.t_group && (
-                              <Badge variant="outline" className="text-xs">
-                                {originalDomain.t_group}
-                              </Badge>
-                            )}
-                          </span>
-                        </button>
-                      </Tooltip>
-                    )
-                  })}
-                </div>
+        {/* 3DMol viewer */}
+        <div className="relative">
+          <ThreeDMolViewer
+            ref={viewerRef}
+            pdbId={pdb_id}
+            chainId={chain_id}
+            domains={activeDomainsForViewer}
+            height="400px"
+            onStructureLoaded={handleViewerReady}
+            onError={handleViewerError}
+            showControls={true}
+            className="rounded-lg overflow-hidden border border-gray-200"
+          />
+
+          {viewerError && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
+              <div className="text-red-600 text-center p-4">
+                <p className="font-semibold">Error loading structure</p>
+                <p className="text-sm mt-1">{viewerError}</p>
               </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="reference" className="space-y-4">
-            {/* 3DMol viewer (same instance) */}
-            <div className="relative">
-              <ThreeDMolViewer
-                ref={viewerRef}
-                pdbId={pdb_id}
-                chainId={chain_id}
-                domains={activeDomainsForViewer}
-                height="400px"
-                onStructureLoaded={handleViewerReady}
-                onError={handleViewerError}
-                showControls={true}
-                className="rounded-lg overflow-hidden border border-gray-200"
-              />
-
-              {viewerError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
-                  <div className="text-red-600 text-center p-4">
-                    <p className="font-semibold">Error loading structure</p>
-                    <p className="text-sm mt-1">{viewerError}</p>
-                  </div>
-                </div>
-              )}
-
-              {!isViewerReady && !viewerError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
-                  <LoadingSpinner />
-                  <p className="ml-2">Loading structure...</p>
-                </div>
-              )}
             </div>
+          )}
 
-            {/* Reference domain selection buttons */}
-            {mappedReferenceDomains.length > 0 && (
-              <div className="border-t pt-4">
-                <h4 className="text-sm font-medium mb-3">Reference Domains</h4>
-                <div className="flex flex-wrap gap-2">
-                  {mappedReferenceDomains.map((domain, index) => {
-                    const originalDomain = referenceDomains[index]
-                    return (
-                      <Tooltip key={domain.id} content={
-                        <div className="text-xs">
-                          <div>{domain.label}</div>
-                          <div>Range: {domain.start}-{domain.end}</div>
-                          {originalDomain.source && (
-                            <div>Source: {originalDomain.source}</div>
-                          )}
-                          {originalDomain.t_group && (
-                            <div>Classification: {originalDomain.t_group}</div>
-                          )}
-                        </div>
-                      }>
-                        <button
-                          onClick={(e) => handleHighlightDomain(domain, index, e)}
-                          className={`px-3 py-1 text-sm border rounded-full ${
-                            selectedDomain === index
-                              ? 'bg-gray-100'
-                              : 'hover:bg-gray-50'
-                          } transition-colors`}
-                          style={{ borderColor: domain.color }}
-                        >
-                          <span className="flex items-center gap-1">
-                            {domain.label}
+          {!isViewerReady && !viewerError && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-lg">
+              <LoadingSpinner />
+              <p className="ml-2">Loading structure...</p>
+            </div>
+          )}
+        </div>
 
-                             <a href={`http://prodata.swmed.edu/ecod/complete/domain/${originalDomain.domain_id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="ml-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Eye className="w-3 h-3" />
-                            </a>
-                          </span>
-                        </button>
-                      </Tooltip>
-                    )
-                  })}
-                </div>
+        {/* Domain selection buttons */}
+        {mappedPutativeDomains.length > 0 && (
+          <div className="border-t pt-4">
+            <h4 className="text-sm font-medium mb-3">Predicted Domains ({mappedPutativeDomains.length})</h4>
+            <div className="flex flex-wrap gap-2">
+              {mappedPutativeDomains.map((domain, index) => {
+                const originalDomain = putativeDomains[index]
+                return (
+                  <Tooltip key={domain.id} content={
+                    <div className="text-xs">
+                      <div>{domain.label}</div>
+                      <div>Range: {domain.start}-{domain.end}</div>
+                      {domain.pdb_range && (
+                        <div>PDB Range: {domain.pdb_range}</div>
+                      )}
+                      {originalDomain.source && (
+                        <div>Source: {originalDomain.source}</div>
+                      )}
+                      {originalDomain.confidence && (
+                        <div>Confidence: {originalDomain.confidence.toFixed(2)}</div>
+                      )}
+                    </div>
+                  }>
+                    <button
+                      onClick={(e) => handleHighlightDomain(domain, index, e)}
+                      className={`px-3 py-1 text-sm border rounded-full ${
+                        selectedDomain === index
+                          ? 'bg-gray-100'
+                          : 'hover:bg-gray-50'
+                      } transition-colors`}
+                      style={{ borderColor: domain.color }}
+                    >
+                      <span className="flex items-center gap-1">
+                        {domain.label}
+                        {originalDomain.t_group && (
+                          <Badge variant="outline" className="text-xs">
+                            {originalDomain.t_group}
+                          </Badge>
+                        )}
+                      </span>
+                    </button>
+                  </Tooltip>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
-                {/* ECOD Reference info */}
-                {mappedReferenceDomains.length > 0 && (
-                  <div className="text-xs text-gray-500 mt-4 flex items-center">
-                    <Info className="w-3 h-3 mr-1" />
-                    Reference domains link to the ECOD database for more information
-                  </div>
-                )}
-              </div>
-            )}
-
-            {mappedReferenceDomains.length === 0 && (
-              <div className="text-center py-6 text-gray-500">
-                No reference domains found for this protein
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
+        {mappedPutativeDomains.length === 0 && (
+          <div className="text-center py-6 text-gray-500">
+            <p>No predicted domains found for this protein</p>
+          </div>
+        )}
       </div>
     </Card>
   )

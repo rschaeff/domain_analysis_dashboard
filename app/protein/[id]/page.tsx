@@ -25,44 +25,111 @@ export default function ProteinDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'sequence' | 'structure'>('structure')
 
-  // Fetch protein details
-useEffect(() => {
-  const fetchProteinDetails = async () => {
-    setLoading(true)
-    setError(null)
+  // Helper function to create domain for viewer
+  const createDomainForViewer = (domain: any, index: number) => {
+    // Extract range information robustly
+    let start, end, pdbRange, pdbStart, pdbEnd;
 
-    try {
-      const proteinResponse = await fetch(`/api/proteins/${proteinId}`)
-      if (!proteinResponse.ok) {
-        throw new Error('Failed to fetch protein details')
+    // Try multiple field name patterns for sequence coordinates
+    start = domain.start_pos || domain.start || domain.startPos;
+    end = domain.end_pos || domain.end || domain.endPos;
+
+    // Try to parse from range string if start/end not available
+    if ((!start || !end) && domain.range) {
+      const rangeParts = domain.range.split('-');
+      if (rangeParts.length === 2) {
+        start = parseInt(rangeParts[0]);
+        end = parseInt(rangeParts[1]);
       }
-      const proteinData = await proteinResponse.json()
-
-      console.log('[FRONTEND PROTEIN] Full response:', proteinData)
-      console.log('[FRONTEND PROTEIN] domain_count:', proteinData.domain_count)
-      console.log('[FRONTEND PROTEIN] putative_domains length:', proteinData.putative_domains?.length)
-      console.log('[FRONTEND PROTEIN] reference_domains length:', proteinData.reference_domains?.length)
-      console.log('[FRONTEND PROTEIN] all_domains length:', proteinData.all_domains?.length)
-
-      setProtein(proteinData)
-
-      const domainsResponse = await fetch(`/api/proteins/${proteinId}/domains`)
-      if (domainsResponse.ok) {
-        const domainsData = await domainsResponse.json()
-        console.log('[FRONTEND DOMAINS] Domains route returned:', domainsData.length, 'domains')
-        setDomains(domainsData)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
-    } finally {
-      setLoading(false)
     }
-  }
 
-  if (proteinId) {
-    fetchProteinDetails()
-  }
-}, [proteinId])
+    // PDB-specific coordinates
+    pdbRange = domain.pdb_range || domain.pdbRange;
+    pdbStart = domain.pdb_start || domain.pdbStart;
+    pdbEnd = domain.pdb_end || domain.pdbEnd;
+
+    // Parse PDB range if available
+    if (pdbRange && !pdbStart && !pdbEnd) {
+      const pdbParts = pdbRange.split('-');
+      if (pdbParts.length === 2) {
+        pdbStart = pdbParts[0];
+        pdbEnd = pdbParts[1];
+      }
+    }
+
+    console.log(`[DOMAIN MAPPING] Putative domain ${index}:`, {
+      id: domain.id,
+      start, end,
+      pdbRange, pdbStart, pdbEnd,
+      originalDomain: domain
+    });
+
+    return {
+      id: domain.id?.toString() || `putative_${index}`,
+      chainId: protein?.chain_id || 'A',
+      domain_type: 'putative',
+      start: start || 0,
+      end: end || 0,
+      pdb_range: pdbRange,
+      pdb_start: pdbStart,
+      pdb_end: pdbEnd,
+      label: `Domain ${domain.domain_number || (index + 1)}`,
+      color: `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+      source: domain.source,
+      confidence: domain.confidence,
+      t_group: domain.t_group,
+      h_group: domain.h_group,
+      x_group: domain.x_group,
+      a_group: domain.a_group,
+      domain_number: domain.domain_number,
+      domain_id: domain.domain_id,
+      range: domain.range
+    };
+  };
+
+  // Fetch protein details
+  useEffect(() => {
+    const fetchProteinDetails = async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        // Fetch protein overview
+        const proteinResponse = await fetch(`/api/proteins/${proteinId}`)
+        if (!proteinResponse.ok) {
+          throw new Error('Failed to fetch protein details')
+        }
+        const proteinData = await proteinResponse.json()
+
+        console.log('[FRONTEND PROTEIN] Full response:', proteinData)
+        console.log('[FRONTEND PROTEIN] domain_count:', proteinData.domain_count)
+        console.log('[FRONTEND PROTEIN] putative_domains length:', proteinData.putative_domains?.length)
+        console.log('[FRONTEND PROTEIN] putative_domains sample:', proteinData.putative_domains?.[0])
+        console.log('[FRONTEND PROTEIN] reference_domains length:', proteinData.reference_domains?.length)
+        console.log('[FRONTEND PROTEIN] reference_domains sample:', proteinData.reference_domains?.[0])
+        console.log('[FRONTEND PROTEIN] all_domains length:', proteinData.all_domains?.length)
+
+        setProtein(proteinData)
+
+        // Fetch domains for this protein
+        const domainsResponse = await fetch(`/api/proteins/${proteinId}/domains`)
+        if (domainsResponse.ok) {
+          const domainsData = await domainsResponse.json()
+          console.log('[FRONTEND DOMAINS] Domains route returned:', domainsData.length, 'domains')
+          console.log('[FRONTEND DOMAINS] Sample domain:', domainsData[0])
+          setDomains(domainsData)
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (proteinId) {
+      fetchProteinDetails()
+    }
+  }, [proteinId])
 
   const handleBack = () => {
     router.back()
@@ -191,7 +258,7 @@ useEffect(() => {
               Protein: {protein.pdb_id}_{protein.chain_id}
             </h1>
             <p className="text-gray-600 mt-1">
-              {protein.domain_count} domains | {protein.sequence_length} residues | 
+              {protein.domain_count} domains | {protein.sequence_length} residues |
               {protein.is_classified ? ' Classified' : ' Unclassified'}
             </p>
           </div>
@@ -208,27 +275,25 @@ useEffect(() => {
         </div>
       </div>
 
-        {/* Summary Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="p-6">
-            <div className="text-2xl font-bold text-blue-600">{protein.domain_count}</div>
-            <div className="text-sm text-gray-600">Total Domains</div>
-          </Card>
-          <Card className="p-6">
-            <div className="text-2xl font-bold text-green-600">{protein.is_classified ? protein.domain_count : 0}</div>
-            <div className="text-sm text-gray-600">Classified Domains</div>
-          </Card>
-          <Card className="p-6">
-            <div className="text-2xl font-bold text-purple-600">{Math.round(protein.coverage * 100)}%</div>
-            <div className="text-sm text-gray-600">Domain Coverage</div>
-          </Card>
-          <Card className="p-6">
-            <div className="text-2xl font-bold text-orange-600">
-              {protein.avg_confidence ? protein.avg_confidence.toFixed(2) : 'N/A'}
-            </div>
-            <div className="text-sm text-gray-600">Avg Confidence</div>
-          </Card>
-        </div>
+      {/* Summary Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="p-6">
+          <div className="text-2xl font-bold text-blue-600">{protein.domain_count}</div>
+          <div className="text-sm text-gray-600">Total Domains</div>
+        </Card>
+        <Card className="p-6">
+          <div className="text-2xl font-bold text-green-600">{protein.fully_classified_domains}</div>
+          <div className="text-sm text-gray-600">Fully Classified</div>
+        </Card>
+        <Card className="p-6">
+          <div className="text-2xl font-bold text-purple-600">{Math.round(protein.coverage * 100)}%</div>
+          <div className="text-sm text-gray-600">Sequence Coverage</div>
+        </Card>
+        <Card className="p-6">
+          <div className="text-2xl font-bold text-orange-600">{protein.domains_with_evidence}</div>
+          <div className="text-sm text-gray-600">With Evidence</div>
+        </Card>
+      </div>
 
       {/* Tabs */}
       <Card className="p-0 overflow-hidden">
@@ -289,17 +354,17 @@ useEffect(() => {
                 </div>
               </div>
 
-                {/* Multi-Track Domain Visualization */}
-                <MultiTrackDomainVisualization
-                  protein={{
-                    id: protein.id,
-                    pdb_id: protein.pdb_id,
-                    chain_id: protein.chain_id,
-                    sequence_length: protein.sequence_length
-                  }}
-                  putativeDomains={protein.putative_domains || []}
-                  referenceDomains={protein.reference_domains || []}
-                  onDomainClick={handleDomainClick}
+              {/* Multi-Track Domain Visualization */}
+              <MultiTrackDomainVisualization
+                protein={{
+                  id: protein.id,
+                  pdb_id: protein.pdb_id,
+                  chain_id: protein.chain_id,
+                  sequence_length: protein.sequence_length
+                }}
+                putativeDomains={protein.putative_domains || []}
+                referenceDomains={protein.reference_domains || []}
+                onDomainClick={handleDomainClick}
               />
             </div>
           )}
@@ -332,52 +397,20 @@ useEffect(() => {
             />
           )}
 
-            {activeTab === 'structure' && (
-              <StructureViewer
-                pdb_id={protein.pdb_id}
-                chain_id={protein.chain_id}
-                domains={[
-                  // Putative domains
-                  ...(protein.putative_domains || []).map((domain, index) => ({
-                    id: domain.id || `putative_${index}`,
-                    domain_type: 'putative',
-                    start: domain.start_pos,
-                    end: domain.end_pos,
-                    pdb_range: domain.pdb_range,
-                    pdb_start: domain.pdb_start,
-                    pdb_end: domain.pdb_end,
-                    label: `Domain ${domain.domain_number || (index + 1)}`,
-                    color: `hsl(${index * 137.5 % 360}, 70%, 50%)`,
-                    source: domain.source,
-                    confidence: domain.confidence,
-                    t_group: domain.t_group,
-                    h_group: domain.h_group,
-                    x_group: domain.x_group,
-                    a_group: domain.a_group,
-                    domain_number: domain.domain_number
-                  })),
-                  // Reference domains
-                  ...(protein.reference_domains || []).map((domain, index) => ({
-                    id: domain.id || `reference_${index}`,
-                    domain_type: 'reference',
-                    start: domain.start_pos,
-                    end: domain.end_pos,
-                    pdb_range: domain.pdb_range,
-                    pdb_start: domain.pdb_start,
-                    pdb_end: domain.pdb_end,
-                    label: domain.domain_id || `Ref ${index + 1}`,
-                    color: `hsl(${(index + (protein.putative_domains?.length || 0)) * 137.5 % 360}, 50%, 40%)`,
-                    source: 'reference',
-                    domain_id: domain.domain_id,
-                    t_group: domain.t_group,
-                    h_group: domain.h_group,
-                    x_group: domain.x_group,
-                    a_group: domain.a_group
-                  }))
-                ]}
-                onDomainClick={handleDomainClick}
-              />
-            )}
+          {activeTab === 'structure' && (
+            <StructureViewer
+              pdb_id={protein.pdb_id}
+              chain_id={protein.chain_id}
+              domains={
+                // Only use putative domains for structure visualization
+                // since they represent actual predicted domains for THIS protein
+                (protein.putative_domains || []).map((domain, index) =>
+                  createDomainForViewer(domain, index)
+                )
+              }
+              onDomainClick={handleDomainClick}
+            />
+          )}
         </div>
       </Card>
     </div>

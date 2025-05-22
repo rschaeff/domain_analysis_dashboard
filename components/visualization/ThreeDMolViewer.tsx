@@ -84,29 +84,163 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     }
   };
 
-  // Analyze structure to understand residue numbering
-  const analyzeStructure = (viewer: any, targetChain: string) => {
+  // Parse chain mapping from mmCIF data
+  const parseChainMapping = (mmcifData: string) => {
+    const mapping = new Map<string, string>(); // auth_chain -> asym_id
+
     try {
-      const atoms = viewer.selectedAtoms({chain: targetChain});
+      // Look for the _pdbx_poly_seq_scheme block
+      const lines = mmcifData.split('\n');
+      let inPolySeqScheme = false;
+      let headerIndices: { [key: string]: number } = {};
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        // Start of the block
+        if (line.startsWith('_pdbx_poly_seq_scheme.')) {
+          inPolySeqScheme = true;
+          const field = line.substring('_pdbx_poly_seq_scheme.'.length);
+          headerIndices[field] = Object.keys(headerIndices).length;
+          continue;
+        }
+
+        // End of block (empty line or new section)
+        if (inPolySeqScheme && (line === '' || line.startsWith('_') || line.startsWith('#'))) {
+          break;
+        }
+
+        // Parse data line
+        if (inPolySeqScheme && line && !line.startsWith('_') && !line.startsWith('#')) {
+          const parts = line.split(/\s+/);
+
+          if (parts.length >= Math.max(headerIndices['asym_id'] || 0, headerIndices['pdb_strand_id'] || 0)) {
+            const asymId = parts[headerIndices['asym_id']] || '';
+            const authChain = parts[headerIndices['pdb_strand_id']] || '';
+
+            if (asymId && authChain && authChain !== '.') {
+              mapping.set(authChain, asymId);
+            }
+          }
+        }
+      }
+
+      debugLog('Parsed chain mapping from mmCIF:', Object.fromEntries(mapping));
+      return mapping;
+    } catch (error) {
+      debugLog('Error parsing chain mapping:', error);
+      return mapping;
+    }
+  };
+
+  // Analyze structure to understand residue numbering and available chains
+  const analyzeStructure = (viewer: any, targetChain?: string, mmcifData?: string) => {
+    try {
+      // Get all atoms first to see what chains are available
+      const allAtoms = viewer.selectedAtoms({});
+      const allChains = [...new Set(allAtoms.map((atom: any) => atom.chain))];
+
+      debugLog(`Available chains in structure: ${allChains.join(', ')}`);
+
+      // Parse chain mapping from mmCIF if available
+      let chainMapping = new Map<string, string>();
+      if (mmcifData) {
+        chainMapping = parseChainMapping(mmcifData);
+      }
+
+      // Find the best chain to use
+      let actualChain = targetChain;
+
+      if (targetChain && !allChains.includes(targetChain)) {
+        debugLog(`Requested chain ${targetChain} not found in structure`);
+
+        // First, try the chain mapping from mmCIF
+        if (chainMapping.has(targetChain)) {
+          const mappedChain = chainMapping.get(targetChain);
+          if (mappedChain && allChains.includes(mappedChain)) {
+            actualChain = mappedChain;
+            debugLog(`Found mmCIF mapping: ${targetChain} -> ${actualChain}`);
+          }
+        }
+
+        // If mapping didn't work, try reverse mapping (asym_id -> auth_chain)
+        if (actualChain === targetChain) {
+          for (const [authChain, asymId] of chainMapping.entries()) {
+            if (asymId === targetChain && allChains.includes(authChain)) {
+              actualChain = authChain;
+              debugLog(`Found reverse mmCIF mapping: ${targetChain} -> ${actualChain}`);
+              break;
+            }
+          }
+        }
+
+        // If still no match, fall back to the most protein-like chain
+        if (actualChain === targetChain) {
+          const chainAnalysis = allChains.map(chain => {
+            const atoms = viewer.selectedAtoms({chain});
+            const residues = [...new Set(atoms.map((atom: any) => atom.resi).filter(r => r))];
+            const caAtoms = atoms.filter((atom: any) => atom.atom === 'CA');
+
+            return {
+              chain,
+              atomCount: atoms.length,
+              residueCount: residues.length,
+              caCount: caAtoms.length,
+              isProteinLike: caAtoms.length > 50
+            };
+          });
+
+          // Sort by protein-like properties
+          chainAnalysis.sort((a, b) => {
+            if (a.isProteinLike !== b.isProteinLike) {
+              return a.isProteinLike ? -1 : 1;
+            }
+            return b.caCount - a.caCount;
+          });
+
+          if (chainAnalysis.length > 0) {
+            actualChain = chainAnalysis[0].chain;
+            debugLog(`Fallback to most protein-like chain: ${actualChain}`);
+          }
+        }
+      }
+
+      if (!actualChain && allChains.length > 0) {
+        actualChain = allChains[0];
+        debugLog(`Using first available chain: ${actualChain}`);
+      }
+
+      if (!actualChain) {
+        debugLog('No chains found in structure');
+        return null;
+      }
+
+      // Analyze the target chain
+      const atoms = viewer.selectedAtoms({chain: actualChain});
       if (atoms.length === 0) {
-        debugLog(`No atoms found for chain ${targetChain}`);
+        debugLog(`No atoms found for chain ${actualChain}`);
         return null;
       }
 
       const residues = new Set<number>();
       atoms.forEach((atom: any) => {
-        residues.add(parseInt(atom.resi));
+        if (atom.resi) {
+          residues.add(parseInt(atom.resi));
+        }
       });
 
       const sortedResidues = Array.from(residues).sort((a, b) => a - b);
       const info = {
+        actualChain,
+        originalChain: targetChain,
         minResidue: sortedResidues[0],
         maxResidue: sortedResidues[sortedResidues.length - 1],
         totalResidues: sortedResidues.length,
-        residueList: sortedResidues
+        residueList: sortedResidues,
+        allChains
       };
 
-      debugLog(`Structure analysis for chain ${targetChain}:`, info);
+      debugLog(`Structure analysis for chain ${actualChain}:`, info);
       return info;
     } catch (error) {
       debugLog('Error analyzing structure:', error);
@@ -180,8 +314,9 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             applyDomainStyling(viewerRef.current);
 
             // Focus on the chain if specified
-            if (chainId) {
-              viewerRef.current.zoomTo({chain: chainId});
+            const targetChain = structureInfoRef.current?.actualChain || chainId;
+            if (targetChain) {
+              viewerRef.current.zoomTo({chain: targetChain});
             } else {
               viewerRef.current.zoomTo();
             }
@@ -202,6 +337,8 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
         if (!viewerRef.current || domains.length <= domainIndex) return;
 
         const domain = domains[domainIndex];
+        const targetChain = structureInfoRef.current?.actualChain || domain.chainId || chainId || 'A';
+
         try {
           debugLog(`Highlighting domain: ${domain.id}, range: ${domain.start}-${domain.end}`);
 
@@ -213,12 +350,11 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
           }
 
           const selection = {
-            chain: domain.chainId || chainId || 'A',
+            chain: targetChain,
             resi: mappedRange
           };
 
           // Set background to low opacity
-          const targetChain = domain.chainId || chainId || 'A';
           viewerRef.current.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.3 } });
           viewerRef.current.setStyle({chain: targetChain}, { cartoon: { color: 'gray', opacity: 0.5 } });
 
@@ -289,7 +425,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
   const applyDomainStyling = (viewer: any) => {
     if (!viewer) return;
 
-    const targetChain = chainId || 'A';
+    const targetChain = structureInfoRef.current?.actualChain || chainId || 'A';
     debugLog(`Applying styling for ${domains.length} domains on chain ${targetChain}`);
 
     // Step 1: Show the entire structure/chain in gray (unclassified regions)
@@ -324,7 +460,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             return;
           }
 
-          const domainChainId = domain.chainId || targetChain;
+          const domainChainId = structureInfoRef.current?.actualChain || domain.chainId || targetChain;
           const selection = {
             chain: domainChainId,
             resi: mappedRange
@@ -345,9 +481,9 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             });
 
             successfulDomains++;
-            debugLog(`Successfully styled domain ${domain.id} with range ${mappedRange}`);
+            debugLog(`✓ Styled domain ${domain.id} with range ${mappedRange}`);
           } else {
-            debugLog(`Warning: Domain ${domain.id} range ${mappedRange} not found in structure`);
+            debugLog(`⚠ Domain ${domain.id} range ${mappedRange} not found in structure`);
           }
 
         } catch (domainError) {
@@ -375,89 +511,121 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
     lastAppliedDomainsRef.current = [];
     structureInfoRef.current = null;
 
-const init3DMol = async () => {
-  try {
-    // Import 3DMol dynamically to avoid SSR issues
-    const $3Dmol = await import('3dmol');
-    debugLog('3DMol library loaded');
-
-    // Clean up previous viewer if it exists
-    if (viewerRef.current) {
+    const init3DMol = async () => {
       try {
-        viewerRef.current.removeAllModels();
-        if (typeof viewerRef.current.destroy === 'function') {
-          viewerRef.current.destroy();
-        }
-      } catch (e) {
-        // Ignore cleanup errors
-      }
-      viewerRef.current = null;
-    }
+        // Import 3DMol dynamically to avoid SSR issues
+        const $3Dmol = await import('3dmol');
+        debugLog('3DMol library loaded');
 
-    // Create a new viewer
-    const config = {
-      backgroundColor: backgroundColor || 'white',
-      id: containerRef.current.id
+        // Clean up previous viewer if it exists
+        if (viewerRef.current) {
+          try {
+            viewerRef.current.removeAllModels();
+            if (typeof viewerRef.current.destroy === 'function') {
+              viewerRef.current.destroy();
+            }
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+          viewerRef.current = null;
+        }
+
+        // Create a new viewer
+        const config = {
+          backgroundColor: backgroundColor || 'white',
+          id: containerRef.current.id
+        };
+
+        debugLog('Creating 3DMol viewer with config:', config);
+        const viewer = $3Dmol.createViewer(containerRef.current, config);
+        viewerRef.current = viewer;
+
+        // Load structure using mmCIF format
+        debugLog(`Loading PDB ID: ${pdbId} (mmCIF format)`);
+
+        // Try the local API first (now serves mmCIF)
+        const structureUrl = `/api/pdb/${pdbId}`;
+
+        // Load structure with fetch and explicit format
+        try {
+          const response = await fetch(structureUrl);
+          if (response.ok) {
+            const structureData = await response.text();
+
+            // Validate mmCIF data
+            if (structureData.includes('data_') || structureData.includes('_entry.id')) {
+              debugLog('mmCIF structure loaded successfully from local API');
+
+              // Add model with explicit mmCIF format
+              const model = viewer.addModel(structureData, 'cif');
+              if (model) {
+                processLoadedStructure(viewer, structureData);
+              } else {
+                throw new Error('Failed to parse mmCIF data');
+              }
+            } else {
+              throw new Error('Invalid mmCIF data received');
+            }
+          } else {
+            throw new Error(`API returned ${response.status}: ${response.statusText}`);
+          }
+        } catch (apiError) {
+          debugLog('Local API failed, trying RCSB mmCIF direct:', apiError);
+
+          // Fallback to RCSB direct mmCIF
+          const rcsbUrl = `https://files.rcsb.org/download/${pdbId.toLowerCase()}.cif`;
+
+          try {
+            const response = await fetch(rcsbUrl);
+            if (response.ok) {
+              const structureData = await response.text();
+              if (structureData.includes('data_') || structureData.includes('_entry.id')) {
+                debugLog('mmCIF structure loaded from RCSB direct');
+                const model = viewer.addModel(structureData, 'cif');
+                if (model) {
+                  processLoadedStructure(viewer, structureData);
+                } else {
+                  throw new Error('Failed to parse mmCIF data from RCSB');
+                }
+              } else {
+                throw new Error('Invalid mmCIF data from RCSB');
+              }
+            } else {
+              throw new Error(`RCSB returned ${response.status}: ${response.statusText}`);
+            }
+          } catch (rcsbError) {
+            handleError(`Failed to load structure ${pdbId} from all sources: ${rcsbError}`);
+          }
+        }
+
+      } catch (error) {
+        handleError(`Error initializing 3DMol.js: ${error instanceof Error ? error.message : String(error)}`);
+      }
     };
 
-    debugLog('Creating 3DMol viewer with config:', config);
-    const viewer = $3Dmol.createViewer(containerRef.current, config);
-    viewerRef.current = viewer;
-
-    // Load structure - FIXED: Use callback-based error handling, not .catch()
-    debugLog(`Loading PDB ID: ${pdbId}`);
-
-    // Try the local API first
-    const pdbUrl = `/api/pdb/${pdbId}`;
-
-    // FIXED: Handle errors in the callback, not with .catch()
-    $3Dmol.download(pdbUrl, viewer, {}, function(model) {
-      if (model) {
-        debugLog('PDB model loaded successfully from local API');
-        processLoadedStructure(viewer);
-      } else {
-        debugLog('Local API failed, trying RCSB PDB direct');
-        // Fallback to RCSB direct
-        const rcsbUrl = `https://files.rcsb.org/download/${pdbId}.pdb`;
-
-        $3Dmol.download(rcsbUrl, viewer, {}, function(fallbackModel) {
-          if (fallbackModel) {
-            debugLog('PDB model loaded from RCSB');
-            processLoadedStructure(viewer);
-          } else {
-            handleError(`Failed to load PDB ${pdbId} from all sources`);
-          }
-        });
-      }
-    });
-
-  } catch (error) {
-    handleError(`Error initializing 3DMol.js: ${error instanceof Error ? error.message : String(error)}`);
-  }
-};
-
     // Process loaded structure
-    const processLoadedStructure = (viewer: any) => {
+    const processLoadedStructure = (viewer: any, mmcifData?: string) => {
       try {
-        debugLog('Processing loaded structure');
+        debugLog('Processing loaded mmCIF structure');
 
-        // Analyze the structure to understand residue numbering
-        const targetChain = chainId || 'A';
-        structureInfoRef.current = analyzeStructure(viewer, targetChain);
+        // Analyze the structure to understand residue numbering and find correct chain
+        structureInfoRef.current = analyzeStructure(viewer, chainId, mmcifData);
+
+        if (!structureInfoRef.current) {
+          throw new Error('Could not analyze structure - no chains found');
+        }
 
         // Apply domain styling
         applyDomainStyling(viewer);
 
-        // Focus on the specific chain if provided
-        if (chainId) {
-          debugLog(`Focusing on chain: ${chainId}`);
-          try {
-            viewer.zoomTo({chain: chainId});
-          } catch (e) {
-            debugLog('Error zooming to chain, using default zoom:', e);
-            viewer.zoomTo();
-          }
-        } else {
+        // Focus on the correct chain
+        const targetChain = structureInfoRef.current.actualChain;
+        debugLog(`Focusing on chain: ${targetChain}`);
+
+        try {
+          viewer.zoomTo({chain: targetChain});
+        } catch (e) {
+          debugLog('Error zooming to chain, using default zoom:', e);
           viewer.zoomTo();
         }
 
@@ -604,7 +772,12 @@ const init3DMol = async () => {
           <button
             onClick={() => {
               if (viewerRef.current) {
-                viewerRef.current.zoomTo();
+                const targetChain = structureInfoRef.current?.actualChain || chainId;
+                if (targetChain) {
+                  viewerRef.current.zoomTo({chain: targetChain});
+                } else {
+                  viewerRef.current.zoomTo();
+                }
                 viewerRef.current.render();
               }
             }}

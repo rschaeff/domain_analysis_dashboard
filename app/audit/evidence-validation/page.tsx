@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { HitLevelEvidenceValidator } from '@/components/analysis/HitLevelEvidenceValidator'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { ArrowLeft, Search } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
 

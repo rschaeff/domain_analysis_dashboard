@@ -74,7 +74,7 @@ export default function ProteinDetailPage() {
       pdb_start: pdbStart,
       pdb_end: pdbEnd,
       label: `Domain ${domain.domain_number || (index + 1)}`,
-      color: `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+      color: DOMAIN_COLORS[index % DOMAIN_COLORS.length],
       source: domain.source,
       confidence: domain.confidence,
       t_group: domain.t_group,

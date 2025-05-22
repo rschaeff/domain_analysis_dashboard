@@ -279,7 +279,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
       // When we have domains, style them individually and hide everything else
 
       // First, hide all atoms with very low opacity
-      viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.2 } });
+      viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.1 } });
 
       // Apply styling for each domain with bright colors
       domains.forEach((domain, index) => {
@@ -357,16 +357,28 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             }
           }
 
-          const domainColor = domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`;
+          // Use hex colors instead of HSL - 3DMol seems to prefer these
+          const domainColor = domain.color || DOMAIN_COLORS[index % DOMAIN_COLORS.length];
           debugLog(`Setting style for domain ${index} with color ${domainColor}:`, selection);
 
           // Apply bright domain color with full opacity
-          viewer.setStyle(selection, {
+          const styleObj = {
             cartoon: {
               color: domainColor,
               opacity: 1.0
             }
-          });
+          };
+
+          viewer.setStyle(selection, styleObj);
+          debugLog(`Applied style:`, styleObj);
+
+          // Verify the style was applied by checking what 3DMol thinks is set
+          try {
+            const atoms = viewer.selectedAtoms(selection);
+            debugLog(`Domain ${index} has ${atoms.length} atoms after styling`);
+          } catch (e) {
+            debugLog(`Error checking styled atoms:`, e);
+          }
 
           // Add label if requested
           if (showControls && domain.label) {
@@ -401,7 +413,8 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
       }
     }
 
-    // Final render
+    // Force a render after styling
+    debugLog('Forcing render after styling');
     viewer.render();
   };
 

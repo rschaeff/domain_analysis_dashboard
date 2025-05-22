@@ -16,6 +16,21 @@ import {
   TrendingUp, Database, Zap
 } from 'lucide-react'
 
+// Enhanced statistics interface with all expected fields
+interface DashboardStatistics {
+  total_proteins: number
+  total_domains: number
+  classified_chains: number
+  unclassified_chains: number
+  classified_domains: number
+  unclassified_domains: number
+  avg_domain_coverage: number
+  avg_confidence: number
+  domains_with_evidence: number
+  total_evidence_items: number
+  error?: string
+}
+
 interface ProteinSummary {
   id: string
   pdb_id: string
@@ -69,6 +84,22 @@ interface AuditData {
   }>
 }
 
+// Safe number formatting helper
+const safeToLocaleString = (value: number | undefined | null): string => {
+  if (value === undefined || value === null || isNaN(value)) {
+    return '0'
+  }
+  return Number(value).toLocaleString()
+}
+
+// Safe percentage calculation helper
+const safePercentage = (numerator: number | undefined | null, denominator: number | undefined | null): number => {
+  if (!numerator || !denominator || denominator === 0) {
+    return 0
+  }
+  return Math.round((Number(numerator) / Number(denominator)) * 100)
+}
+
 export default function EnhancedDashboard() {
   const router = useRouter()
 
@@ -77,6 +108,7 @@ export default function EnhancedDashboard() {
   const [architectureGroups, setArchitectureGroups] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [statisticsLoading, setStatisticsLoading] = useState(true)
 
   // Filter and pagination state
   const [filters, setFilters] = useState<DomainFilters>({})
@@ -88,12 +120,19 @@ export default function EnhancedDashboard() {
 
   // Dashboard state
   const [viewMode, setViewMode] = useState<'proteins' | 'architecture' | 'audit'>('proteins')
-  const [statistics, setStatistics] = useState({
+
+  // Initialize with safe defaults
+  const [statistics, setStatistics] = useState<DashboardStatistics>({
     total_proteins: 0,
     total_domains: 0,
     classified_chains: 0,
     unclassified_chains: 0,
-    avg_domain_coverage: 0
+    classified_domains: 0,
+    unclassified_domains: 0,
+    avg_domain_coverage: 0,
+    avg_confidence: 0,
+    domains_with_evidence: 0,
+    total_evidence_items: 0
   })
 
   // Audit state
@@ -105,16 +144,43 @@ export default function EnhancedDashboard() {
   const [auditLoading, setAuditLoading] = useState(false)
   const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
 
-  // Fetch dashboard stats
+  // Fetch dashboard stats with proper error handling
   const fetchDashboardStats = async () => {
+    setStatisticsLoading(true)
     try {
       const response = await fetch('/api/dashboard/stats')
       if (response.ok) {
         const data = await response.json()
-        setStatistics(data)
+
+        // Ensure all required fields exist with safe defaults
+        const safeStats: DashboardStatistics = {
+          total_proteins: Number(data.total_proteins || 0),
+          total_domains: Number(data.total_domains || 0),
+          classified_chains: Number(data.classified_chains || 0),
+          unclassified_chains: Number(data.unclassified_chains || 0),
+          classified_domains: Number(data.classified_domains || 0),
+          unclassified_domains: Number(data.unclassified_domains || 0),
+          avg_domain_coverage: Number(data.avg_domain_coverage || 0),
+          avg_confidence: Number(data.avg_confidence || 0),
+          domains_with_evidence: Number(data.domains_with_evidence || 0),
+          total_evidence_items: Number(data.total_evidence_items || 0),
+          error: data.error
+        }
+
+        setStatistics(safeStats)
+
+        if (data.error) {
+          console.warn('Dashboard stats API returned with error:', data.error)
+        }
+      } else {
+        console.error('Failed to fetch dashboard stats:', response.status)
+        setError('Failed to load dashboard statistics')
       }
     } catch (err) {
       console.error('Error fetching dashboard stats:', err)
+      setError('Failed to load dashboard statistics')
+    } finally {
+      setStatisticsLoading(false)
     }
   }
 
@@ -154,9 +220,8 @@ export default function EnhancedDashboard() {
       setProteins(data.data || [])
       setPagination(data.pagination || { page, size: 50, total: 0 })
 
-      if (data.statistics) {
-        setStatistics(data.statistics)
-      }
+      // Don't overwrite main dashboard statistics with protein-specific ones
+      // The main statistics should come from fetchDashboardStats()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -164,7 +229,7 @@ export default function EnhancedDashboard() {
     }
   }
 
-  // Fetch architecture data (existing implementation)
+  // Fetch architecture data (existing implementation with error handling)
   const fetchArchitectureData = async (newFilters?: DomainFilters) => {
     setLoading(true)
     setError(null)
@@ -195,9 +260,6 @@ export default function EnhancedDashboard() {
       const data = await response.json()
       setArchitectureGroups(data.architectures || [])
 
-      if (data.statistics) {
-        setStatistics(data.statistics)
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -340,6 +402,15 @@ export default function EnhancedDashboard() {
                   </Badge>
                 )}
               </Button>
+              <Button
+                variant="outline"
+                className="flex items-center gap-2"
+                onClick={fetchDashboardStats}
+                disabled={statisticsLoading}
+              >
+                <RefreshCw className={`w-4 h-4 ${statisticsLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
               <Button variant="outline" className="flex items-center gap-2">
                 <Download className="w-4 h-4" />
                 Export
@@ -347,37 +418,113 @@ export default function EnhancedDashboard() {
             </div>
           </div>
 
+          {/* Error Alert */}
+          {error && (
+            <Card className="p-4 border-red-200 bg-red-50">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+                <div>
+                  <div className="font-medium text-red-800">Error</div>
+                  <div className="text-sm text-red-700">{error}</div>
+                </div>
+              </div>
+            </Card>
+          )}
+
           {/* Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="p-6">
               <div className="text-2xl font-bold text-blue-600">
-                {statistics.total_proteins.toLocaleString()}
+                {statisticsLoading ? (
+                  <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
+                ) : (
+                  safeToLocaleString(statistics.total_proteins)
+                )}
               </div>
               <div className="text-sm text-gray-600">Total Proteins</div>
+              {statistics.error && (
+                <div className="text-xs text-red-500 mt-1">Data may be incomplete</div>
+              )}
             </Card>
 
             <Card className="p-6">
               <div className="text-2xl font-bold text-green-600">
-                {statistics.total_domains.toLocaleString()}
+                {statisticsLoading ? (
+                  <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
+                ) : (
+                  safeToLocaleString(statistics.total_domains)
+                )}
               </div>
               <div className="text-sm text-gray-600">Total Domains</div>
             </Card>
 
             <Card className="p-6">
               <div className="text-2xl font-bold text-purple-600">
-                {statistics.classified_chains.toLocaleString()} ({
-                  statistics.total_proteins ?
-                  Math.round((statistics.classified_chains / statistics.total_proteins) * 100) : 0
-                }%)
+                {statisticsLoading ? (
+                  <div className="animate-pulse bg-gray-200 h-8 w-24 rounded"></div>
+                ) : (
+                  `${safeToLocaleString(statistics.classified_chains)} (${safePercentage(statistics.classified_chains, statistics.total_proteins)}%)`
+                )}
               </div>
               <div className="text-sm text-gray-600">Classified Proteins</div>
             </Card>
 
             <Card className="p-6">
               <div className="text-2xl font-bold text-orange-600">
-                {statistics.avg_domain_coverage?.toFixed(1)}%
+                {statisticsLoading ? (
+                  <div className="animate-pulse bg-gray-200 h-8 w-12 rounded"></div>
+                ) : (
+                  `${(statistics.avg_domain_coverage * 100).toFixed(1)}%`
+                )}
               </div>
               <div className="text-sm text-gray-600">Avg Coverage</div>
+            </Card>
+          </div>
+
+          {/* Additional Statistics Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="p-4">
+              <div className="text-lg font-bold text-indigo-600">
+                {statisticsLoading ? (
+                  <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
+                ) : (
+                  safeToLocaleString(statistics.classified_domains)
+                )}
+              </div>
+              <div className="text-xs text-gray-600">Classified Domains</div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="text-lg font-bold text-teal-600">
+                {statisticsLoading ? (
+                  <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
+                ) : (
+                  safeToLocaleString(statistics.domains_with_evidence)
+                )}
+              </div>
+              <div className="text-xs text-gray-600">Domains with Evidence</div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="text-lg font-bold text-cyan-600">
+                {statisticsLoading ? (
+                  <div className="animate-pulse bg-gray-200 h-6 w-12 rounded"></div>
+                ) : (
+                  `${(statistics.avg_confidence * 100).toFixed(1)}%`
+                )}
+              </div>
+              <div className="text-xs text-gray-600">Avg Confidence</div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="text-lg font-bold text-emerald-600">
+                {statisticsLoading ? (
+                  <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
+                ) : (
+                  safeToLocaleString(statistics.total_evidence_items)
+                )}
+              </div>
+              <div className="text-xs text-gray-600">Evidence Items</div>
             </Card>
           </div>
 
@@ -425,17 +572,6 @@ export default function EnhancedDashboard() {
               <LoadingSpinner />
               <p className="mt-4 text-gray-600">Loading data...</p>
             </Card>
-          ) : error ? (
-            <Card className="p-8 text-center">
-              <div className="text-red-600 mb-4">Error: {error}</div>
-              <Button onClick={() => {
-                if (viewMode === 'proteins') fetchProteins(pagination.page)
-                else if (viewMode === 'architecture') fetchArchitectureData()
-                else if (viewMode === 'audit') runAudit(selectedBatch || undefined)
-              }}>
-                Retry
-              </Button>
-            </Card>
           ) : viewMode === 'proteins' ? (
             <ProteinTable
               proteins={proteins}
@@ -467,7 +603,7 @@ export default function EnhancedDashboard() {
   )
 }
 
-// Audit View Component
+// Audit View Component (unchanged from your original)
 interface AuditViewProps {
   auditData: AuditData
   loading: boolean

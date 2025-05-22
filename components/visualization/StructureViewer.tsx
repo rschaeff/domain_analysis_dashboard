@@ -357,7 +357,7 @@ export function StructureViewer({
         </div>
       )
     }
-
+  ]
   // Evidence table columns
   const evidenceColumns = [
     {

@@ -141,38 +141,66 @@ export function DomainSummaryParser({
   }
 
   // Parse the domain summary XML based on actual structure
-  const parseDomainSummaryXml = (xmlContent: string): DomainSummaryData => {
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(xmlContent, 'text/xml')
-    
-    // Check for parsing errors
-    const parseError = doc.querySelector('parsererror')
-    if (parseError) {
-      throw new Error(`XML parsing error: ${parseError.textContent}`)
+// Fixed section of DomainSummaryParser.tsx - parseDomainSummaryFile function
+
+const parseDomainSummaryFile = async () => {
+  setParsing(true)
+  setError(null)
+
+  try {
+    // Find domain summary file
+    const domainSummaryFile = filesystemEvidence?.files?.find((file: any) =>
+      file.file_type === 'domain_summary' && file.file_exists
+    )
+
+    if (!domainSummaryFile) {
+      throw new Error('No domain summary file found or file does not exist')
     }
 
-    // Extract metadata (from HHSearch format or domain summary format)
-    const metadata = extractMetadata(doc)
-    
-    // Parse chain BLAST hits
-    const chainBlastHits = parseChainBlastHits(doc)
-    
-    // Parse domain BLAST hits
-    const domainBlastHits = parseDomainBlastHits(doc)
-    
-    // Parse HHSearch hits
-    const hhsearchHits = parseHHSearchHits(doc)
-    
-    const all_hits: AlignmentHit[] = [...chainBlastHits, ...domainBlastHits, ...hhsearchHits]
-
-    return {
-      metadata,
-      chain_blast_hits: chainBlastHits,
-      domain_blast_hits: domainBlastHits,
-      hhsearch_hits: hhsearchHits,
-      all_hits
+    // Check if we have the file_id (correct field name from filesystem API)
+    const fileId = domainSummaryFile.file_id || domainSummaryFile.id
+    if (!fileId) {
+      throw new Error('Domain summary file found but missing file ID')
     }
+
+    console.log('Fetching file with ID:', fileId, 'for protein:', proteinId)
+
+    // Fetch file content using the correct field name
+    const response = await fetch(`/api/proteins/${proteinId}/files/${fileId}`)
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+      throw new Error(`Failed to fetch file: ${response.status} ${response.statusText} - ${errorData.error || ''}`)
+    }
+
+    const data = await response.json()
+
+    if (!data.content) {
+      throw new Error('File fetched successfully but content is empty')
+    }
+
+    const xmlContent = data.content
+
+    console.log('Successfully fetched XML content, length:', xmlContent.length)
+
+    // Parse the XML
+    const summary = parseDomainSummaryXml(xmlContent)
+    setSummaryData(summary)
+
+    // Analyze coverage
+    const analysis = analyzeCoverage(summary)
+    setCoverageAnalysis(analysis)
+
+    if (onAnalysisComplete) {
+      onAnalysisComplete(analysis, summary)
+    }
+
+  } catch (err) {
+    console.error('Error in parseDomainSummaryFile:', err)
+    setError(err instanceof Error ? err.message : 'Unknown error occurred')
+  } finally {
+    setParsing(false)
   }
+}
 
   const extractMetadata = (doc: Document) => {
     // Try HHSearch format first

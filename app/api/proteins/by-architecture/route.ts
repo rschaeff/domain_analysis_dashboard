@@ -1,309 +1,107 @@
 // app/api/proteins/by-architecture/route.ts
-
-import { NextRequest, NextResponse } from 'next/server'
-import { PrismaClient } from '@prisma/client'
-
-// Use your existing Prisma instance or create one
-// Adjust this import based on your Prisma setup:
-// import { prisma } from '@/lib/prisma'
-// import { db } from '@/lib/db'
-
-const prisma = new PrismaClient()
-
-interface DomainData {
-  id: string
-  domain_number: number
-  range: string
-  start_position?: number
-  end_position?: number
-  confidence: number | null
-  t_group: string | null
-  h_group: string | null
-  x_group: string | null
-  a_group: string | null
-  evidence_count: number
-  evidence_types: string
-}
-
-interface ProteinWithDomains {
-  protein_id: string
-  pdb_id: string
-  chain_id: string
-  sequence_length: number
-  processing_date: string
-  best_confidence: number
-  avg_confidence: number
-  classification_completeness: number
-  domains: DomainData[]
-}
-
-interface ArchitectureGroup {
-  architecture_id: string
-  pattern_name: string
-  domain_count: number
-  t_groups: string[]
-  frequency: number
-  avg_confidence: number
-  classification_completeness: number
-  proteins: ProteinWithDomains[]
-  pagination?: {
-    page: number
-    size: number
-    total: number
-  }
-}
-
-interface ArchitectureResponse {
-  architectures: ArchitectureGroup[]
-  statistics: {
-    total_proteins: number
-    total_domains: number
-    classified_chains: number
-    unclassified_chains: number
-    avg_domain_coverage: number
-  }
-}
-
-export async function GET(request: NextRequest): Promise<NextResponse<ArchitectureResponse | { error: string }>> {
+export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-
-    // Extract filters from query parameters
-    const pdbId = searchParams.get('pdb_id')
-    const chainId = searchParams.get('chain_id')
-    const minConfidence = searchParams.get('min_confidence')
-    const maxConfidence = searchParams.get('max_confidence')
-    const tGroups = searchParams.get('t_groups')?.split(',').filter(Boolean)
-    const hGroups = searchParams.get('h_groups')?.split(',').filter(Boolean)
-    const xGroups = searchParams.get('x_groups')?.split(',').filter(Boolean)
-    const evidenceTypes = searchParams.get('evidence_types')
-
-    // Build Prisma where clause
-    const proteinWhere: any = {}
-    const domainWhere: any = {}
-
-    if (pdbId) {
-      proteinWhere.pdb_id = {
-        contains: pdbId,
-        mode: 'insensitive'
-      }
-    }
-
-    if (chainId) {
-      proteinWhere.chain_id = chainId
-    }
-
-    if (minConfidence || maxConfidence) {
-      domainWhere.confidence = {}
-      if (minConfidence) domainWhere.confidence.gte = parseFloat(minConfidence)
-      if (maxConfidence) domainWhere.confidence.lte = parseFloat(maxConfidence)
-    }
-
-    if (tGroups && tGroups.length > 0) {
-      domainWhere.t_group = { in: tGroups }
-    }
-
-    if (hGroups && hGroups.length > 0) {
-      domainWhere.h_group = { in: hGroups }
-    }
-
-    if (xGroups && xGroups.length > 0) {
-      domainWhere.x_group = { in: xGroups }
-    }
-
-    if (evidenceTypes) {
-      domainWhere.evidence_types = {
-        contains: evidenceTypes,
-        mode: 'insensitive'
-      }
-    }
-
-    // Combine filters
-    const whereClause: any = {
-      ...proteinWhere,
-      domains: {
-        some: domainWhere
-      }
-    }
-
-    // Get proteins with their domains (adjust table names based on your Prisma schema)
-    const proteins = await prisma.protein.findMany({
-      where: whereClause,
-      include: {
-        domains: {
-          where: domainWhere,
-          orderBy: [
-            { start_position: 'asc' },
-            { domain_number: 'asc' }
-          ]
-        }
-      },
-      take: 1000, // Limit for performance
-      orderBy: [
-        { created_at: 'desc' },
-        { pdb_id: 'asc' }
-      ]
-    })
-
-    // Group proteins by architecture (T-group pattern)
-    const architectureMap = new Map<string, {
-      proteins: typeof proteins
-      t_groups: string[]
-      domain_count: number
-    }>()
-
-    proteins.forEach(protein => {
-      if (protein.domains.length === 0) return
-
-      // Create architecture ID from ordered T-groups
-      const sortedDomains = protein.domains.sort((a, b) => {
-        return (a.start_position || a.domain_number || 0) - (b.start_position || b.domain_number || 0)
-      })
-
-      const tGroupPattern = sortedDomains.map(d => d.t_group || 'UNCLASSIFIED').join('|')
-      const tGroups = sortedDomains.map(d => d.t_group || 'UNCLASSIFIED')
-      const domainCount = sortedDomains.length
-
-      if (!architectureMap.has(tGroupPattern)) {
-        architectureMap.set(tGroupPattern, {
-          proteins: [],
-          t_groups: tGroups,
-          domain_count: domainCount
-        })
-      }
-
-      architectureMap.get(tGroupPattern)!.proteins.push(protein)
-    })
-
-    // Convert to architecture groups and calculate metrics
-    const architectures: ArchitectureGroup[] = Array.from(architectureMap.entries())
-      .map(([architectureId, data]) => {
-        const { proteins: groupProteins, t_groups, domain_count } = data
-
-        // Calculate group metrics
-        const allConfidences = groupProteins.flatMap(p =>
-          p.domains.map(d => d.confidence).filter(c => c !== null)
-        ) as number[]
-
-        const avgConfidence = allConfidences.length > 0
-          ? allConfidences.reduce((sum, conf) => sum + conf, 0) / allConfidences.length
-          : 0
-
-        const classificationCompleteness = groupProteins.reduce((sum, protein) => {
-          const classified = protein.domains.filter(d => d.t_group !== null).length
-          const total = protein.domains.length
-          return sum + (total > 0 ? classified / total : 0)
-        }, 0) / groupProteins.length
-
-        // Create pattern name
-        let patternName = ''
-        if (domain_count === 1) {
-          patternName = t_groups[0] === 'UNCLASSIFIED' ? 'Unclassified domain' : 'Single domain'
-        } else if (domain_count === 2) {
-          patternName = 'Two-domain protein'
-        } else if (domain_count === 3) {
-          patternName = 'Three-domain protein'
-        } else {
-          patternName = 'Complex multi-domain'
-        }
-
-        // Transform proteins data
-        const transformedProteins: ProteinWithDomains[] = groupProteins
-          .slice(0, 20) // Limit proteins per group
-          .map(protein => {
-            const proteinConfidences = protein.domains
-              .map(d => d.confidence)
-              .filter(c => c !== null) as number[]
-
-            return {
-              protein_id: protein.id.toString(),
-              pdb_id: protein.pdb_id,
-              chain_id: protein.chain_id,
-              sequence_length: protein.length || 0,
-              processing_date: protein.created_at?.toISOString() || new Date().toISOString(),
-              best_confidence: proteinConfidences.length > 0 ? Math.max(...proteinConfidences) : 0,
-              avg_confidence: proteinConfidences.length > 0
-                ? proteinConfidences.reduce((sum, conf) => sum + conf, 0) / proteinConfidences.length
-                : 0,
-              classification_completeness: protein.domains.length > 0
-                ? protein.domains.filter(d => d.t_group !== null).length / protein.domains.length
-                : 0,
-              domains: protein.domains.map(domain => ({
-                id: domain.id.toString(),
-                domain_number: domain.domain_number || 1,
-                range: domain.range || '',
-                start_position: domain.start_position || undefined,
-                end_position: domain.end_position || undefined,
-                confidence: domain.confidence,
-                t_group: domain.t_group,
-                h_group: domain.h_group,
-                x_group: domain.x_group,
-                a_group: domain.a_group,
-                evidence_count: domain.evidence_count || 0,
-                evidence_types: domain.evidence_types || ''
-              }))
-            }
-          })
-
-        return {
-          architecture_id: architectureId,
-          pattern_name: patternName,
+    // Use the actual database structure
+    const architectureQuery = `
+      WITH architecture_patterns AS (
+        SELECT
+          pp.id as protein_id,
+          pp.pdb_id,
+          pp.chain_id,
+          pp.sequence_length,
+          pp.timestamp as processing_date,
+          -- Create architecture ID from ordered T-groups
+          array_to_string(
+            array_agg(
+              COALESCE(pd.t_group, 'UNCLASSIFIED')
+              ORDER BY pd.domain_number
+            ),
+            '|'
+          ) as architecture_id,
+          -- Get domain count
+          COUNT(pd.id) as domain_count,
+          -- Get unique T-groups
+          array_agg(DISTINCT pd.t_group ORDER BY pd.t_group) as t_groups,
+          -- Calculate metrics
+          AVG(pd.confidence) as avg_confidence,
+          COUNT(CASE WHEN pd.t_group IS NOT NULL THEN 1 END)::float / COUNT(pd.id) as classification_completeness,
+          MAX(pd.confidence) as best_confidence
+        FROM pdb_analysis.partition_proteins pp
+        LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
+        WHERE pp.is_classified = true
+        GROUP BY pp.id, pp.pdb_id, pp.chain_id, pp.sequence_length, pp.timestamp
+        HAVING COUNT(pd.id) > 0
+      ),
+      architecture_groups AS (
+        SELECT
+          architecture_id,
           domain_count,
           t_groups,
-          frequency: groupProteins.length,
-          avg_confidence,
-          classification_completeness,
-          proteins: transformedProteins,
-          pagination: {
-            page: 1,
-            size: 20,
-            total: groupProteins.length
-          }
-        }
-      })
-      .sort((a, b) => {
-        // Sort by frequency (most common first), then by domain count
-        if (b.frequency !== a.frequency) return b.frequency - a.frequency
-        return a.domain_count - b.domain_count
-      })
-      .slice(0, 50) // Top 50 architectures
+          COUNT(*) as frequency,
+          AVG(avg_confidence) as group_avg_confidence,
+          AVG(classification_completeness) as group_classification_completeness,
+          -- Sample proteins for this architecture (limit 20)
+          array_agg(
+            json_build_object(
+              'protein_id', protein_id,
+              'pdb_id', pdb_id,
+              'chain_id', chain_id,
+              'sequence_length', sequence_length,
+              'processing_date', processing_date,
+              'avg_confidence', avg_confidence,
+              'best_confidence', best_confidence,
+              'classification_completeness', classification_completeness
+            )
+            ORDER BY best_confidence DESC
+            LIMIT 20
+          ) as sample_proteins
+        FROM architecture_patterns
+        GROUP BY architecture_id, domain_count, t_groups
+      )
+      SELECT
+        architecture_id,
+        domain_count,
+        t_groups,
+        frequency,
+        group_avg_confidence,
+        group_classification_completeness,
+        sample_proteins
+      FROM architecture_groups
+      ORDER BY frequency DESC, domain_count ASC
+      LIMIT 50
+    `
 
-    // Get summary statistics
-    const totalProteins = await prisma.protein.count({ where: proteinWhere })
-    const totalDomains = await prisma.domain.count({ where: domainWhere })
+    const results = await prisma.$queryRawUnsafe(architectureQuery)
 
-    const classifiedProteins = await prisma.protein.count({
-      where: {
-        ...proteinWhere,
-        domains: {
-          some: {
-            ...domainWhere,
-            t_group: { not: null }
-          }
-        }
-      }
-    })
+    // Transform results for frontend
+    const architectures = (results as any[]).map(row => ({
+      architecture_id: row.architecture_id,
+      pattern_name: generatePatternName(row.domain_count, row.t_groups),
+      domain_count: row.domain_count,
+      t_groups: row.t_groups,
+      frequency: row.frequency,
+      avg_confidence: row.group_avg_confidence,
+      classification_completeness: row.group_classification_completeness,
+      proteins: row.sample_proteins.map(p => ({
+        ...p,
+        domains: [] // Fetch separately if needed
+      }))
+    }))
 
-    const response: ArchitectureResponse = {
-      architectures,
-      statistics: {
-        total_proteins: totalProteins,
-        total_domains: totalDomains,
-        classified_chains: classifiedProteins,
-        unclassified_chains: totalProteins - classifiedProteins,
-        avg_domain_coverage: 75.0 // Placeholder - calculate based on your needs
-      }
-    }
-
-    return NextResponse.json(response)
-
+    return NextResponse.json({ architectures })
   } catch (error) {
-    console.error('Architecture API Error:', error)
-    return NextResponse.json(
-      { error: `Failed to fetch architecture data: ${error instanceof Error ? error.message : 'Unknown error'}` },
-      { status: 500 }
-    )
-  } finally {
-    await prisma.$disconnect()
+    // ... error handling
+  }
+}
+
+function generatePatternName(domainCount: number, tGroups: string[]): string {
+  if (domainCount === 1) {
+    return tGroups[0] === 'UNCLASSIFIED' ? 'Unclassified domain' : 'Single domain'
+  } else if (domainCount === 2) {
+    return 'Two-domain protein'
+  } else if (domainCount === 3) {
+    return 'Three-domain protein'
+  } else {
+    return 'Complex multi-domain'
   }
 }

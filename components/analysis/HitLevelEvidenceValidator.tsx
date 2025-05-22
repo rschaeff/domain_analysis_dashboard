@@ -58,10 +58,6 @@ export function HitLevelEvidenceValidator({
   const [selectedDomain, setSelectedDomain] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'overview' | 'evidence_analysis' | 'traceability'>('overview')
 
-  // Parsing state
-  const [parsingStatus, setParsingStatus] = useState<'not_started' | 'parsing' | 'completed' | 'error'>('not_started')
-  const [parsingError, setParsingError] = useState<string | null>(null)
-
   // Fetch filesystem evidence
   useEffect(() => {
     const fetchFilesystemEvidence = async () => {
@@ -82,7 +78,6 @@ export function HitLevelEvidenceValidator({
   const handleAnalysisComplete = (analysis: any[], summary: any) => {
     setSummaryData(summary)
     setCoverageAnalysis(analysis)
-    setParsingStatus('parsing')
 
     try {
       // Convert coverage analysis to hit validations format and add usage tracking
@@ -118,10 +113,8 @@ export function HitLevelEvidenceValidator({
       })
 
       setHitValidations(validations)
-      setParsingStatus('completed')
     } catch (err) {
-      setParsingError(err instanceof Error ? err.message : 'Error processing validations')
-      setParsingStatus('error')
+      console.error('Error processing validations:', err)
     }
   }
 
@@ -141,13 +134,6 @@ export function HitLevelEvidenceValidator({
       }
       return false
     })
-  }
-
-  // Trigger parsing
-  const triggerParsing = () => {
-    setParsingStatus('parsing')
-    setParsingError(null)
-    // This will be handled by the DomainSummaryParser component
   }
 
   // Calculate evidence metrics
@@ -296,181 +282,99 @@ export function HitLevelEvidenceValidator({
       id: 'overview',
       label: 'Pipeline Domains',
       icon: Eye,
-      description: 'Current domain predictions with 3D visualization',
-      requiresParsing: false
+      description: 'Current domain predictions with 3D visualization'
     },
     {
       id: 'evidence_analysis',
       label: 'Evidence Analysis',
       icon: Search,
-      description: 'Quality assessment and usage analysis of evidence hits',
-      requiresParsing: true,
+      description: 'Parse evidence files and analyze quality and usage',
       badge: evidenceMetrics.unused_usable_hits > 0 ? evidenceMetrics.unused_usable_hits : undefined
     },
     {
       id: 'traceability',
       label: 'Domain Traceability',
       icon: Activity,
-      description: 'Which evidence contributed to each domain prediction',
-      requiresParsing: true
+      description: 'Which evidence contributed to each domain prediction'
     }
   ]
 
   return (
     <div className="space-y-6">
-      {/* ALWAYS VISIBLE: Parsing Control & Status */}
-      <Card className="p-6 border-l-4 border-l-blue-500">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <FileText className="w-5 h-5 text-blue-600" />
-              <div>
-                <h3 className="font-semibold">Evidence File Analysis</h3>
-                <p className="text-sm text-gray-600">Parse domain summary files to analyze evidence quality and pipeline usage</p>
-              </div>
-            </div>
-
-            {parsingStatus === 'not_started' && (
-              <Badge variant="outline">Ready to Parse</Badge>
-            )}
-            {parsingStatus === 'parsing' && (
-              <Badge variant="secondary">
-                <LoadingSpinner size="sm" className="mr-1" />
-                Parsing...
-              </Badge>
-            )}
-            {parsingStatus === 'completed' && (
-              <Badge variant="default">
-                <CheckCircle className="w-4 h-4 mr-1" />
-                Analysis Complete
-              </Badge>
-            )}
-            {parsingStatus === 'error' && (
-              <Badge variant="destructive">
-                <XCircle className="w-4 h-4 mr-1" />
-                Parse Failed
-              </Badge>
-            )}
+      {/* Evidence Summary - Only show after successful parsing */}
+      {hitValidations.length > 0 && (
+        <Card className="p-6 border-l-4 border-l-green-500">
+          <div className="flex items-center gap-2 mb-4">
+            <CheckCircle className="w-4 h-4 text-green-600" />
+            <h3 className="font-semibold text-green-800">Evidence Analysis Complete</h3>
           </div>
 
-          <Button
-            onClick={triggerParsing}
-            disabled={parsingStatus === 'parsing'}
-            variant={parsingStatus === 'not_started' ? 'default' : 'outline'}
-          >
-            {parsingStatus === 'parsing' ? (
-              <LoadingSpinner size="sm" className="mr-2" />
-            ) : (
-              <Search className="w-4 h-4 mr-2" />
-            )}
-            {parsingStatus === 'not_started' ? 'Parse Evidence Files' : 'Reparse Files'}
-          </Button>
-        </div>
-
-        {/* Error Display */}
-        {parsingStatus === 'error' && parsingError && (
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded">
-            <div className="flex items-center gap-2 text-red-800">
-              <XCircle className="w-4 h-4" />
-              <span className="font-medium">Parsing Failed</span>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div className="text-center">
+              <div className="text-xl font-bold text-blue-600">{evidenceMetrics.total_hits}</div>
+              <div className="text-gray-600">Total Evidence Hits</div>
             </div>
-            <p className="text-red-700 text-sm mt-1">{parsingError}</p>
+            <div className="text-center">
+              <div className="text-xl font-bold text-green-600">{evidenceMetrics.usable_hits}</div>
+              <div className="text-gray-600">Usable for Boundaries</div>
+              <div className="text-xs text-gray-500">Good quality coordinates</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold text-purple-600">{evidenceMetrics.used_hits}</div>
+              <div className="text-gray-600">Used by Pipeline</div>
+              <div className="text-xs text-gray-500">Contributed to domains</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold text-orange-600">{evidenceMetrics.unused_usable_hits}</div>
+              <div className="text-gray-600">Unused but Usable</div>
+              <div className="text-xs text-gray-500">Potential missed evidence</div>
+            </div>
           </div>
-        )}
 
-        {/* Evidence Summary - Only show after successful parsing */}
-        {parsingStatus === 'completed' && (
-          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div className="text-center">
-                <div className="text-xl font-bold text-blue-600">{evidenceMetrics.total_hits}</div>
-                <div className="text-gray-600">Total Evidence Hits</div>
+          {/* Key Issues Alert */}
+          {evidenceMetrics.unused_usable_hits > 0 && (
+            <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <div className="flex items-center gap-2 text-orange-800">
+                <AlertCircle className="w-4 h-4" />
+                <span className="font-medium">
+                  {evidenceMetrics.unused_usable_hits} high-quality evidence hits were not used by the pipeline
+                </span>
               </div>
-              <div className="text-center">
-                <div className="text-xl font-bold text-green-600">{evidenceMetrics.usable_hits}</div>
-                <div className="text-gray-600">Usable for Boundaries</div>
-                <div className="text-xs text-gray-500">Good quality coordinates</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xl font-bold text-purple-600">{evidenceMetrics.used_hits}</div>
-                <div className="text-gray-600">Used by Pipeline</div>
-                <div className="text-xs text-gray-500">Contributed to domains</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xl font-bold text-orange-600">{evidenceMetrics.unused_usable_hits}</div>
-                <div className="text-gray-600">Unused but Usable</div>
-                <div className="text-xs text-gray-500">Potential missed evidence</div>
+              <div className="text-sm text-orange-700 mt-1">
+                This may indicate missed domain boundaries or classification opportunities
               </div>
             </div>
-
-            {/* Key Issues Alert */}
-            {evidenceMetrics.unused_usable_hits > 0 && (
-              <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                <div className="flex items-center gap-2 text-orange-800">
-                  <AlertCircle className="w-4 h-4" />
-                  <span className="font-medium">
-                    {evidenceMetrics.unused_usable_hits} high-quality evidence hits were not used by the pipeline
-                  </span>
-                </div>
-                <div className="text-sm text-orange-700 mt-1">
-                  This may indicate missed domain boundaries or classification opportunities
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {/* Hidden DomainSummaryParser - controlled by the parsing button */}
-      {parsingStatus === 'parsing' && (
-        <div style={{ display: 'none' }}>
-          <DomainSummaryParser
-            proteinId={proteinId}
-            filesystemEvidence={filesystemEvidence}
-            currentDomains={pipelineDomains}
-            sequenceLength={sequenceLength}
-            onAnalysisComplete={handleAnalysisComplete}
-          />
-        </div>
+          )}
+        </Card>
       )}
 
       {/* Navigation Tabs */}
       <Card className="p-0 overflow-hidden">
         <div className="border-b">
           <nav className="flex space-x-8 px-6">
-            {tabs.map((tab) => {
-              const disabled = tab.requiresParsing && parsingStatus !== 'completed'
-
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => !disabled && setActiveTab(tab.id as any)}
-                  disabled={disabled}
-                  className={`flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                    activeTab === tab.id && !disabled
-                      ? 'border-blue-500 text-blue-600'
-                      : disabled
-                      ? 'border-transparent text-gray-400 cursor-not-allowed'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  <tab.icon className="w-4 h-4" />
-                  <div className="text-left">
-                    <div className="flex items-center gap-2">
-                      {tab.label}
-                      {tab.badge && tab.badge > 0 && (
-                        <Badge variant="destructive" className="text-xs">
-                          {tab.badge}
-                        </Badge>
-                      )}
-                    </div>
-                    {tab.requiresParsing && parsingStatus !== 'completed' && (
-                      <div className="text-xs text-gray-400">Requires parsing</div>
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <tab.icon className="w-4 h-4" />
+                <div className="text-left">
+                  <div className="flex items-center gap-2">
+                    {tab.label}
+                    {tab.badge && tab.badge > 0 && (
+                      <Badge variant="destructive" className="text-xs">
+                        {tab.badge}
+                      </Badge>
                     )}
                   </div>
-                </button>
-              )
-            })}
+                </div>
+              </button>
+            ))}
           </nav>
         </div>
       </Card>
@@ -625,87 +529,40 @@ export function HitLevelEvidenceValidator({
 
       {activeTab === 'evidence_analysis' && (
         <div className="space-y-6">
-          {/* Evidence Categories - Two-column layout */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Domain Summary Parser - Always visible in this tab */}
+          <DomainSummaryParser
+            proteinId={proteinId}
+            filesystemEvidence={filesystemEvidence}
+            currentDomains={pipelineDomains}
+            sequenceLength={sequenceLength}
+            onAnalysisComplete={handleAnalysisComplete}
+          />
 
-            {/* LEFT: USABLE EVIDENCE */}
-            <Card className="p-6 border-l-4 border-l-green-500">
-              <div className="flex items-center gap-2 mb-4">
-                <CheckCircle className="w-5 h-5 text-green-600" />
-                <h4 className="text-lg font-semibold text-green-800">
-                  Usable Evidence ({evidenceMetrics.usable_hits})
-                </h4>
-              </div>
+          {/* Evidence Categories - Only show after parsing */}
+          {hitValidations.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-              {/* Sub-categories within usable */}
-              <div className="space-y-4">
-                <div className="p-3 bg-purple-50 rounded border border-purple-200">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-purple-800">Used by Pipeline ({evidenceMetrics.used_hits})</span>
-                    <Badge variant="default">INCORPORATED</Badge>
-                  </div>
-                  <div className="text-sm text-purple-700 mb-3">
-                    These hits were used to define domain boundaries and classifications
-                  </div>
-
-                  {/* Used hits table */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left p-2">Type</th>
-                          <th className="text-left p-2">Hit ID</th>
-                          <th className="text-left p-2">Range</th>
-                          <th className="text-left p-2">Quality</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {hitValidations
-                          .filter(h => h.validation_results?.is_usable_for_boundaries && h.contributes_to_pipeline_domains)
-                          .slice(0, 5)
-                          .map((hit, i) => (
-                            <tr key={i} className="border-b">
-                              <td className="p-2">
-                                <Badge variant="outline" className="text-xs">
-                                  {hit.evidence_type?.toUpperCase()}
-                                </Badge>
-                              </td>
-                              <td className="p-2 font-mono">
-                                {hit.hit.type === 'hhsearch' ? hit.hit.hit_id :
-                                 hit.hit.type === 'domain_blast' ? hit.hit.domain_id :
-                                 `${hit.hit.pdb_id}_${hit.hit.chain_id}`}
-                              </td>
-                              <td className="p-2 font-mono">{hit.hit.query_range}</td>
-                              <td className="p-2">
-                                <Badge variant={
-                                  hit.validation_results.coverage_quality === 'excellent' ? 'default' : 'secondary'
-                                } className="text-xs">
-                                  {hit.validation_results.coverage_quality}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                    {evidenceMetrics.used_hits > 5 && (
-                      <div className="text-xs text-purple-600 mt-2">
-                        ... and {evidenceMetrics.used_hits - 5} more
-                      </div>
-                    )}
-                  </div>
+              {/* LEFT: USABLE EVIDENCE */}
+              <Card className="p-6 border-l-4 border-l-green-500">
+                <div className="flex items-center gap-2 mb-4">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                  <h4 className="text-lg font-semibold text-green-800">
+                    Usable Evidence ({evidenceMetrics.usable_hits})
+                  </h4>
                 </div>
 
-                <div className="p-3 bg-orange-50 rounded border border-orange-200">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-orange-800">Unused but Usable ({evidenceMetrics.unused_usable_hits})</span>
-                    <Badge variant="destructive">MISSED</Badge>
-                  </div>
-                  <div className="text-sm text-orange-700 mb-3">
-                    High-quality evidence not incorporated - potential missed domains or boundaries
-                  </div>
+                {/* Sub-categories within usable */}
+                <div className="space-y-4">
+                  <div className="p-3 bg-purple-50 rounded border border-purple-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-purple-800">Used by Pipeline ({evidenceMetrics.used_hits})</span>
+                      <Badge variant="default">INCORPORATED</Badge>
+                    </div>
+                    <div className="text-sm text-purple-700 mb-3">
+                      These hits were used to define domain boundaries and classifications
+                    </div>
 
-                  {/* Unused usable hits table */}
-                  {evidenceMetrics.unused_usable_hits > 0 ? (
+                    {/* Used hits table */}
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
@@ -718,7 +575,7 @@ export function HitLevelEvidenceValidator({
                         </thead>
                         <tbody>
                           {hitValidations
-                            .filter(h => h.validation_results?.is_usable_for_boundaries && !h.contributes_to_pipeline_domains)
+                            .filter(h => h.validation_results?.is_usable_for_boundaries && h.contributes_to_pipeline_domains)
                             .slice(0, 5)
                             .map((hit, i) => (
                               <tr key={i} className="border-b">
@@ -744,126 +601,186 @@ export function HitLevelEvidenceValidator({
                             ))}
                         </tbody>
                       </table>
-                      {evidenceMetrics.unused_usable_hits > 5 && (
-                        <div className="text-xs text-orange-600 mt-2">
-                          ... and {evidenceMetrics.unused_usable_hits - 5} more
+                      {evidenceMetrics.used_hits > 5 && (
+                        <div className="text-xs text-purple-600 mt-2">
+                          ... and {evidenceMetrics.used_hits - 5} more
                         </div>
                       )}
                     </div>
-                  ) : (
-                    <div className="text-sm text-green-600 bg-green-50 p-2 rounded">
-                      ✓ All usable evidence was incorporated into pipeline domains
+                  </div>
+
+                  <div className="p-3 bg-orange-50 rounded border border-orange-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-orange-800">Unused but Usable ({evidenceMetrics.unused_usable_hits})</span>
+                      <Badge variant="destructive">MISSED</Badge>
                     </div>
-                  )}
-                </div>
-              </div>
-            </Card>
-
-            {/* RIGHT: UNUSABLE EVIDENCE */}
-            <Card className="p-6 border-l-4 border-l-red-500">
-              <div className="flex items-center gap-2 mb-4">
-                <XCircle className="w-5 h-5 text-red-600" />
-                <h4 className="text-lg font-semibold text-red-800">
-                  Unusable Evidence ({evidenceMetrics.total_hits - evidenceMetrics.usable_hits})
-                </h4>
-              </div>
-
-              <div className="text-sm text-gray-600 mb-4">
-                Evidence hits that failed quality validation and were excluded from domain determination
-              </div>
-
-              {/* Breakdown by reason */}
-              <div className="space-y-2 text-sm mb-4">
-                <div className="flex justify-between">
-                  <span>Too short (fragments):</span>
-                  <span className="font-medium">{evidenceMetrics.fragments}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Poor quality:</span>
-                  <span className="font-medium">{evidenceMetrics.poor_quality}</span>
-                </div>
-              </div>
-
-              {/* Unusable hits table */}
-              {(evidenceMetrics.total_hits - evidenceMetrics.usable_hits) > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left p-2">Type</th>
-                        <th className="text-left p-2">Hit ID</th>
-                        <th className="text-left p-2">Range</th>
-                        <th className="text-left p-2">Issue</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {hitValidations
-                        .filter(h => !h.validation_results?.is_usable_for_boundaries)
-                        .slice(0, 5)
-                        .map((hit, i) => (
-                          <tr key={i} className="border-b">
-                            <td className="p-2">
-                              <Badge variant="outline" className="text-xs">
-                                {hit.evidence_type?.toUpperCase()}
-                              </Badge>
-                            </td>
-                            <td className="p-2 font-mono">
-                              {hit.hit.type === 'hhsearch' ? hit.hit.hit_id :
-                               hit.hit.type === 'domain_blast' ? hit.hit.domain_id :
-                               `${hit.hit.pdb_id}_${hit.hit.chain_id}`}
-                            </td>
-                            <td className="p-2 font-mono">{hit.hit.query_range}</td>
-                            <td className="p-2">
-                              <Badge variant="destructive" className="text-xs">
-                                {hit.validation_results.coverage_quality}
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                  {(evidenceMetrics.total_hits - evidenceMetrics.usable_hits) > 5 && (
-                    <div className="text-xs text-red-600 mt-2">
-                      ... and {(evidenceMetrics.total_hits - evidenceMetrics.usable_hits) - 5} more
+                    <div className="text-sm text-orange-700 mb-3">
+                      High-quality evidence not incorporated - potential missed domains or boundaries
                     </div>
-                  )}
+
+                    {/* Unused usable hits table */}
+                    {evidenceMetrics.unused_usable_hits > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="text-left p-2">Type</th>
+                              <th className="text-left p-2">Hit ID</th>
+                              <th className="text-left p-2">Range</th>
+                              <th className="text-left p-2">Quality</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {hitValidations
+                              .filter(h => h.validation_results?.is_usable_for_boundaries && !h.contributes_to_pipeline_domains)
+                              .slice(0, 5)
+                              .map((hit, i) => (
+                                <tr key={i} className="border-b">
+                                  <td className="p-2">
+                                    <Badge variant="outline" className="text-xs">
+                                      {hit.evidence_type?.toUpperCase()}
+                                    </Badge>
+                                  </td>
+                                  <td className="p-2 font-mono">
+                                    {hit.hit.type === 'hhsearch' ? hit.hit.hit_id :
+                                     hit.hit.type === 'domain_blast' ? hit.hit.domain_id :
+                                     `${hit.hit.pdb_id}_${hit.hit.chain_id}`}
+                                  </td>
+                                  <td className="p-2 font-mono">{hit.hit.query_range}</td>
+                                  <td className="p-2">
+                                    <Badge variant={
+                                      hit.validation_results.coverage_quality === 'excellent' ? 'default' : 'secondary'
+                                    } className="text-xs">
+                                      {hit.validation_results.coverage_quality}
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                        {evidenceMetrics.unused_usable_hits > 5 && (
+                          <div className="text-xs text-orange-600 mt-2">
+                            ... and {evidenceMetrics.unused_usable_hits - 5} more
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-green-600 bg-green-50 p-2 rounded">
+                        ✓ All usable evidence was incorporated into pipeline domains
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </Card>
-          </div>
+              </Card>
+
+              {/* RIGHT: UNUSABLE EVIDENCE */}
+              <Card className="p-6 border-l-4 border-l-red-500">
+                <div className="flex items-center gap-2 mb-4">
+                  <XCircle className="w-5 h-5 text-red-600" />
+                  <h4 className="text-lg font-semibold text-red-800">
+                    Unusable Evidence ({evidenceMetrics.total_hits - evidenceMetrics.usable_hits})
+                  </h4>
+                </div>
+
+                <div className="text-sm text-gray-600 mb-4">
+                  Evidence hits that failed quality validation and were excluded from domain determination
+                </div>
+
+                {/* Breakdown by reason */}
+                <div className="space-y-2 text-sm mb-4">
+                  <div className="flex justify-between">
+                    <span>Too short (fragments):</span>
+                    <span className="font-medium">{evidenceMetrics.fragments}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Poor quality:</span>
+                    <span className="font-medium">{evidenceMetrics.poor_quality}</span>
+                  </div>
+                </div>
+
+                {/* Unusable hits table */}
+                {(evidenceMetrics.total_hits - evidenceMetrics.usable_hits) > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left p-2">Type</th>
+                          <th className="text-left p-2">Hit ID</th>
+                          <th className="text-left p-2">Range</th>
+                          <th className="text-left p-2">Issue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {hitValidations
+                          .filter(h => !h.validation_results?.is_usable_for_boundaries)
+                          .slice(0, 5)
+                          .map((hit, i) => (
+                            <tr key={i} className="border-b">
+                              <td className="p-2">
+                                <Badge variant="outline" className="text-xs">
+                                  {hit.evidence_type?.toUpperCase()}
+                                </Badge>
+                              </td>
+                              <td className="p-2 font-mono">
+                                {hit.hit.type === 'hhsearch' ? hit.hit.hit_id :
+                                 hit.hit.type === 'domain_blast' ? hit.hit.domain_id :
+                                 `${hit.hit.pdb_id}_${hit.hit.chain_id}`}
+                              </td>
+                              <td className="p-2 font-mono">{hit.hit.query_range}</td>
+                              <td className="p-2">
+                                <Badge variant="destructive" className="text-xs">
+                                  {hit.validation_results.coverage_quality}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                    {(evidenceMetrics.total_hits - evidenceMetrics.usable_hits) > 5 && (
+                      <div className="text-xs text-red-600 mt-2">
+                        ... and {(evidenceMetrics.total_hits - evidenceMetrics.usable_hits) - 5} more
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            </div>
+          )}
 
           {/* Key Insights Section */}
-          <Card className="p-6 bg-yellow-50 border-yellow-200">
-            <div className="flex items-center gap-2 mb-3">
-              <Info className="w-5 h-5 text-yellow-600" />
-              <h4 className="font-semibold text-yellow-800">Pipeline Analysis Insights</h4>
-            </div>
+          {hitValidations.length > 0 && (
+            <Card className="p-6 bg-yellow-50 border-yellow-200">
+              <div className="flex items-center gap-2 mb-3">
+                <Info className="w-5 h-5 text-yellow-600" />
+                <h4 className="font-semibold text-yellow-800">Pipeline Analysis Insights</h4>
+              </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-              <div>
-                <div className="font-medium text-yellow-800 mb-1">Evidence Utilization</div>
-                <div className="text-yellow-700">
-                  {evidenceMetrics.usable_hits > 0 ?
-                    Math.round((evidenceMetrics.used_hits / evidenceMetrics.usable_hits) * 100) : 0}% of usable evidence was incorporated
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <div className="font-medium text-yellow-800 mb-1">Evidence Utilization</div>
+                  <div className="text-yellow-700">
+                    {evidenceMetrics.usable_hits > 0 ?
+                      Math.round((evidenceMetrics.used_hits / evidenceMetrics.usable_hits) * 100) : 0}% of usable evidence was incorporated
+                  </div>
+                </div>
+                <div>
+                  <div className="font-medium text-yellow-800 mb-1">Quality Rate</div>
+                  <div className="text-yellow-700">
+                    {evidenceMetrics.total_hits > 0 ?
+                      Math.round((evidenceMetrics.usable_hits / evidenceMetrics.total_hits) * 100) : 0}% of evidence passed quality validation
+                  </div>
+                </div>
+                <div>
+                  <div className="font-medium text-yellow-800 mb-1">Potential Issues</div>
+                  <div className="text-yellow-700">
+                    {evidenceMetrics.unused_usable_hits > 0 ?
+                      `${evidenceMetrics.unused_usable_hits} missed opportunities` :
+                      'No obvious issues detected'}
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="font-medium text-yellow-800 mb-1">Quality Rate</div>
-                <div className="text-yellow-700">
-                  {evidenceMetrics.total_hits > 0 ?
-                    Math.round((evidenceMetrics.usable_hits / evidenceMetrics.total_hits) * 100) : 0}% of evidence passed quality validation
-                </div>
-              </div>
-              <div>
-                <div className="font-medium text-yellow-800 mb-1">Potential Issues</div>
-                <div className="text-yellow-700">
-                  {evidenceMetrics.unused_usable_hits > 0 ?
-                    `${evidenceMetrics.unused_usable_hits} missed opportunities` :
-                    'No obvious issues detected'}
-                </div>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          )}
         </div>
       )}
 

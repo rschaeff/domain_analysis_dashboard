@@ -6,26 +6,17 @@ import { useState, useEffect } from 'react'
 import { DomainSummary, ProteinOverview } from '@/lib/types'
 import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
 import { MultiTrackDomainVisualization } from '@/components/visualization/MultiTrackDomainVisualization'
-import { DataTable } from '@/components/common/DataTable'
 import { SequenceViewer } from '@/components/visualization/SequenceViewer'
-import { StructureViewer } from '@/components/visualization/StructureViewer'
+import { EnhancedStructureViewer } from '@/components/visualization/EnhancedStructureViewer'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { ArrowLeft, Eye, BarChart3, Download, Edit } from 'lucide-react'
+import { ArrowLeft, BarChart3, Eye, Download, Edit } from 'lucide-react'
 
 // Domain colors with high contrast for visualization
 const DOMAIN_COLORS = [
-  '#FF0000', // Red
-  '#0066FF', // Blue
-  '#00CC00', // Green
-  '#FF6600', // Orange
-  '#9900CC', // Purple
-  '#00CCCC', // Cyan
-  '#CC6600', // Brown
-  '#FF99CC', // Pink
-  '#666666', // Gray
-  '#336699', // Steel Blue
+  '#FF0000', '#0066FF', '#00CC00', '#FF6600', '#9900CC', '#00CCCC',
+  '#CC6600', '#FF99CC', '#666666', '#336699'
 ]
 
 export default function ProteinDetailPage() {
@@ -34,10 +25,9 @@ export default function ProteinDetailPage() {
   const proteinId = params.id as string
 
   const [protein, setProtein] = useState<ProteinOverview | null>(null)
-  const [domains, setDomains] = useState<DomainSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'domains' | 'sequence' | 'structure'>('structure')
+  const [activeTab, setActiveTab] = useState<'overview' | 'sequence' | 'structure'>('structure')
 
   // Helper function to create domain for viewer
   const createDomainForViewer = (domain: any, index: number) => {
@@ -70,13 +60,6 @@ export default function ProteinDetailPage() {
         pdbEnd = pdbParts[1];
       }
     }
-
-    console.log(`[DOMAIN MAPPING] Putative domain ${index}:`, {
-      id: domain.id,
-      start, end,
-      pdbRange, pdbStart, pdbEnd,
-      originalDomain: domain
-    });
 
     return {
       id: domain.id?.toString() || `putative_${index}`,
@@ -116,23 +99,8 @@ export default function ProteinDetailPage() {
         const proteinData = await proteinResponse.json()
 
         console.log('[FRONTEND PROTEIN] Full response:', proteinData)
-        console.log('[FRONTEND PROTEIN] domain_count:', proteinData.domain_count)
-        console.log('[FRONTEND PROTEIN] putative_domains length:', proteinData.putative_domains?.length)
-        console.log('[FRONTEND PROTEIN] putative_domains sample:', proteinData.putative_domains?.[0])
-        console.log('[FRONTEND PROTEIN] reference_domains length:', proteinData.reference_domains?.length)
-        console.log('[FRONTEND PROTEIN] reference_domains sample:', proteinData.reference_domains?.[0])
-        console.log('[FRONTEND PROTEIN] all_domains length:', proteinData.all_domains?.length)
-
         setProtein(proteinData)
 
-        // Fetch domains for this protein
-        const domainsResponse = await fetch(`/api/proteins/${proteinId}/domains`)
-        if (domainsResponse.ok) {
-          const domainsData = await domainsResponse.json()
-          console.log('[FRONTEND DOMAINS] Domains route returned:', domainsData.length, 'domains')
-          console.log('[FRONTEND DOMAINS] Sample domain:', domainsData[0])
-          setDomains(domainsData)
-        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred')
       } finally {
@@ -149,8 +117,11 @@ export default function ProteinDetailPage() {
     router.back()
   }
 
-  const handleDomainClick = (domain: DomainSummary) => {
-    router.push(`/domains/${domain.id}`)
+  const handleDomainClick = (domain: any) => {
+    // Navigate to domain detail page if domain has an ID
+    if (domain.id) {
+      router.push(`/domains/${domain.id}`)
+    }
   }
 
   const handleDownload = () => {
@@ -189,73 +160,10 @@ export default function ProteinDetailPage() {
   // Mock sequence data (would come from API)
   const mockSequence = 'MKWVTFISLLLLFSSAYSRGVFRRDTHKSEIAHRFKDLGEEHFKGLVLIAFSQYLQQCPFDEHVKLVNELTEFAKTCVADESHAGCEKSLHTLFGDELCKVASLRETYGDMADCCEKQEPERNECFLSHKDDSPDLPKLKPDPNTLCDEFKADEKKFWGKYLYEIARRHPYFYAPELLYYANKYNGVFQECCQAEDKGACLLPKIETMREKVLASSARQRLRCASIQKFGERALKAWSVARLSQKFPKAEFVEVTKLVTDLTKVHKECCHGDLLECADDRADLAKYICDNQDTISSKLKECCDKPLLEKSHCIAEVEKDAIPENLPPLTADFAEDKDVCKNYQEAKDAFLGSFLYEYSRRHPEYAVSVLLRLAKEYEATLEECCAKDDPHACYSTVFDKLKHLVDEPQNLIKQNCDQFEKLGEYGFQNALIVRYTRKVPQVSTPTLVEVSRSLGKVGTRCCTKPESERMPCTEDYLSLILNRLCVLHEKTPVSEKVTKCCTESLVNRRPCFSALTPDETYVPKAFDEKLFTFHADICTLPDTEKQIKKQTALVELLKHKPKATEEQLKTVMENFVAFVDKCCAADDKEACFAVEGPKLVVSTQTALA'
 
-  // Table columns for domains
-  const domainColumns = [
-    {
-      key: 'domain_number',
-      label: 'Domain',
-      sortable: true,
-      render: (value: number) => <span className="font-mono">{value}</span>
-    },
-    {
-      key: 'range',
-      label: 'Range',
-      render: (value: string) => <span className="font-mono text-sm">{value}</span>
-    },
-    {
-      key: 'confidence',
-      label: 'Confidence',
-      sortable: true,
-      render: (value: number | null) => {
-        if (!value) return <span className="text-gray-400">N/A</span>
-        const color = value >= 0.8 ? 'text-green-600' : value >= 0.5 ? 'text-yellow-600' : 'text-red-600'
-        return <span className={`font-medium ${color}`}>{value.toFixed(3)}</span>
-      }
-    },
-    {
-      key: 't_group',
-      label: 'Classification',
-      render: (value: string | null) => (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${
-          value ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
-        }`}>
-          {value || 'Unclassified'}
-        </span>
-      )
-    },
-    {
-      key: 'evidence_count',
-      label: 'Evidence',
-      sortable: true,
-      render: (value: number, domain: DomainSummary) => (
-        <div className="text-center">
-          <span className="font-medium">{value}</span>
-          <div className="text-xs text-gray-500">{domain.evidence_types}</div>
-        </div>
-      )
-    },
-    {
-      key: 'actions',
-      label: 'Actions',
-      render: (_: any, domain: DomainSummary) => (
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleDomainClick(domain)}
-          >
-            <Eye className="w-4 h-4" />
-          </Button>
-        </div>
-      )
-    }
-  ]
-
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'domains', label: 'Domains', icon: Eye },
-    { id: 'sequence', label: 'Sequence', icon: Eye },
-    { id: 'structure', label: 'Structure', icon: Eye }
+    { id: 'structure', label: 'Structure & Domains', icon: Eye },
+    { id: 'sequence', label: 'Sequence', icon: Eye }
   ]
 
   return (
@@ -383,46 +291,31 @@ export default function ProteinDetailPage() {
             </div>
           )}
 
-          {activeTab === 'domains' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Domain Details</h3>
-                <span className="text-sm text-gray-500">{domains.length} domains</span>
-              </div>
-              <DataTable
-                data={domains}
-                columns={domainColumns}
-                onRowClick={handleDomainClick}
-              />
-            </div>
+          {activeTab === 'structure' && (
+            <EnhancedStructureViewer
+              pdb_id={protein.pdb_id}
+              chain_id={protein.chain_id}
+              domains={
+                // Only use putative domains for structure visualization
+                (protein.putative_domains || []).map((domain, index) =>
+                  createDomainForViewer(domain, index)
+                )
+              }
+              onDomainClick={handleDomainClick}
+            />
           )}
 
           {activeTab === 'sequence' && (
             <SequenceViewer
               protein_id={`${protein.pdb_id}_${protein.chain_id}`}
               sequence={mockSequence}
-              domains={domains.map((domain, index) => ({
+              domains={(protein.putative_domains || []).map((domain, index) => ({
                 start: domain.start_pos,
                 end: domain.end_pos,
                 label: `Domain ${domain.domain_number}`,
                 color: `hsl(${index * 137.5 % 360}, 70%, 50%)`
               }))}
               features={[]}
-            />
-          )}
-
-          {activeTab === 'structure' && (
-            <StructureViewer
-              pdb_id={protein.pdb_id}
-              chain_id={protein.chain_id}
-              domains={
-                // Only use putative domains for structure visualization
-                // since they represent actual predicted domains for THIS protein
-                (protein.putative_domains || []).map((domain, index) =>
-                  createDomainForViewer(domain, index)
-                )
-              }
-              onDomainClick={handleDomainClick}
             />
           )}
         </div>

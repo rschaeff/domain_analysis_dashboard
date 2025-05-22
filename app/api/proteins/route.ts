@@ -1,3 +1,4 @@
+// app/api/proteins/route.ts (Updated sorting section)
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@/lib/config'
@@ -17,6 +18,10 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
     const size = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(searchParams.get('size') || DEFAULT_PAGE_SIZE.toString())))
     const skip = (page - 1) * size
+
+    // Parse sorting parameters
+    const sort = searchParams.get('sort') || 'recent'
+    const sortDirection = searchParams.get('sort_dir') || 'desc'
 
     // Parse filters
     const filters: any = {}
@@ -49,9 +54,9 @@ export async function GET(request: NextRequest) {
       filters.batch_id = parseInt(searchParams.get('batch_id')!)
     }
 
-    // Build the base query
+    // Build the base query with better temporal information
     let baseQuery = `
-      SELECT 
+      SELECT
         p.id,
         p.pdb_id,
         p.chain_id,
@@ -68,7 +73,7 @@ export async function GET(request: NextRequest) {
         COUNT(CASE WHEN d.t_group IS NOT NULL THEN 1 END) as fully_classified_domains,
         COUNT(CASE WHEN de.id IS NOT NULL THEN 1 END) as domains_with_evidence,
         -- Calculate coverage (sum of domain lengths / sequence length)
-        CASE 
+        CASE
           WHEN p.length > 0 AND COUNT(d.id) > 0 THEN
             COALESCE(SUM(d.end_pos - d.start_pos + 1)::float / p.length, 0)
           ELSE 0
@@ -78,7 +83,13 @@ export async function GET(request: NextRequest) {
         CASE WHEN COUNT(d.id) > 0 THEN true ELSE false END as is_classified,
         -- Batch and reference information
         MAX(pp.batch_id) as batch_id,
-        MAX(pp.reference_version) as reference_version
+        MAX(pp.reference_version) as reference_version,
+        MAX(pp.timestamp) as processing_date,
+        -- Quality metrics
+        AVG(d.confidence) as avg_confidence,
+        MAX(d.confidence) as best_confidence,
+        -- Recency information
+        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MAX(pp.timestamp))) / 86400.0 as days_since_processing
       FROM pdb_analysis.protein p
       LEFT JOIN pdb_analysis.domain d ON p.id = d.protein_id
       LEFT JOIN pdb_analysis.domain_evidence de ON d.id = de.domain_id
@@ -131,9 +142,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Add GROUP BY clause
-    baseQuery += ` 
-      GROUP BY 
-        p.id, p.pdb_id, p.chain_id, p.source_id, p.unp_acc, 
+    baseQuery += `
+      GROUP BY
+        p.id, p.pdb_id, p.chain_id, p.source_id, p.unp_acc,
         p.name, p.type, p.tax_id, p.length, p.created_at, p.updated_at
     `
 
@@ -146,8 +157,37 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Add ORDER BY
-    baseQuery += ' ORDER BY p.pdb_id, p.chain_id'
+    // Build ORDER BY clause based on sort parameter
+    let orderByClause = ''
+    switch (sort) {
+      case 'recent':
+        orderByClause = 'ORDER BY processing_date DESC NULLS LAST, batch_id DESC NULLS LAST, p.pdb_id, p.chain_id'
+        break
+      case 'batch':
+        orderByClause = 'ORDER BY batch_id DESC NULLS LAST, processing_date DESC NULLS LAST, p.pdb_id, p.chain_id'
+        break
+      case 'confidence':
+        orderByClause = `ORDER BY best_confidence ${sortDirection.toUpperCase()} NULLS LAST, processing_date DESC NULLS LAST, p.pdb_id, p.chain_id`
+        break
+      case 'coverage':
+        orderByClause = `ORDER BY coverage ${sortDirection.toUpperCase()}, processing_date DESC NULLS LAST, p.pdb_id, p.chain_id`
+        break
+      case 'domains':
+        orderByClause = `ORDER BY domain_count ${sortDirection.toUpperCase()}, processing_date DESC NULLS LAST, p.pdb_id, p.chain_id`
+        break
+      case 'length':
+        orderByClause = `ORDER BY p.length ${sortDirection.toUpperCase()}, processing_date DESC NULLS LAST, p.pdb_id, p.chain_id`
+        break
+      case 'alphabetic':
+        orderByClause = 'ORDER BY p.pdb_id, p.chain_id'
+        break
+      default:
+        // Default to recent first
+        orderByClause = 'ORDER BY processing_date DESC NULLS LAST, batch_id DESC NULLS LAST, p.pdb_id, p.chain_id'
+    }
+
+    // Add ORDER BY to the query
+    baseQuery += ' ' + orderByClause
 
     // Calculate statistics for filtered dataset
     const statsQuery = `
@@ -156,7 +196,8 @@ export async function GET(request: NextRequest) {
         COUNT(CASE WHEN domain_count > 0 THEN 1 END) as classified_proteins,
         COUNT(CASE WHEN domain_count = 0 THEN 1 END) as unclassified_proteins,
         AVG(CASE WHEN domain_count > 0 THEN domain_count END) as avg_domains_per_protein,
-        AVG(sequence_length) as avg_sequence_length
+        AVG(sequence_length) as avg_sequence_length,
+        COUNT(CASE WHEN days_since_processing <= 7 THEN 1 END) as recent_proteins
       FROM (
         ${baseQuery}
       ) AS protein_stats
@@ -168,8 +209,18 @@ export async function GET(request: NextRequest) {
       prisma.$queryRawUnsafe(statsQuery, ...queryParams.slice(0, whereConditions.length))
     ])
 
-    // Serialize results to handle BigInt
-    const serializedResults = serializeBigInt(results)
+    // Serialize results to handle BigInt and add computed fields
+    const serializedResults = serializeBigInt(results).map((protein: any) => ({
+      ...protein,
+      // Add helpful computed fields
+      days_old: Math.floor(Number(protein.days_since_processing || 0)),
+      is_recent: Number(protein.days_since_processing || 999) < 7,
+      confidence_level: protein.best_confidence >= 0.8 ? 'high' :
+                       protein.best_confidence >= 0.5 ? 'medium' : 'low',
+      classification_completeness: protein.domain_count > 0 ?
+        protein.fully_classified_domains / protein.domain_count : 0
+    }))
+
     const stats = statsResult as any[]
 
     const statistics = {
@@ -177,10 +228,26 @@ export async function GET(request: NextRequest) {
       classifiedProteins: Number(stats[0]?.classified_proteins || 0),
       unclassifiedProteins: Number(stats[0]?.unclassified_proteins || 0),
       avgDomainsPerProtein: Number(stats[0]?.avg_domains_per_protein || 0),
-      avgSequenceLength: Number(stats[0]?.avg_sequence_length || 0)
+      avgSequenceLength: Number(stats[0]?.avg_sequence_length || 0),
+      recentProteins: Number(stats[0]?.recent_proteins || 0)
     }
 
     const total = statistics.totalProteins
+
+    // Add sorting metadata
+    const sortingInfo = {
+      current_sort: sort,
+      sort_direction: sortDirection,
+      available_sorts: [
+        { key: 'recent', label: 'Most Recent', description: 'Recently processed proteins first' },
+        { key: 'batch', label: 'Latest Batch', description: 'Newest batches first' },
+        { key: 'confidence', label: 'Best Confidence', description: 'Highest confidence first' },
+        { key: 'coverage', label: 'Coverage', description: 'Best domain coverage first' },
+        { key: 'domains', label: 'Domain Count', description: 'Most domains first' },
+        { key: 'length', label: 'Sequence Length', description: 'Longest sequences first' },
+        { key: 'alphabetic', label: 'Alphabetic', description: 'PDB ID alphabetically' }
+      ]
+    }
 
     return NextResponse.json({
       data: serializedResults,
@@ -190,7 +257,8 @@ export async function GET(request: NextRequest) {
         total,
         totalPages: Math.ceil(total / size)
       },
-      statistics
+      statistics,
+      sorting: sortingInfo
     })
 
   } catch (error) {

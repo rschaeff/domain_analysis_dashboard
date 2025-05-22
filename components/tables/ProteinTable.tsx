@@ -14,7 +14,11 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight as ChevronRightIcon,
-  Database
+  Database,
+  Clock,
+  Zap,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react'
 
 interface ProteinSummary {
@@ -26,24 +30,28 @@ interface ProteinSummary {
   batch_id: number
   reference_version: string
   is_classified: boolean
-  
+
   // Domain summary
   domain_count: number
   classified_domains: number
   avg_confidence: number
   best_confidence: number
   coverage: number
-  
+
   // Evidence summary
   total_evidence_count: number
   evidence_types: string
   has_chain_blast: boolean
   has_domain_blast: boolean
   has_hhsearch: boolean
-  
+
   // Processing info
   processing_date: string
-  
+  days_old?: number
+  is_recent?: boolean
+  confidence_level?: 'high' | 'medium' | 'low'
+  classification_status?: string
+
   // Individual domains (loaded on expansion)
   domains?: DomainDetails[]
 }
@@ -73,31 +81,37 @@ interface ProteinTableProps {
   pagination: PaginationParams
   onPageChange: (page: number) => void
   onProteinClick: (protein: ProteinSummary) => void
+  sortBy?: string
+  sortDirection?: 'asc' | 'desc'
+  onSortChange?: (sortKey: string) => void
   loading?: boolean
 }
 
-export function ProteinTable({ 
-  proteins, 
-  pagination, 
-  onPageChange, 
+export function ProteinTable({
+  proteins,
+  pagination,
+  onPageChange,
   onProteinClick,
-  loading = false 
+  sortBy = 'recent',
+  sortDirection = 'desc',
+  onSortChange,
+  loading = false
 }: ProteinTableProps) {
   const [expandedProteins, setExpandedProteins] = useState<Set<string>>(new Set())
   const [loadingDomains, setLoadingDomains] = useState<Set<string>>(new Set())
 
   const toggleProteinExpansion = async (protein: ProteinSummary) => {
     const newExpanded = new Set(expandedProteins)
-    
+
     if (newExpanded.has(protein.id)) {
       newExpanded.delete(protein.id)
     } else {
       newExpanded.add(protein.id)
-      
+
       // Load domain details if not already loaded
       if (!protein.domains) {
         setLoadingDomains(prev => new Set([...prev, protein.id]))
-        
+
         try {
           const response = await fetch(`/api/proteins/${protein.source_id}/domains`)
           if (response.ok) {
@@ -116,13 +130,37 @@ export function ProteinTable({
         }
       }
     }
-    
+
     setExpandedProteins(newExpanded)
   }
 
+  const handleSort = (sortKey: string) => {
+    if (onSortChange) {
+      onSortChange(sortKey)
+    }
+  }
+
+  const renderSortableHeader = (label: string, sortKey: string, className = '') => (
+    <th className={`text-left py-3 px-4 font-medium text-gray-700 ${className}`}>
+      <button
+        onClick={() => handleSort(sortKey)}
+        className={`flex items-center gap-1 hover:text-blue-600 transition-colors ${
+          sortBy === sortKey ? 'text-blue-600' : ''
+        }`}
+      >
+        {label}
+        {sortBy === sortKey && (
+          sortDirection === 'desc' ?
+            <ArrowDown className="w-4 h-4" /> :
+            <ArrowUp className="w-4 h-4" />
+        )}
+      </button>
+    </th>
+  )
+
   const renderConfidenceBadge = (confidence: number | null) => {
     if (!confidence) return <Badge variant="outline">N/A</Badge>
-    
+
     if (confidence >= 0.8) {
       return <Badge className="bg-green-100 text-green-800">{confidence.toFixed(2)}</Badge>
     } else if (confidence >= 0.5) {
@@ -141,7 +179,7 @@ export function ProteinTable({
         </div>
       )
     }
-    
+
     if (protein.classified_domains === protein.domain_count && protein.domain_count > 0) {
       return (
         <div className="flex items-center gap-2">
@@ -150,7 +188,7 @@ export function ProteinTable({
         </div>
       )
     }
-    
+
     return (
       <div className="flex items-center gap-2">
         <AlertCircle className="w-4 h-4 text-yellow-500" />
@@ -164,19 +202,19 @@ export function ProteinTable({
   const renderEvidenceIndicators = (protein: ProteinSummary) => {
     return (
       <div className="flex gap-1">
-        <Badge 
+        <Badge
           variant={protein.has_chain_blast ? "default" : "outline"}
           className={`text-xs ${protein.has_chain_blast ? 'bg-blue-500' : 'text-gray-400'}`}
         >
           CB
         </Badge>
-        <Badge 
+        <Badge
           variant={protein.has_domain_blast ? "default" : "outline"}
           className={`text-xs ${protein.has_domain_blast ? 'bg-purple-500' : 'text-gray-400'}`}
         >
           DB
         </Badge>
-        <Badge 
+        <Badge
           variant={protein.has_hhsearch ? "default" : "outline"}
           className={`text-xs ${protein.has_hhsearch ? 'bg-green-500' : 'text-gray-400'}`}
         >
@@ -186,18 +224,40 @@ export function ProteinTable({
     )
   }
 
+  const renderProcessingInfo = (protein: ProteinSummary) => {
+    const daysOld = protein.days_old || 0
+    const isRecent = protein.is_recent || daysOld < 7
+
+    return (
+      <div className="text-sm">
+        <div className="flex items-center gap-1">
+          <span className="font-medium">#{protein.batch_id}</span>
+          {isRecent && <Zap className="w-3 h-3 text-green-500" title="Recent" />}
+        </div>
+        <div className="text-xs text-gray-500 flex items-center gap-1">
+          <Clock className="w-3 h-3" />
+          {daysOld === 0 ? 'Today' :
+           daysOld === 1 ? '1 day ago' :
+           daysOld < 7 ? `${daysOld} days ago` :
+           daysOld < 30 ? `${Math.floor(daysOld / 7)} weeks ago` :
+           `${Math.floor(daysOld / 30)} months ago`}
+        </div>
+      </div>
+    )
+  }
+
   const renderClassificationBadge = (value: string | null, type: string) => {
     if (!value) {
       return <Badge variant="outline" className="text-gray-400">Unassigned</Badge>
     }
-    
+
     const colors = {
       't_group': 'bg-blue-100 text-blue-800',
-      'h_group': 'bg-purple-100 text-purple-800', 
+      'h_group': 'bg-purple-100 text-purple-800',
       'x_group': 'bg-green-100 text-green-800',
       'a_group': 'bg-orange-100 text-orange-800'
     }
-    
+
     return (
       <Badge className={colors[type as keyof typeof colors] || 'bg-gray-100 text-gray-800'}>
         {value}
@@ -238,7 +298,15 @@ export function ProteinTable({
           <span>•</span>
           <span>{pagination.total} total proteins</span>
           <span>•</span>
-          <span>Showing protein-level summaries with expandable domain details</span>
+          <span>
+            Sorted by {sortBy === 'recent' ? 'most recent' :
+                     sortBy === 'batch' ? 'latest batch' :
+                     sortBy === 'confidence' ? 'best confidence' :
+                     sortBy === 'coverage' ? 'domain coverage' :
+                     sortBy === 'domains' ? 'domain count' : sortBy}
+          </span>
+          <span>•</span>
+          <span>{proteins.filter(p => p.is_recent).length} processed recently</span>
         </div>
       </div>
 
@@ -250,11 +318,11 @@ export function ProteinTable({
               <tr>
                 <th className="text-left py-3 px-4 font-medium text-gray-700">Protein</th>
                 <th className="text-left py-3 px-4 font-medium text-gray-700">Classification</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700">Domains</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700">Confidence</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700">Coverage</th>
+                {renderSortableHeader('Domains', 'domains')}
+                {renderSortableHeader('Confidence', 'confidence')}
+                {renderSortableHeader('Coverage', 'coverage')}
                 <th className="text-left py-3 px-4 font-medium text-gray-700">Evidence</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700">Batch</th>
+                {renderSortableHeader('Processing', 'recent')}
                 <th className="text-left py-3 px-4 font-medium text-gray-700">Actions</th>
               </tr>
             </thead>
@@ -275,25 +343,32 @@ export function ProteinTable({
                             <ChevronRight className="w-4 h-4" />
                           )}
                         </button>
-                        
+
                         <div>
-                          <button
-                            onClick={() => onProteinClick(protein)}
-                            className="text-blue-600 hover:text-blue-800 font-medium text-lg"
-                          >
-                            {protein.pdb_id}_{protein.chain_id}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => onProteinClick(protein)}
+                              className="text-blue-600 hover:text-blue-800 font-medium text-lg"
+                            >
+                              {protein.pdb_id}_{protein.chain_id}
+                            </button>
+                            {protein.is_recent && (
+                              <Badge className="bg-green-100 text-green-800 text-xs">
+                                Recent
+                              </Badge>
+                            )}
+                          </div>
                           <div className="text-sm text-gray-500">
                             {protein.sequence_length} residues
                           </div>
                         </div>
                       </div>
                     </td>
-                    
+
                     <td className="py-3 px-4">
                       {renderClassificationStatus(protein)}
                     </td>
-                    
+
                     <td className="py-3 px-4">
                       <div className="text-center">
                         <div className="text-lg font-semibold">
@@ -304,7 +379,7 @@ export function ProteinTable({
                         </div>
                       </div>
                     </td>
-                    
+
                     <td className="py-3 px-4">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
@@ -317,7 +392,7 @@ export function ProteinTable({
                         </div>
                       </div>
                     </td>
-                    
+
                     <td className="py-3 px-4">
                       <div className="text-center">
                         <div className={`text-lg font-semibold ${
@@ -329,7 +404,7 @@ export function ProteinTable({
                         <div className="text-xs text-gray-500">sequence</div>
                       </div>
                     </td>
-                    
+
                     <td className="py-3 px-4">
                       <div className="space-y-1">
                         {renderEvidenceIndicators(protein)}
@@ -338,14 +413,9 @@ export function ProteinTable({
                         </div>
                       </div>
                     </td>
-                    
+
                     <td className="py-3 px-4">
-                      <div className="text-sm">
-                        <div className="font-medium">#{protein.batch_id}</div>
-                        <div className="text-xs text-gray-500">
-                          {new Date(protein.processing_date).toLocaleDateString()}
-                        </div>
-                      </div>
+                      {renderProcessingInfo(protein)}
                     </td>
                     
                     <td className="py-3 px-4">

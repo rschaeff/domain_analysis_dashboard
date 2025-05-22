@@ -184,16 +184,25 @@ export default function EnhancedDashboard() {
     }
   }
 
+  // State for sorting
+  const [sortBy, setSortBy] = useState('recent')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+
   // Fetch protein-centric data
-  const fetchProteins = async (page = 1, newFilters?: DomainFilters) => {
+  const fetchProteins = async (page = 1, newFilters?: DomainFilters, newSort?: string, newSortDir?: 'asc' | 'desc') => {
     setLoading(true)
     setError(null)
 
     try {
       const filtersToUse = newFilters !== undefined ? newFilters : filters
+      const sortToUse = newSort || sortBy
+      const sortDirToUse = newSortDir || sortDirection
+
       const params = new URLSearchParams({
         page: page.toString(),
-        size: '50'
+        size: '50',
+        sort: sortToUse,
+        sort_dir: sortDirToUse
       })
 
       // Add filters
@@ -340,6 +349,13 @@ export default function EnhancedDashboard() {
   const handlePageChange = (page: number) => {
     setPagination(prev => ({ ...prev, page }))
     fetchProteins(page)
+  }
+
+  const handleSortChange = (newSort: string, newDirection?: 'asc' | 'desc') => {
+    const direction = newDirection || (newSort === sortBy && sortDirection === 'desc' ? 'asc' : 'desc')
+    setSortBy(newSort)
+    setSortDirection(direction)
+    fetchProteins(1, filters, newSort, direction)
   }
 
   const handleProteinClick = (protein: ProteinSummary) => {
@@ -555,14 +571,57 @@ export default function EnhancedDashboard() {
             </Card>
           )}
 
-          {/* Filters (hide for audit view) */}
+          {/* Filters and Sorting (hide for audit view) */}
           {viewMode !== 'audit' && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg">
-              <FilterPanel
-                filters={filters}
-                onFiltersChange={handleFiltersChange}
-                onReset={handleResetFilters}
-              />
+            <div className="space-y-4">
+              {/* Filters */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg">
+                <FilterPanel
+                  filters={filters}
+                  onFiltersChange={handleFiltersChange}
+                  onReset={handleResetFilters}
+                />
+              </div>
+
+              {/* Sorting Controls for Protein View */}
+              {viewMode === 'proteins' && (
+                <Card className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm font-medium text-gray-700">Sort by:</span>
+                      <div className="flex gap-2">
+                        {[
+                          { key: 'recent', label: 'Most Recent', icon: '🕒' },
+                          { key: 'batch', label: 'Latest Batch', icon: '📦' },
+                          { key: 'confidence', label: 'Confidence', icon: '⭐' },
+                          { key: 'coverage', label: 'Coverage', icon: '📊' },
+                          { key: 'domains', label: 'Domains', icon: '🧬' }
+                        ].map(({ key, label, icon }) => (
+                          <Button
+                            key={key}
+                            size="sm"
+                            variant={sortBy === key ? 'default' : 'outline'}
+                            onClick={() => handleSortChange(key)}
+                            className="flex items-center gap-1"
+                          >
+                            <span>{icon}</span>
+                            {label}
+                            {sortBy === key && (
+                              <span className="ml-1">
+                                {sortDirection === 'desc' ? '↓' : '↑'}
+                              </span>
+                            )}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="text-sm text-gray-500">
+                      Showing page {pagination.page} of {Math.ceil(pagination.total / pagination.size)}
+                    </div>
+                  </div>
+                </Card>
+              )}
             </div>
           )}
 

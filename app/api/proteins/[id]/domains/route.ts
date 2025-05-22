@@ -125,7 +125,7 @@ export async function GET(
     const domainsResult = await prisma.$queryRawUnsafe(domainsQuery, pdbId, chainId)
     const domains = serializeBigInt(domainsResult)
 
-    // Get evidence with all available scoring data
+    // Get evidence with all available scoring data and classification names
     const evidenceQuery = `
       SELECT
         CAST(de.domain_id AS INTEGER) as domain_id,
@@ -142,8 +142,11 @@ export async function GET(
         CAST(de.hsp_count AS INTEGER) as hsp_count,
         de.is_discontinuous,
         de.t_group as ref_t_group,
+        tc_ref.name as ref_t_group_name,
         de.h_group as ref_h_group,
+        hc_ref.name as ref_h_group_name,
         de.x_group as ref_x_group,
+        xc_ref.name as ref_x_group_name,
         de.a_group as ref_a_group,
         de.query_range,
         de.hit_range,
@@ -151,6 +154,9 @@ export async function GET(
       FROM pdb_analysis.domain_evidence de
       JOIN pdb_analysis.partition_domains pd ON de.domain_id = pd.id
       JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id
+      LEFT JOIN pdb_analysis.t_classification tc_ref ON de.t_group = tc_ref.t_id
+      LEFT JOIN pdb_analysis.h_classification hc_ref ON de.h_group = hc_ref.h_id
+      LEFT JOIN pdb_analysis.x_classification xc_ref ON de.x_group = xc_ref.x_id
       WHERE pp.pdb_id = $1 AND pp.chain_id = $2
       ORDER BY de.domain_id, de.confidence DESC
     `

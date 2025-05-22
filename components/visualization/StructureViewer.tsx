@@ -347,11 +347,14 @@ export function StructureViewer({
       label: 'Reference',
       render: (_: any, evidence: any) => (
         <div className="text-xs space-y-1">
-          {evidence.ref_t_group && (
-            <div className="font-medium text-blue-600">{evidence.ref_t_group}</div>
+          {evidence.ref_t_group_name && (
+            <div className="font-medium text-blue-600">{evidence.ref_t_group_name}</div>
+          )}
+          {evidence.ref_t_group && evidence.ref_t_group_name && (
+            <div className="text-gray-500 font-mono text-xs">{evidence.ref_t_group}</div>
           )}
           {evidence.pdb_id && evidence.chain_id && (
-            <div className="text-gray-500 font-mono">
+            <div className="text-gray-500 font-mono text-xs">
               {evidence.pdb_id}_{evidence.chain_id}
             </div>
           )}

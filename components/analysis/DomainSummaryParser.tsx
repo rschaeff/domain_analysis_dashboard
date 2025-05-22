@@ -882,7 +882,7 @@ export function DomainSummaryParser({
                   ⚠️ Fragments Detected ({coverageAnalysis.filter(a => a.is_fragment).length})
                 </div>
                 <div className="text-red-700">
-                  These alignments are too short (< {minAlignmentLength} residues) to represent meaningful domains.
+                  These alignments are too short (under {minAlignmentLength} residues) to represent meaningful domains.
                 </div>
               </div>
             )}

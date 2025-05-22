@@ -100,39 +100,52 @@ export function ProteinTable({
   const [expandedProteins, setExpandedProteins] = useState<Set<string>>(new Set())
   const [loadingDomains, setLoadingDomains] = useState<Set<string>>(new Set())
 
-  const toggleProteinExpansion = async (protein: ProteinSummary) => {
-    const newExpanded = new Set(expandedProteins)
+// In ProteinTable.tsx, update the toggleProteinExpansion function:
 
-    if (newExpanded.has(protein.id)) {
-      newExpanded.delete(protein.id)
-    } else {
-      newExpanded.add(protein.id)
+const toggleProteinExpansion = async (protein: ProteinSummary) => {
+  const newExpanded = new Set(expandedProteins)
 
-      // Load domain details if not already loaded
-      if (!protein.domains) {
-        setLoadingDomains(prev => new Set([...prev, protein.id]))
+  if (newExpanded.has(protein.id)) {
+    newExpanded.delete(protein.id)
+  } else {
+    newExpanded.add(protein.id)
 
-        try {
-          const response = await fetch(`/api/proteins/${protein.source_id}/domains`)
-          if (response.ok) {
-            const domains = await response.json()
-            // Update the protein object with domain details
-            protein.domains = domains.filter((d: any) => d.domain_type === 'putative')
-          }
-        } catch (error) {
-          console.error('Failed to load domain details:', error)
-        } finally {
-          setLoadingDomains(prev => {
-            const newSet = new Set(prev)
-            newSet.delete(protein.id)
-            return newSet
-          })
+    // Load domain details if not already loaded
+    if (!protein.domains) {
+      setLoadingDomains(prev => new Set([...prev, protein.id]))
+
+      try {
+        const response = await fetch(`/api/proteins/${protein.source_id}/domains`)
+        if (response.ok) {
+          const data = await response.json()
+
+          // FIX: Use data.domains instead of expecting domains directly
+          console.log('[PROTEIN TABLE] API response:', data)
+          console.log('[PROTEIN TABLE] Domains array:', data.domains)
+
+          // Update the protein object with domain details
+          protein.domains = data.domains?.filter((d: any) => d.domain_type === 'putative') || []
+
+          console.log('[PROTEIN TABLE] Filtered putative domains:', protein.domains)
+        } else {
+          console.error('[PROTEIN TABLE] API error:', response.status, response.statusText)
+          protein.domains = []
         }
+      } catch (error) {
+        console.error('Failed to load domain details:', error)
+        protein.domains = []
+      } finally {
+        setLoadingDomains(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(protein.id)
+          return newSet
+        })
       }
     }
-
-    setExpandedProteins(newExpanded)
   }
+
+  setExpandedProteins(newExpanded)
+}
 
   const handleSort = (sortKey: string) => {
     if (onSortChange) {

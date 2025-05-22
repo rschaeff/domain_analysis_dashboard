@@ -84,6 +84,9 @@ export async function GET(request: NextRequest) {
       days_old: Math.floor(Number(protein.days_since_processing || 0)),
       is_recent: Number(protein.days_since_processing || 999) < 7,
 
+      avg_confidence: Number(protein.avg_domain_confidence || 0),
+      best_confidence: Number(protein.best_domain_confidence || 0),
+
       // Confidence level categorization
       confidence_level: protein.best_domain_confidence >= 0.8 ? 'high' :
                        protein.best_domain_confidence >= 0.5 ? 'medium' : 'low',

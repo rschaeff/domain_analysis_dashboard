@@ -178,13 +178,19 @@ const putativeDomainsQuery = `
     pds.source_id,
     pds.confidence,
     pds.t_group,
+    tc.name as t_group_name,
     pds.h_group,
+    hc.name as h_group_name,
     pds.x_group,
+    xc.name as x_group_name,
     pds.a_group,
     pds.evidence_count,
     pds.evidence_types,
     'putative' as domain_type
   FROM pdb_analysis.partition_domain_summary pds
+  LEFT JOIN pdb_analysis.t_classification tc ON pds.t_group = tc.t_id
+  LEFT JOIN pdb_analysis.h_classification hc ON pds.h_group = hc.h_id
+  LEFT JOIN pdb_analysis.x_classification xc ON pds.x_group = xc.x_id
   WHERE pds.pdb_id = $1 AND pds.chain_id = $2
   ORDER BY pds.domain_number
 `

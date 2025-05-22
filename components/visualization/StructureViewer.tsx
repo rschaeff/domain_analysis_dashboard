@@ -146,10 +146,10 @@ export function StructureViewer({
   // Domain table columns
   const domainColumns = [
     {
-      key: 'domain_number',
-      label: 'Domain',
+      key: 'domain_id',
+      label: 'Domain ID',
       sortable: true,
-      render: (value: number, domain: any, index: number) => (
+      render: (value: string, domain: any, index: number) => (
         <button
           onClick={() => handleDomainHighlight(domain, index)}
           className={`font-mono px-2 py-1 rounded text-sm ${
@@ -163,18 +163,20 @@ export function StructureViewer({
             borderLeftStyle: 'solid'
           }}
         >
-          {value}
+          {value || `Domain ${domain.domain_number}`}
         </button>
       )
     },
     {
       key: 'range',
-      label: 'Sequence Range',
+      label: 'PDB Range',
       render: (value: string, domain: any) => (
         <div className="font-mono text-sm">
-          <div>{value}</div>
-          {domain.pdb_range && domain.pdb_range !== value && (
-            <div className="text-xs text-gray-500">PDB: {domain.pdb_range}</div>
+          <div className="font-medium">
+            {domain.pdb_range || value || 'N/A'}
+          </div>
+          {domain.pdb_range && value && domain.pdb_range !== value && (
+            <div className="text-xs text-gray-500">Seq: {value}</div>
           )}
         </div>
       )
@@ -197,10 +199,10 @@ export function StructureViewer({
           <span className={`px-2 py-1 rounded text-xs font-medium ${
             value ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
           }`}>
-            {value || 'Unclassified'}
+            {domain.t_group_name || value || 'Unclassified'}
           </span>
-          {domain.h_group && (
-            <div className="text-xs text-gray-600">H: {domain.h_group}</div>
+          {domain.t_group && domain.t_group_name && (
+            <div className="text-xs text-gray-500 font-mono">{domain.t_group}</div>
           )}
         </div>
       )
@@ -260,30 +262,100 @@ export function StructureViewer({
     {
       key: 'source_id',
       label: 'Source',
-      render: (value: string) => (
-        <span className="font-mono text-sm">{value}</span>
-      )
-    },
-    {
-      key: 'confidence',
-      label: 'Confidence',
-      render: (value: number) => {
-        const color = value >= 0.8 ? 'text-green-600' : value >= 0.5 ? 'text-yellow-600' : 'text-red-600'
-        return <span className={`font-medium ${color}`}>{value?.toFixed(3) || 'N/A'}</span>
+      render: (value: string) => {
+        // Detect ECOD domain IDs (typically start with 'e' followed by alphanumeric)
+        const isEcodDomain = value && /^e[a-zA-Z0-9]+$/i.test(value)
+
+        if (isEcodDomain) {
+          const ecodUrl = `http://prodata.swmed.edu/ecod/af2_pdb/domain/${value}`
+          return (
+            <a
+              href={ecodUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline"
+              title={`View ${value} on ECOD`}
+            >
+              {value}
+            </a>
+          )
+        }
+
+        return <span className="font-mono text-sm">{value}</span>
       }
     },
     {
-      key: 'query_range',
-      label: 'Query Range',
-      render: (value: string) => (
-        <span className="font-mono text-sm">{value}</span>
+      key: 'scores',
+      label: 'Scores',
+      render: (_: any, evidence: any) => {
+        const isHHSearch = evidence.evidence_type === 'hhsearch'
+        const isBLAST = evidence.evidence_type === 'blast' || evidence.evidence_type === 'chain_blast' || evidence.evidence_type === 'domain_blast'
+
+        return (
+          <div className="text-sm space-y-1">
+            {/* Method-specific primary score */}
+            {isHHSearch && evidence.probability !== null && (
+              <div className="font-medium">
+                Prob: <span className="text-green-600">{evidence.probability?.toFixed(1)}%</span>
+              </div>
+            )}
+            {isBLAST && evidence.score !== null && (
+              <div className="font-medium">
+                Bit: <span className="text-blue-600">{evidence.score?.toFixed(1)}</span>
+              </div>
+            )}
+
+            {/* E-value (common to both) */}
+            {evidence.evalue !== null && (
+              <div className="text-xs text-gray-600">
+                E-val: {evidence.evalue < 1e-10 ? evidence.evalue.toExponential(1) : evidence.evalue.toFixed(2)}
+              </div>
+            )}
+
+            {/* Additional BLAST info */}
+            {isBLAST && evidence.hsp_count && (
+              <div className="text-xs text-gray-500">
+                HSPs: {evidence.hsp_count}
+              </div>
+            )}
+
+            {/* HHSearch raw score if available */}
+            {isHHSearch && evidence.score !== null && evidence.score !== evidence.probability && (
+              <div className="text-xs text-gray-500">
+                Score: {evidence.score?.toFixed(1)}
+              </div>
+            )}
+          </div>
+        )
+      }
+    },
+    {
+      key: 'ranges',
+      label: 'Alignment',
+      render: (_: any, evidence: any) => (
+        <div className="font-mono text-xs space-y-1">
+          <div>Query: {evidence.query_range || 'N/A'}</div>
+          <div className="text-gray-500">Hit: {evidence.hit_range || 'N/A'}</div>
+          {evidence.is_discontinuous && (
+            <div className="text-orange-600 text-xs">Discontinuous</div>
+          )}
+        </div>
       )
     },
     {
-      key: 'hit_range',
-      label: 'Hit Range',
-      render: (value: string) => (
-        <span className="font-mono text-sm">{value}</span>
+      key: 'ref_classification',
+      label: 'Reference',
+      render: (_: any, evidence: any) => (
+        <div className="text-xs space-y-1">
+          {evidence.ref_t_group && (
+            <div className="font-medium text-blue-600">{evidence.ref_t_group}</div>
+          )}
+          {evidence.pdb_id && evidence.chain_id && (
+            <div className="text-gray-500 font-mono">
+              {evidence.pdb_id}_{evidence.chain_id}
+            </div>
+          )}
+        </div>
       )
     }
   ]
@@ -377,9 +449,10 @@ export function StructureViewer({
                     <Tooltip key={domain.id} content={
                       <div className="text-xs">
                         <div>{domain.label}</div>
-                        <div>Range: {domain.start}-{domain.end}</div>
-                        {domain.pdb_range && <div>PDB: {domain.pdb_range}</div>}
+                        <div>PDB Range: {domain.pdb_range || `${domain.start}-${domain.end}`}</div>
+                        {domain.pdb_range && <div>Seq Range: {domain.start}-{domain.end}</div>}
                         {originalDomain.confidence && <div>Confidence: {originalDomain.confidence.toFixed(2)}</div>}
+                        {originalDomain.t_group_name && <div>Type: {originalDomain.t_group_name}</div>}
                       </div>
                     }>
                       <button
@@ -397,9 +470,9 @@ export function StructureViewer({
                             style={{ backgroundColor: domain.color }}
                           />
                           Domain {originalDomain.domain_number}
-                          {originalDomain.t_group && (
+                          {originalDomain.t_group_name && (
                             <Badge variant="outline" className="text-xs ml-1">
-                              {originalDomain.t_group}
+                              {originalDomain.t_group_name}
                             </Badge>
                           )}
                         </span>
@@ -441,7 +514,7 @@ export function StructureViewer({
                 {selectedDomain !== null && (
                   <div className="border-t pt-4">
                     <h4 className="text-md font-medium mb-3">
-                      Evidence for Domain {putativeDomains[selectedDomain]?.domain_number}
+                      Evidence for {putativeDomains[selectedDomain]?.domain_id || `Domain ${putativeDomains[selectedDomain]?.domain_number}`}
                     </h4>
 
                     {loadingEvidence ? (

@@ -1,4 +1,4 @@
-// app/api/proteins/[id]/domains/route.ts - ROBUST BIGINT VERSION
+// app/api/proteins/[id]/domains/route.ts - UPDATED WITH CLASSIFICATION NAMES
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
@@ -55,7 +55,7 @@ export async function GET(
       )
     }
 
-    // Use explicit CAST to avoid BigInt issues
+    // Use explicit CAST to avoid BigInt issues and include classification names
     const proteinQuery = `
       SELECT
         CAST(pp.id AS INTEGER) as processing_id,
@@ -84,7 +84,7 @@ export async function GET(
 
     const protein = serializedProteinResult[0]
 
-    // Get domains with explicit CAST to avoid BigInt issues
+    // Get domains with explicit CAST and classification names
     const domainsQuery = `
       SELECT
         CAST(pd.id AS INTEGER) as id,
@@ -101,8 +101,11 @@ export async function GET(
         pd.source_id,
         pd.confidence,
         pd.t_group,
+        tc.name as t_group_name,
         pd.h_group,
+        hc.name as h_group_name,
         pd.x_group,
+        xc.name as x_group_name,
         pd.a_group,
         pd.is_manual_rep,
         pd.is_f70,
@@ -112,6 +115,9 @@ export async function GET(
         'putative' as domain_type
       FROM pdb_analysis.partition_domains pd
       JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id
+      LEFT JOIN pdb_analysis.t_classification tc ON pd.t_group = tc.t_id
+      LEFT JOIN pdb_analysis.h_classification hc ON pd.h_group = hc.h_id
+      LEFT JOIN pdb_analysis.x_classification xc ON pd.x_group = xc.x_id
       WHERE pp.pdb_id = $1 AND pp.chain_id = $2
       ORDER BY pd.domain_number
     `
@@ -119,15 +125,26 @@ export async function GET(
     const domainsResult = await prisma.$queryRawUnsafe(domainsQuery, pdbId, chainId)
     const domains = serializeBigInt(domainsResult)
 
-    // Get evidence with explicit CAST for COUNT functions
+    // Get evidence with all available scoring data
     const evidenceQuery = `
       SELECT
         CAST(de.domain_id AS INTEGER) as domain_id,
         de.evidence_type,
         de.source_id,
+        de.domain_ref_id,
+        de.hit_id,
+        de.pdb_id,
+        de.chain_id,
         de.confidence,
-        de.evalue,
         de.probability,
+        de.evalue,
+        de.score,
+        CAST(de.hsp_count AS INTEGER) as hsp_count,
+        de.is_discontinuous,
+        de.t_group as ref_t_group,
+        de.h_group as ref_h_group,
+        de.x_group as ref_x_group,
+        de.a_group as ref_a_group,
         de.query_range,
         de.hit_range,
         CAST(COUNT(*) OVER (PARTITION BY de.domain_id) AS INTEGER) as domain_evidence_count
@@ -171,7 +188,8 @@ export async function GET(
         data_architecture: 'pipeline_native',
         total_domains: actualDomainCount,
         total_evidence_items: totalEvidenceItems,
-        bigint_serialized: true
+        bigint_serialized: true,
+        includes_classification_names: true
       }
     }
 

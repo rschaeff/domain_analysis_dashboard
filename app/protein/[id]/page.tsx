@@ -14,6 +14,20 @@ import { Button } from '@/components/ui/Button'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { ArrowLeft, Eye, BarChart3, Download, Edit } from 'lucide-react'
 
+// Domain colors with high contrast for visualization
+const DOMAIN_COLORS = [
+  '#FF0000', // Red
+  '#0066FF', // Blue
+  '#00CC00', // Green
+  '#FF6600', // Orange
+  '#9900CC', // Purple
+  '#00CCCC', // Cyan
+  '#CC6600', // Brown
+  '#FF99CC', // Pink
+  '#666666', // Gray
+  '#336699', // Steel Blue
+]
+
 export default function ProteinDetailPage() {
   const params = useParams()
   const router = useRouter()

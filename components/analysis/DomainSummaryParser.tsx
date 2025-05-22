@@ -142,7 +142,7 @@ export function DomainSummaryParser({
 
     return {
       query_coverage: queryLength / sequenceLength,
-      hit_coverage: refLength && refLength > 0 ? hitLength / refLength : hitLength / 100, // Default to assuming 100-residue reference if unknown
+      hit_coverage: refLength && refLength > 0 ? hitLength / refLength : hitLength / 100,
       alignment_length: queryLength
     }
   }
@@ -158,7 +158,7 @@ export function DomainSummaryParser({
       throw new Error(`XML parsing error: ${parseError.textContent}`)
     }
 
-    // Extract metadata (from HHSearch format or domain summary format)
+    // Extract metadata
     const metadata = extractMetadata(doc)
 
     // Parse chain BLAST hits
@@ -255,12 +255,12 @@ export function DomainSummaryParser({
   const parseDomainBlastHits = (doc: Document): DomainBlastHit[] => {
     const hits: DomainBlastHit[] = []
 
-    // Look for domain BLAST section - this has domain_id attributes
+    // Look for domain BLAST section
     const domainBlastHits = doc.querySelectorAll('blast_run[program="blastp"] hits hit')
 
     domainBlastHits.forEach(hit => {
       const domainId = hit.getAttribute('domain_id')
-      if (!domainId) return // Skip if no domain_id (not a domain BLAST hit)
+      if (!domainId) return
 
       const queryReg = hit.querySelector('query_reg')?.textContent?.trim()
       const hitReg = hit.querySelector('hit_reg')?.textContent?.trim()
@@ -297,7 +297,7 @@ export function DomainSummaryParser({
   const parseHHSearchHits = (doc: Document): HHSearchHit[] => {
     const hits: HHSearchHit[] = []
 
-    // Look for HHSearch section - can be in hh_hit_list, hh_run, or hhsearch section
+    // Look for HHSearch section
     const hhHits = doc.querySelectorAll('hh_hit_list hh_hit, hh_run hits hit, hhsearch hits hit')
 
     hhHits.forEach(hit => {
@@ -305,13 +305,11 @@ export function DomainSummaryParser({
 
       // Handle different HHSearch formats
       if (hit.tagName === 'hh_hit') {
-        // Format from hh_hit_list
         queryReg = hit.querySelector('query_range')?.textContent?.trim()
         hitReg = hit.querySelector('template_seqid_range')?.textContent?.trim()
         queryAlignment = hit.querySelector('alignment query_ali')?.textContent?.trim()
         templateAlignment = hit.querySelector('alignment template_ali')?.textContent?.trim()
       } else {
-        // Format from hh_run hits or hhsearch hits
         queryReg = hit.querySelector('query_reg')?.textContent?.trim()
         hitReg = hit.querySelector('hit_reg')?.textContent?.trim()
       }
@@ -323,7 +321,6 @@ export function DomainSummaryParser({
         if (queryRange && hitRange) {
           const coverage = calculateCoverage(queryRange.start, queryRange.end, hitRange.start, hitRange.end)
 
-          // Extract identity/similarity if available
           const templateRange = hit.querySelector('template_seqid_range')
           const identity = templateRange ? parseFloat(templateRange.getAttribute('identity') || '0') : undefined
           const similarity = templateRange ? parseFloat(templateRange.getAttribute('similarity') || '0') : undefined
@@ -355,7 +352,7 @@ export function DomainSummaryParser({
     return hits
   }
 
-  // Analyze coverage quality
+  // Analyze coverage quality based on absolute size
   const analyzeCoverage = (summaryData: DomainSummaryData): CoverageAnalysis[] => {
     return summaryData.all_hits.map(hit => {
       const issues: string[] = []
@@ -364,7 +361,7 @@ export function DomainSummaryParser({
       let isFragment = false
       let supportsCurrentDomains = false
 
-      // Fragment detection based on ABSOLUTE SIZE, not percentage
+      // Quality assessment based on absolute size
       if (hit.alignment_length < minAlignmentLength) {
         quality = 'fragment'
         isFragment = true
@@ -382,14 +379,14 @@ export function DomainSummaryParser({
         recommendations.push('Good domain size - reliable for classification')
       }
 
-      // Additional quality checks based on reference coverage (percentages make sense here)
+      // Check reference coverage
       if (hit.hit_coverage < 0.3) {
         if (quality === 'excellent') quality = 'good'
         issues.push(`Low reference coverage (${(hit.hit_coverage * 100).toFixed(1)}%)`)
         recommendations.push('May not represent complete reference domain')
       }
 
-      // Very high query coverage might indicate single-domain protein
+      // High query coverage note
       if (hit.query_coverage > 0.8) {
         recommendations.push('High sequence coverage - may indicate single-domain protein')
       }
@@ -417,14 +414,13 @@ export function DomainSummaryParser({
         }
       }
 
-      // Check if this hit supports any current domain
+      // Check domain support
       for (const domain of currentDomains) {
         const domainStart = domain.start_pos || domain.start
         const domainEnd = domain.end_pos || domain.end
 
         if (!domainStart || !domainEnd) continue
 
-        // Check for overlap
         const overlapStart = Math.max(hit.query_start, domainStart)
         const overlapEnd = Math.min(hit.query_end, domainEnd)
 
@@ -443,80 +439,7 @@ export function DomainSummaryParser({
         }
       }
 
-      // Additional recommendations based on evidence type
-      if (hit.type === 'domain_blast' && quality === 'excellent') {
-        recommendations.push('High-quality domain evidence - good for boundary definition')
-      } else if (hit.type === 'chain_blast' && hit.query_coverage > 0.8) {
-        recommendations.push('Extensive chain match - may indicate single-domain protein')
-      } else if (hit.type === 'hhsearch' && quality === 'excellent') {
-        recommendations.push('High-confidence HHSearch hit - reliable classification')
-      }
-
-      if (!supportsCurrentDomains && quality === 'excellent') {
-        recommendations.push('High-quality evidence not used in current domains - investigate')
-      }
-
-      return {
-        hit,
-        coverage_quality: quality,
-        issues,
-        recommendations,
-        is_fragment: isFragment,
-        supports_current_domains: supportsCurrentDomains
-      }
-    })
-  }
-
-      // Check significance
-      if (hit.type === 'hhsearch') {
-        const hhHit = hit as HHSearchHit
-        if (hhHit.probability < 50) {
-          issues.push(`Very low probability (${hhHit.probability.toFixed(1)}%)`)
-          if (quality === 'excellent') quality = 'poor'
-          else if (quality === 'good') quality = 'poor'
-        } else if (hhHit.probability < 80) {
-          issues.push(`Low probability (${hhHit.probability.toFixed(1)}%)`)
-          if (quality === 'excellent') quality = 'good'
-        }
-        if (hhHit.evalue > 1e-3) {
-          issues.push(`High E-value (${hhHit.evalue.toExponential(2)})`)
-        }
-      } else {
-        if (hit.evalue > 1e-3) {
-          issues.push(`High E-value (${hit.evalue.toExponential(2)})`)
-          if (quality === 'excellent') quality = 'good'
-        } else if (hit.evalue > 1e-10) {
-          issues.push(`Moderate E-value (${hit.evalue.toExponential(2)})`)
-        }
-      }
-
-      // Check if this hit supports any current domain
-      for (const domain of currentDomains) {
-        const domainStart = domain.start_pos || domain.start
-        const domainEnd = domain.end_pos || domain.end
-
-        if (!domainStart || !domainEnd) continue
-
-        // Check for overlap
-        const overlapStart = Math.max(hit.query_start, domainStart)
-        const overlapEnd = Math.min(hit.query_end, domainEnd)
-
-        if (overlapStart <= overlapEnd) {
-          const overlapLength = overlapEnd - overlapStart + 1
-          const domainLength = domainEnd - domainStart + 1
-          const overlapRatio = overlapLength / domainLength
-
-          if (overlapRatio > 0.5) {
-            supportsCurrentDomains = true
-            recommendations.push(`Supports current domain ${domain.domain_number || domain.domain_id}`)
-            break
-          } else if (overlapRatio > 0.2) {
-            recommendations.push(`Partial overlap with domain ${domain.domain_number || domain.domain_id}`)
-          }
-        }
-      }
-
-      // Additional recommendations based on evidence type
+      // Additional recommendations
       if (hit.type === 'domain_blast' && quality === 'excellent') {
         recommendations.push('High-quality domain evidence - good for boundary definition')
       } else if (hit.type === 'chain_blast' && hit.query_coverage > 0.8) {
@@ -546,34 +469,24 @@ export function DomainSummaryParser({
     setError(null)
 
     try {
-      // Check if filesystemEvidence is available
       if (!filesystemEvidence) {
         throw new Error('No filesystem evidence available. Please fetch filesystem data first.')
       }
 
-      console.log('Available files:', filesystemEvidence.files)
-
-      // Find domain summary file
       const domainSummaryFile = filesystemEvidence?.files?.find((file: any) =>
         file.file_type === 'domain_summary' && file.file_exists
       )
 
       if (!domainSummaryFile) {
-        // List available files for debugging
         const availableFiles = filesystemEvidence?.files?.map((f: any) => f.file_type).join(', ') || 'none'
         throw new Error(`No domain summary file found. Available file types: ${availableFiles}`)
       }
 
-      // Check if we have the file_id (correct field name from filesystem API)
       const fileId = domainSummaryFile.file_id || domainSummaryFile.id
       if (!fileId) {
-        console.error('Domain summary file object:', domainSummaryFile)
         throw new Error('Domain summary file found but missing file ID')
       }
 
-      console.log('Fetching file with ID:', fileId, 'for protein:', proteinId)
-
-      // Fetch file content using the correct field name
       const response = await fetch(`/api/proteins/${proteinId}/files/${fileId}`)
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
@@ -586,15 +499,9 @@ export function DomainSummaryParser({
         throw new Error('File fetched successfully but content is empty')
       }
 
-      const xmlContent = data.content
-
-      console.log('Successfully fetched XML content, length:', xmlContent.length)
-
-      // Parse the XML
-      const summary = parseDomainSummaryXml(xmlContent)
+      const summary = parseDomainSummaryXml(data.content)
       setSummaryData(summary)
 
-      // Analyze coverage
       const analysis = analyzeCoverage(summary)
       setCoverageAnalysis(analysis)
 
@@ -616,7 +523,7 @@ export function DomainSummaryParser({
     return analysis.hit.type === evidenceFilter
   })
 
-  // Table columns for coverage analysis
+  // Table columns
   const analysisColumns = [
     {
       key: 'type',
@@ -787,7 +694,7 @@ export function DomainSummaryParser({
             </div>
           )}
 
-          {/* Thresholds */}
+          {/* Threshold Controls */}
           {summaryData && (
             <div className="grid grid-cols-1 gap-4">
               <div>
@@ -818,7 +725,7 @@ export function DomainSummaryParser({
         </div>
       </Card>
 
-      {/* Error display */}
+      {/* Error Display */}
       {error && (
         <Card className="p-4 bg-red-50 border-red-200">
           <div className="flex items-start gap-2">
@@ -869,7 +776,7 @@ export function DomainSummaryParser({
         </Card>
       )}
 
-      {/* Coverage Analysis Results */}
+      {/* Results Table */}
       {coverageAnalysis.length > 0 && (
         <Card className="p-0 overflow-hidden">
           <div className="p-4 border-b bg-gray-50">
@@ -963,10 +870,10 @@ export function DomainSummaryParser({
         </Card>
       )}
 
-      {/* Analysis insights */}
+      {/* Analysis Insights */}
       {coverageAnalysis.length > 0 && (
         <Card className="p-4">
-          <h4 className="font-medium mb-3">Coverage Analysis Insights</h4>
+          <h4 className="font-medium mb-3">Analysis Insights</h4>
           <div className="space-y-3 text-sm">
             {/* Fragment warning */}
             {coverageAnalysis.filter(a => a.is_fragment).length > 0 && (
@@ -975,7 +882,7 @@ export function DomainSummaryParser({
                   ⚠️ Fragments Detected ({coverageAnalysis.filter(a => a.is_fragment).length})
                 </div>
                 <div className="text-red-700">
-                  These alignments are too short (< {minAlignmentLength} residues) to represent meaningful domains. Consider filtering them out or adjusting the minimum length threshold.
+                  These alignments are too short (< {minAlignmentLength} residues) to represent meaningful domains.
                 </div>
               </div>
             )}
@@ -987,7 +894,7 @@ export function DomainSummaryParser({
                   🔍 Short Domains ({coverageAnalysis.filter(a => a.coverage_quality === 'poor' && !a.is_fragment).length})
                 </div>
                 <div className="text-yellow-700">
-                  These alignments are short but potentially valid domains. Verify they have sufficient secondary structure content and aren't fragments of larger domains.
+                  These alignments are short but potentially valid domains. Verify structural content.
                 </div>
               </div>
             )}
@@ -999,43 +906,19 @@ export function DomainSummaryParser({
                   💡 Unused High-Quality Evidence ({coverageAnalysis.filter(a => !a.supports_current_domains && a.coverage_quality === 'excellent').length})
                 </div>
                 <div className="text-blue-700">
-                  There are high-quality alignments that don't support current domain assignments. These may indicate missed domains or suggest boundary adjustments.
+                  High-quality alignments not supporting current domains - investigate for missed domains.
                 </div>
               </div>
             )}
 
-            {/* Good coverage */}
+            {/* Good evidence */}
             {coverageAnalysis.filter(a => a.coverage_quality === 'excellent').length > 0 && (
               <div className="p-3 bg-green-50 rounded-lg">
                 <div className="font-medium text-green-800 mb-1">
                   ✅ High Quality Evidence ({coverageAnalysis.filter(a => a.coverage_quality === 'excellent').length})
                 </div>
                 <div className="text-green-700">
-                  These alignments are long enough (≥60 residues) to represent meaningful domains and provide strong evidence for domain boundaries.
-                </div>
-              </div>
-            )}
-
-            {/* No evidence found */}
-            {coverageAnalysis.length === 0 && summaryData && (
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <div className="font-medium text-gray-800 mb-1">
-                  📄 No Evidence Found
-                </div>
-                <div className="text-gray-700">
-                  The domain summary file was parsed but no alignment evidence was found. This could indicate an issue with the file format or content.
-                </div>
-              </div>
-            )}
-
-            {/* All fragments */}
-            {coverageAnalysis.length > 0 && coverageAnalysis.every(a => a.is_fragment) && (
-              <div className="p-3 bg-orange-50 rounded-lg">
-                <div className="font-medium text-orange-800 mb-1">
-                  🔬 All Evidence Too Short
-                </div>
-                <div className="text-orange-700">
-                  All alignment evidence is shorter than {minAlignmentLength} residues. This protein may be unstructured, or the alignment parameters need adjustment.
+                  These alignments are long enough (≥60 residues) to represent meaningful domains.
                 </div>
               </div>
             )}

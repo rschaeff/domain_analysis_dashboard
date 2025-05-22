@@ -42,6 +42,8 @@ export function StructureViewer({
   const [showDomainDetails, setShowDomainDetails] = useState(true)
   const [domainEvidence, setDomainEvidence] = useState<any[]>([])
   const [loadingEvidence, setLoadingEvidence] = useState(false)
+  const [filesystemEvidence, setFilesystemEvidence] = useState<any>(null)
+  const [loadingFilesystem, setLoadingFilesystem] = useState(false)
   const viewerRef = useRef<any>(null)
 
   // Filter to only putative domains for structure visualization
@@ -69,6 +71,26 @@ export function StructureViewer({
       }
     }))
   }
+
+  // Fetch filesystem evidence on component mount
+  useEffect(() => {
+    const fetchFilesystemEvidence = async () => {
+      setLoadingFilesystem(true)
+      try {
+        const response = await fetch(`/api/proteins/${pdb_id}_${chain_id}/filesystem`)
+        if (response.ok) {
+          const data = await response.json()
+          setFilesystemEvidence(data)
+        }
+      } catch (error) {
+        console.error('Error fetching filesystem evidence:', error)
+      } finally {
+        setLoadingFilesystem(false)
+      }
+    }
+
+    fetchFilesystemEvidence()
+  }, [pdb_id, chain_id])
 
   const mappedDomains = mapDomainsFor3D(putativeDomains)
 
@@ -247,6 +269,94 @@ export function StructureViewer({
       )
     }
   ]
+
+  // Filesystem evidence table columns
+  const filesystemColumns = [
+    {
+      key: 'file_type',
+      label: 'File Type',
+      render: (value: string) => (
+        <Badge variant={
+          value === 'domain_summary' ? 'default' :
+          value.includes('blast') ? 'secondary' :
+          value === 'hhsearch_result' ? 'outline' : 'secondary'
+        }>
+          {value.replace('_', ' ').toUpperCase()}
+        </Badge>
+      )
+    },
+    {
+      key: 'file_exists',
+      label: 'Status',
+      render: (value: boolean, file: any) => (
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${value ? 'bg-green-500' : 'bg-red-500'}`} />
+          <span className={value ? 'text-green-700' : 'text-red-700'}>
+            {value ? 'Exists' : 'Missing'}
+          </span>
+          {file.file_size && (
+            <span className="text-xs text-gray-500">
+              ({(file.file_size / 1024).toFixed(1)}KB)
+            </span>
+          )}
+        </div>
+      )
+    },
+    {
+      key: 'file_path',
+      label: 'Path',
+      render: (value: string) => {
+        // Show just the filename and immediate directory for readability
+        const parts = value.split('/')
+        const filename = parts[parts.length - 1]
+        const dir = parts[parts.length - 2]
+        return (
+          <div className="font-mono text-xs">
+            <div className="font-medium">{filename}</div>
+            <div className="text-gray-500">.../{dir}/</div>
+          </div>
+        )
+      }
+    },
+    {
+      key: 'last_checked',
+      label: 'Last Checked',
+      render: (value: string) => {
+        if (!value) return <span className="text-gray-400">Never</span>
+        const date = new Date(value)
+        const now = new Date()
+        const diffHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
+
+        if (diffHours < 24) {
+          return <span className="text-green-600">{diffHours.toFixed(0)}h ago</span>
+        } else if (diffHours < 24 * 7) {
+          return <span className="text-yellow-600">{(diffHours / 24).toFixed(0)}d ago</span>
+        } else {
+          return <span className="text-red-600">{date.toLocaleDateString()}</span>
+        }
+      }
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      render: (_: any, file: any) => (
+        <div className="flex gap-1">
+          <Tooltip content="View file contents">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!file.file_exists}
+              onClick={() => {
+                // TODO: Implement file viewing
+                console.log('View file:', file.file_path)
+              }}
+            >
+              <Eye className="w-3 h-3" />
+            </Button>
+          </Tooltip>
+        </div>
+      )
+    }
 
   // Evidence table columns
   const evidenceColumns = [
@@ -536,6 +646,63 @@ export function StructureViewer({
                     )}
                   </div>
                 )}
+
+                {/* Filesystem Evidence */}
+                <div className="border-t pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-md font-medium">Pipeline Files</h4>
+                    {filesystemEvidence?.process_info && (
+                      <div className="text-sm text-gray-600">
+                        Batch: {filesystemEvidence.process_info.batch_name} |
+                        Stage: {filesystemEvidence.process_info.current_stage} |
+                        Status: <span className={
+                          filesystemEvidence.process_info.process_status === 'success' ? 'text-green-600' :
+                          filesystemEvidence.process_info.process_status === 'error' ? 'text-red-600' :
+                          'text-yellow-600'
+                        }>{filesystemEvidence.process_info.process_status}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {loadingFilesystem ? (
+                    <div className="flex items-center gap-2 text-gray-600">
+                      <LoadingSpinner size="sm" />
+                      Loading filesystem evidence...
+                    </div>
+                  ) : filesystemEvidence?.files && filesystemEvidence.files.length > 0 ? (
+                    <div className="space-y-4">
+                      {/* File counts summary */}
+                      <div className="flex gap-4 text-sm">
+                        <span className="text-gray-600">
+                          Total: {filesystemEvidence.file_counts.total}
+                        </span>
+                        <span className="text-green-600">
+                          Existing: {filesystemEvidence.file_counts.existing}
+                        </span>
+                        <span className="text-red-600">
+                          Missing: {filesystemEvidence.file_counts.missing}
+                        </span>
+                      </div>
+
+                      {/* Files table */}
+                      <DataTable
+                        data={filesystemEvidence.files}
+                        columns={filesystemColumns}
+                        showPagination={false}
+                      />
+
+                      {/* Error message if any */}
+                      {filesystemEvidence.process_info?.error_message && (
+                        <div className="bg-red-50 border border-red-200 rounded p-3 text-sm">
+                          <strong className="text-red-800">Processing Error:</strong>
+                          <div className="text-red-700 mt-1">{filesystemEvidence.process_info.error_message}</div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-sm">No pipeline files found for this protein.</p>
+                  )}
+                </div>
               </div>
             )}
           </div>

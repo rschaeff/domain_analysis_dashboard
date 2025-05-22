@@ -2,64 +2,83 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { DomainFilters, DomainSummary, PaginationParams } from '@/lib/types'
+import { DomainFilters, PaginationParams } from '@/lib/types'
 import { FilterPanel } from '@/components/filters/FilterPanel'
-import { DataTable } from '@/components/common/DataTable'
+import { ProteinTable } from '@/components/tables/ProteinTable'
 import { ArchitectureGroupedTable } from '@/components/tables/ArchitectureGroupedTable'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
-import { MultiTrackDomainVisualization } from '@/components/visualization/MultiTrackDomainVisualization'
-import { Eye, Download, BarChart3, Users, Table, Grid, Layers, List } from 'lucide-react'
+import { Badge } from '@/components/ui/Badge'
+import {
+  Eye, Download, BarChart3, Users, Table, Grid, Layers, List,
+  AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
+  TrendingUp, Database, Zap
+} from 'lucide-react'
 
-interface DomainsResponse {
-  data: DomainSummary[]
-  pagination: PaginationParams
-  statistics: {
-    totalDomains: number
-    classifiedDomains: number
-    highConfidenceDomains: number
-    avgConfidence: number
-    domainsWithEvidence: number
-  }
-}
-
-interface ArchitectureGroup {
-  architecture_id: string
-  pattern_name: string
-  domain_count: number
-  t_groups: string[]
-  frequency: number
-  avg_confidence: number
-  classification_completeness: number
-  proteins: ProteinWithDomains[]
-  pagination?: {
-    page: number
-    size: number
-    total: number
-  }
-}
-
-interface ProteinWithDomains {
-  protein_id: string
+interface ProteinSummary {
+  id: string
   pdb_id: string
   chain_id: string
+  source_id: string
   sequence_length: number
-  processing_date: string
-  best_confidence: number
+  batch_id: number
+  reference_version: string
+  is_classified: boolean
+
+  // Domain summary
+  domain_count: number
+  classified_domains: number
   avg_confidence: number
-  classification_completeness: number
-  domains: DomainSummary[]
+  best_confidence: number
+  coverage: number
+
+  // Evidence summary
+  total_evidence_count: number
+  evidence_types: string
+  has_chain_blast: boolean
+  has_domain_blast: boolean
+  has_hhsearch: boolean
+
+  // Processing info
+  processing_date: string
 }
 
-export default function DashboardPage() {
+interface AuditData {
+  missingPartitions: Array<{
+    batch_id: number
+    batch_name: string
+    missing_proteins: number
+    proteins_without_domains: number
+    domains_without_evidence: number
+    classification_failures: number
+    sample_issues: string[]
+  }>
+  evidenceConflicts: Array<{
+    conflict_type: string
+    tuning_suggestion: string
+    case_count: number
+    avg_final_confidence: number
+    sample_cases: string[]
+  }>
+  chainBlastIssues: Array<{
+    chain_blast_issue: string
+    protein_count: number
+    avg_chain_blast_hits: number
+    sample_proteins: string[]
+  }>
+}
+
+export default function EnhancedDashboard() {
   const router = useRouter()
-  const [domains, setDomains] = useState<DomainSummary[]>([])
-  const [architectureGroups, setArchitectureGroups] = useState<ArchitectureGroup[]>([])
+
+  // Core data state
+  const [proteins, setProteins] = useState<ProteinSummary[]>([])
+  const [architectureGroups, setArchitectureGroups] = useState([])
   const [loading, setLoading] = useState(false)
-  const [statsLoading, setStatsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Filter and pagination state
   const [filters, setFilters] = useState<DomainFilters>({})
   const [pagination, setPagination] = useState<PaginationParams>({
     page: 1,
@@ -67,57 +86,100 @@ export default function DashboardPage() {
     total: 0
   })
 
+  // Dashboard state
+  const [viewMode, setViewMode] = useState<'proteins' | 'architecture' | 'audit'>('proteins')
   const [statistics, setStatistics] = useState({
     total_proteins: 0,
     total_domains: 0,
     classified_chains: 0,
     unclassified_chains: 0,
     avg_domain_coverage: 0
-  });
+  })
 
-  const [selectedDomain, setSelectedDomain] = useState<DomainSummary | null>(null)
-  const [viewMode, setViewMode] = useState<'table' | 'architecture' | 'visualization'>('architecture')
-  const [visualizationMode, setVisualizationMode] = useState<'simple' | 'detailed'>('detailed')
-  const [initialLoad, setInitialLoad] = useState(true)
+  // Audit state
+  const [auditData, setAuditData] = useState<AuditData>({
+    missingPartitions: [],
+    evidenceConflicts: [],
+    chainBlastIssues: []
+  })
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
 
   // Fetch dashboard stats
   const fetchDashboardStats = async () => {
-    setStatsLoading(true);
     try {
-      const response = await fetch('/api/dashboard/stats');
+      const response = await fetch('/api/dashboard/stats')
       if (response.ok) {
-        const data = await response.json();
-        setStatistics(data);
-      } else {
-        console.error('Failed to fetch dashboard stats:', response.statusText);
+        const data = await response.json()
+        setStatistics(data)
       }
     } catch (err) {
-      console.error('Error fetching dashboard stats:', err);
-    } finally {
-      setStatsLoading(false);
+      console.error('Error fetching dashboard stats:', err)
     }
-  };
+  }
 
-  // Fetch architecture-grouped data
+  // Fetch protein-centric data
+  const fetchProteins = async (page = 1, newFilters?: DomainFilters) => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const filtersToUse = newFilters !== undefined ? newFilters : filters
+      const params = new URLSearchParams({
+        page: page.toString(),
+        size: '50'
+      })
+
+      // Add filters
+      Object.entries(filtersToUse).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          if (Array.isArray(value) && value.length > 0) {
+            let paramKey = key
+            if (key === 't_group') paramKey = 't_groups'
+            else if (key === 'h_group') paramKey = 'h_groups'
+            else if (key === 'x_group') paramKey = 'x_groups'
+            params.set(paramKey, value.join(','))
+          } else if (!Array.isArray(value)) {
+            params.set(key, value.toString())
+          }
+        }
+      })
+
+      const response = await fetch(`/api/proteins/summary?${params}`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch proteins: ${response.status}`)
+      }
+
+      const data = await response.json()
+      setProteins(data.data || [])
+      setPagination(data.pagination || { page, size: 50, total: 0 })
+
+      if (data.statistics) {
+        setStatistics(data.statistics)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch architecture data (existing implementation)
   const fetchArchitectureData = async (newFilters?: DomainFilters) => {
     setLoading(true)
     setError(null)
 
     try {
       const filtersToUse = newFilters !== undefined ? newFilters : filters
-
       const params = new URLSearchParams()
 
-      // Add filters to URL params with proper mapping
       Object.entries(filtersToUse).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') {
           if (Array.isArray(value) && value.length > 0) {
-            // Map frontend filter names to API parameter names
             let paramKey = key
             if (key === 't_group') paramKey = 't_groups'
             else if (key === 'h_group') paramKey = 'h_groups'
             else if (key === 'x_group') paramKey = 'x_groups'
-
             params.set(paramKey, value.join(','))
           } else if (!Array.isArray(value)) {
             params.set(key, value.toString())
@@ -126,17 +188,13 @@ export default function DashboardPage() {
       })
 
       const response = await fetch(`/api/proteins/by-architecture?${params}`)
-
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to fetch architecture data: ${response.status} ${errorText}`)
+        throw new Error(`Failed to fetch architecture data: ${response.status}`)
       }
 
       const data = await response.json()
-
       setArchitectureGroups(data.architectures || [])
 
-      // Update statistics from architecture data
       if (data.statistics) {
         setStatistics(data.statistics)
       }
@@ -147,105 +205,68 @@ export default function DashboardPage() {
     }
   }
 
-  // Fetch domains data (for table view)
-  const fetchDomains = async (page = 1, newFilters?: DomainFilters) => {
-    if (initialLoad) setInitialLoad(false)
-    setLoading(true)
-    setStatsLoading(true)
+  // Run comprehensive audit
+  const runAudit = async (batchId?: number) => {
+    setAuditLoading(true)
     setError(null)
 
     try {
-      const filtersToUse = newFilters !== undefined ? newFilters : filters
+      const batchParam = batchId ? `?batch_id=${batchId}` : ''
 
-      const params = new URLSearchParams({
-        page: page.toString(),
-        size: '50'
-      })
+      const [missingResponse, evidenceResponse, chainBlastResponse] = await Promise.all([
+        fetch(`/api/audit/missing-partitions${batchParam}`),
+        fetch(`/api/audit/evidence-analysis${batchParam}`),
+        fetch('/api/audit/chain-blast-diagnostic')
+      ])
 
-      // Add filters to URL params with proper mapping
-      Object.entries(filtersToUse).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== '') {
-          if (Array.isArray(value) && value.length > 0) {
-            // Map frontend filter names to API parameter names
-            let paramKey = key
-            if (key === 't_group') paramKey = 't_groups'
-            else if (key === 'h_group') paramKey = 'h_groups'
-            else if (key === 'x_group') paramKey = 'x_groups'
-
-            params.set(paramKey, value.join(','))
-          } else if (!Array.isArray(value)) {
-            params.set(key, value.toString())
-          }
-        }
-      })
-
-      const response = await fetch(`/api/domains?${params}`)
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to fetch domains: ${response.status} ${errorText}`)
+      if (!missingResponse.ok || !evidenceResponse.ok || !chainBlastResponse.ok) {
+        throw new Error('One or more audit requests failed')
       }
 
-      const data = await response.json()
+      const [missingData, evidenceData, chainBlastData] = await Promise.all([
+        missingResponse.json(),
+        evidenceResponse.json(),
+        chainBlastResponse.json()
+      ])
 
-      // Update states
-      setDomains(data.data || [])
-      setPagination(data.pagination || { page, size: 50, total: 0 })
-
-      // Handle statistics - support both new and old API format
-      if (data.statistics) {
-        setStatistics(data.statistics)
-      } else {
-        // Fallback for older API format
-        const domains = data.data || []
-        setStatistics({
-          totalDomains: data.pagination?.total || 0,
-          classifiedDomains: domains.filter((d: DomainSummary) => d.t_group).length,
-          highConfidenceDomains: domains.filter((d: DomainSummary) => d.confidence && d.confidence >= 0.8).length,
-          avgConfidence: domains.length > 0 ? domains.reduce((sum: number, d: DomainSummary) => sum + (d.confidence || 0), 0) / domains.length : 0,
-          domainsWithEvidence: domains.filter((d: DomainSummary) => d.evidence_count > 0).length
-        })
-      }
+      setAuditData({
+        missingPartitions: missingData.missing_partitions || [],
+        evidenceConflicts: evidenceData.evidence_analysis || [],
+        chainBlastIssues: chainBlastData.chain_blast_diagnostic || []
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
+      setError(err instanceof Error ? err.message : 'Audit failed')
     } finally {
-      setLoading(false)
-      setStatsLoading(false)
+      setAuditLoading(false)
     }
-
-    await fetchDashboardStats();
   }
-
-  // Initial load
-  useEffect(() => {
-    if (viewMode === 'architecture') {
-      fetchArchitectureData()
-    } else {
-      fetchDomains(1)
-    }
-  }, [])
-
-  // Handle filter changes
-  useEffect(() => {
-    if (!initialLoad) {
-      if (viewMode === 'architecture') {
-        fetchArchitectureData()
-      } else {
-        fetchDomains(1)
-      }
-    }
-  }, [filters, initialLoad])
 
   // Handle view mode changes
   useEffect(() => {
-    if (viewMode === 'architecture') {
+    if (viewMode === 'proteins') {
+      fetchProteins(1)
+    } else if (viewMode === 'architecture') {
       fetchArchitectureData()
-    } else if (viewMode === 'table') {
-      fetchDomains(1)
+    } else if (viewMode === 'audit') {
+      runAudit(selectedBatch || undefined)
     }
-  }, [viewMode])
+  }, [viewMode, selectedBatch])
 
   // Handle filter changes
+  useEffect(() => {
+    if (viewMode === 'proteins') {
+      fetchProteins(1)
+    } else if (viewMode === 'architecture') {
+      fetchArchitectureData()
+    }
+  }, [filters])
+
+  // Initial load
+  useEffect(() => {
+    fetchDashboardStats()
+    fetchProteins(1)
+  }, [])
+
   const handleFiltersChange = (newFilters: DomainFilters) => {
     setFilters(newFilters)
   }
@@ -254,277 +275,30 @@ export default function DashboardPage() {
     setFilters({})
   }
 
-  // Handle pagination
   const handlePageChange = (page: number) => {
     setPagination(prev => ({ ...prev, page }))
-    fetchDomains(page)
+    fetchProteins(page)
   }
 
-  // Handle architecture group pagination
-  const handleArchitecturePageChange = (architectureId: string, page: number) => {
-    // In a real implementation, this would update the specific architecture group
-    console.log(`Architecture ${architectureId} page change to ${page}`)
-    // You would call an API endpoint like:
-    // fetchArchitectureGroupPage(architectureId, page)
+  const handleProteinClick = (protein: ProteinSummary) => {
+    router.push(`/protein/${protein.source_id}`)
   }
 
-  // Handle domain selection
-  const handleDomainClick = (domain: DomainSummary) => {
-    setSelectedDomain(domain)
+  // Calculate audit summary
+  const auditSummary = {
+    totalIssues: auditData.missingPartitions.reduce((sum, batch) => sum + batch.missing_proteins, 0) +
+                 auditData.evidenceConflicts.reduce((sum, conflict) => sum + conflict.case_count, 0) +
+                 auditData.chainBlastIssues.reduce((sum, issue) => sum + issue.protein_count, 0),
+    criticalIssues: auditData.missingPartitions.filter(batch => batch.missing_proteins > 100).length +
+                   auditData.evidenceConflicts.filter(conflict => conflict.case_count > 50).length,
+    chainBlastProblems: auditData.chainBlastIssues.filter(issue =>
+      issue.chain_blast_issue === 'CHAIN_BLAST_NOT_USED' ||
+      issue.chain_blast_issue === 'HIGH_CONF_CHAIN_BLAST_IGNORED'
+    ).reduce((sum, issue) => sum + issue.protein_count, 0)
   }
-
-  const handleViewDomain = (domain: DomainSummary) => {
-    router.push(`/domains/${domain.id}`)
-  }
-
-  // Fixed navigation to use source_id format
-  const handleViewProtein = (domain: DomainSummary) => {
-    if (domain.pdb_id && domain.chain_id) {
-      const sourceId = `${domain.pdb_id}_${domain.chain_id}`
-      router.push(`/protein/${sourceId}`)
-    } else {
-      console.error('Missing pdb_id or chain_id for domain:', domain)
-    }
-  }
-
-  // Enhanced classification badge renderer
-  const renderClassificationBadge = (
-    value: string | null,
-    filterKey: 'h_group' | 'x_group' | 'a_group' | 't_group',
-    label: string
-  ) => {
-    const currentFilters = (filters[filterKey] as string[]) || []
-    const isCurrentlyFiltered = currentFilters.includes(value || '')
-
-    return (
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          if (value) {
-            const newFilters = isCurrentlyFiltered
-              ? currentFilters.filter(item => item !== value)
-              : [...currentFilters, value]
-
-            handleFiltersChange({
-              ...filters,
-              [filterKey]: newFilters.length > 0 ? newFilters : undefined
-            })
-          }
-        }}
-        className={`px-2 py-1 rounded text-xs font-medium transition-all duration-200 ${
-          value
-            ? isCurrentlyFiltered
-              ? 'bg-green-500 text-white hover:bg-green-600 ring-2 ring-green-300 cursor-pointer'
-              : 'bg-blue-500 text-white hover:bg-blue-600 hover:scale-105 cursor-pointer'
-            : 'bg-gray-100 text-gray-500 cursor-default'
-        }`}
-        disabled={!value}
-        title={value ? (
-          isCurrentlyFiltered
-            ? `Click to remove ${label} ${value} from filter`
-            : `Click to add ${label} ${value} to filter`
-        ) : undefined}
-      >
-        {value || 'Unclassified'}
-        {isCurrentlyFiltered && <span className="ml-1">✓</span>}
-      </button>
-    )
-  }
-
-  // Enhanced export functionality
-  const handleExport = async () => {
-    try {
-      const params = new URLSearchParams({ size: '10000' })
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          if (Array.isArray(value)) {
-            let paramKey = key
-            if (key === 't_group') paramKey = 't_groups'
-            else if (key === 'h_group') paramKey = 'h_groups'
-            else if (key === 'x_group') paramKey = 'x_groups'
-            params.set(paramKey, value.join(','))
-          } else {
-            params.set(key, value.toString())
-          }
-        }
-      })
-
-      const endpoint = viewMode === 'architecture' ? '/api/proteins/by-architecture' : '/api/domains'
-      const response = await fetch(`${endpoint}?${params}`)
-      const data = await response.json()
-
-      let csvData: any[] = []
-
-      if (viewMode === 'architecture') {
-        // Export architecture data
-        csvData = data.architectures.flatMap((group: ArchitectureGroup) =>
-          group.proteins.flatMap((protein: ProteinWithDomains) =>
-            protein.domains.map((domain: DomainSummary) => ({
-              architecture_id: group.architecture_id,
-              pattern_name: group.pattern_name,
-              pdb_id: domain.pdb_id,
-              chain_id: domain.chain_id,
-              domain_number: domain.domain_number,
-              range: domain.range,
-              confidence: domain.confidence,
-              t_group: domain.t_group,
-              h_group: domain.h_group,
-              evidence_count: domain.evidence_count,
-              evidence_types: domain.evidence_types
-            }))
-          )
-        )
-      } else {
-        csvData = data.data.map((domain: DomainSummary) => ({
-          pdb_id: domain.pdb_id,
-          chain_id: domain.chain_id,
-          domain_number: domain.domain_number,
-          range: domain.range,
-          confidence: domain.confidence,
-          t_group: domain.t_group,
-          h_group: domain.h_group,
-          evidence_count: domain.evidence_count,
-          evidence_types: domain.evidence_types
-        }))
-      }
-
-      downloadAsCSV(csvData, `${viewMode}_export_${new Date().toISOString().split('T')[0]}.csv`)
-    } catch (error) {
-      console.error('Export failed:', error)
-    }
-  }
-
-  // Calculate active filter count
-  const activeFilterCount = Object.keys(filters).filter(key => {
-    const value = filters[key as keyof DomainFilters]
-    if (Array.isArray(value)) {
-      return value.length > 0
-    }
-    return value !== undefined && value !== null && value !== ''
-  }).length
-
-  // Table columns configuration (for table view)
-  const columns = [
-    {
-      key: 'pdb_id',
-      label: 'PDB ID',
-      sortable: true,
-      render: (value: string, domain: DomainSummary) => (
-        <button
-          onClick={() => handleViewProtein(domain)}
-          className="text-blue-600 hover:text-blue-800 font-medium"
-        >
-          {value}_{domain.chain_id}
-        </button>
-      )
-    },
-    {
-      key: 'domain_number',
-      label: 'Domain',
-      sortable: true,
-      render: (value: number, domain: DomainSummary) => (
-        <span className="font-mono">{value}</span>
-      )
-    },
-    {
-      key: 'range',
-      label: 'Range',
-      render: (value: string) => (
-        <span className="font-mono text-sm">{value}</span>
-      )
-    },
-    {
-      key: 'confidence',
-      label: 'Confidence',
-      sortable: true,
-      render: (value: number | null) => {
-        if (!value) return <span className="text-gray-400">N/A</span>
-        const color = value >= 0.8 ? 'text-green-600' : value >= 0.5 ? 'text-yellow-600' : 'text-red-600'
-        return <span className={`font-medium ${color}`}>{value.toFixed(3)}</span>
-      }
-    },
-    {
-      key: 'x_group',
-      label: 'X-Group',
-      render: (value: string | null) => renderClassificationBadge(value, 'x_group', 'X-group (Possible Homology)')
-    },
-    {
-      key: 'h_group',
-      label: 'H-Group',
-      render: (value: string | null) => renderClassificationBadge(value, 'h_group', 'H-group (Homology)')
-    },
-    {
-      key: 't_group',
-      label: 'T-Group',
-      render: (value: string | null) => renderClassificationBadge(value, 't_group', 'T-group (Topology)')
-    },
-    {
-      key: 'evidence_count',
-      label: 'Evidence',
-      sortable: true,
-      render: (value: number, domain: DomainSummary) => (
-        <div className="text-center">
-          <span className="font-medium">{value}</span>
-          <div className="text-xs text-gray-500">{domain.evidence_types}</div>
-        </div>
-      )
-    },
-    {
-      key: 'actions',
-      label: 'Actions',
-      render: (_: any, domain: DomainSummary) => (
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleViewDomain(domain)}
-          >
-            <Eye className="w-4 h-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleDomainClick(domain)}
-          >
-            <BarChart3 className="w-4 h-4" />
-          </Button>
-        </div>
-      )
-    }
-  ]
-
-  // Loading state component for statistics
-  const StatCard = ({
-    title,
-    value,
-    color,
-    loading
-  }: {
-    title: string
-    value: number | string
-    color: string
-    loading?: boolean
-  }) => (
-    <Card className="p-6">
-      {loading ? (
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-24"></div>
-        </div>
-      ) : (
-        <>
-          <div className={`text-2xl font-bold ${color}`}>
-            {typeof value === 'number' ? value.toLocaleString() : value}
-          </div>
-          <div className="text-sm text-gray-600">{title}</div>
-        </>
-      )}
-    </Card>
-  )
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Container with responsive max-width */}
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="space-y-6">
           {/* Header */}
@@ -532,55 +306,41 @@ export default function DashboardPage() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Domain Analysis Dashboard</h1>
               <p className="text-gray-600 mt-1">
-                Analyze protein domain architectures and classification patterns
+                Analyze protein domain architectures, classifications, and pipeline health
               </p>
             </div>
+
             <div className="flex flex-wrap gap-2">
+              <Button
+                variant={viewMode === 'proteins' ? 'default' : 'outline'}
+                onClick={() => setViewMode('proteins')}
+                className="flex items-center gap-2"
+              >
+                <Database className="w-4 h-4" />
+                Proteins
+              </Button>
               <Button
                 variant={viewMode === 'architecture' ? 'default' : 'outline'}
                 onClick={() => setViewMode('architecture')}
                 className="flex items-center gap-2"
               >
                 <Layers className="w-4 h-4" />
-                Architecture View
+                Architecture
               </Button>
               <Button
-                variant={viewMode === 'table' ? 'default' : 'outline'}
-                onClick={() => setViewMode('table')}
+                variant={viewMode === 'audit' ? 'default' : 'outline'}
+                onClick={() => setViewMode('audit')}
                 className="flex items-center gap-2"
               >
-                <List className="w-4 h-4" />
-                Table View
+                <AlertTriangle className="w-4 h-4" />
+                Audit
+                {auditSummary.totalIssues > 0 && (
+                  <Badge variant="destructive" className="ml-1">
+                    {auditSummary.totalIssues}
+                  </Badge>
+                )}
               </Button>
-              <Button
-                variant={viewMode === 'visualization' ? 'default' : 'outline'}
-                onClick={() => setViewMode('visualization')}
-                className="flex items-center gap-2"
-              >
-                <Grid className="w-4 h-4" />
-                Visualization
-              </Button>
-              {viewMode === 'visualization' && (
-                <div className="flex border rounded-md">
-                  <Button
-                    size="sm"
-                    variant={visualizationMode === 'simple' ? 'default' : 'ghost'}
-                    onClick={() => setVisualizationMode('simple')}
-                    className="rounded-r-none"
-                  >
-                    Simple
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={visualizationMode === 'detailed' ? 'default' : 'ghost'}
-                    onClick={() => setVisualizationMode('detailed')}
-                    className="rounded-l-none"
-                  >
-                    Detailed
-                  </Button>
-                </div>
-              )}
-              <Button variant="outline" onClick={handleExport} className="flex items-center gap-2">
+              <Button variant="outline" className="flex items-center gap-2">
                 <Download className="w-4 h-4" />
                 Export
               </Button>
@@ -589,386 +349,308 @@ export default function DashboardPage() {
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Total Proteins"
-              value={statistics.total_proteins ? statistics.total_proteins.toLocaleString() : '0'}
-              color="text-blue-600"
-              loading={statsLoading}
-            />
-            <StatCard
-              title="Total Domains"
-              value={statistics.total_domains ? statistics.total_domains.toLocaleString() : '0'}
-              color="text-green-600"
-              loading={statsLoading}
-            />
-            <StatCard
-              title="Classified Proteins"
-              value={statistics.classified_chains ?
-                `${statistics.classified_chains.toLocaleString()} (${
+            <Card className="p-6">
+              <div className="text-2xl font-bold text-blue-600">
+                {statistics.total_proteins.toLocaleString()}
+              </div>
+              <div className="text-sm text-gray-600">Total Proteins</div>
+            </Card>
+
+            <Card className="p-6">
+              <div className="text-2xl font-bold text-green-600">
+                {statistics.total_domains.toLocaleString()}
+              </div>
+              <div className="text-sm text-gray-600">Total Domains</div>
+            </Card>
+
+            <Card className="p-6">
+              <div className="text-2xl font-bold text-purple-600">
+                {statistics.classified_chains.toLocaleString()} ({
                   statistics.total_proteins ?
                   Math.round((statistics.classified_chains / statistics.total_proteins) * 100) : 0
-                }%)` : '0 (0%)'
-              }
-              color="text-purple-600"
-              loading={statsLoading}
-            />
-            <StatCard
-              title="Domain Coverage"
-              value={statistics.avg_domain_coverage ?
-                `${statistics.avg_domain_coverage.toFixed(1)}%` : '0%'
-              }
-              color="text-orange-600"
-              loading={statsLoading}
-            />
-          </div>
-
-          {/* Enhanced Filters */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg">
-            <FilterPanel
-              filters={filters}
-              onFiltersChange={handleFiltersChange}
-              onReset={handleResetFilters}
-            />
-            {activeFilterCount > 0 && (
-              <div className="px-6 pb-4 text-sm text-blue-700">
-                💡 <strong>Tip:</strong> Click on classification badges to quickly add or remove filters!
+                }%)
               </div>
-            )}
+              <div className="text-sm text-gray-600">Classified Proteins</div>
+            </Card>
+
+            <Card className="p-6">
+              <div className="text-2xl font-bold text-orange-600">
+                {statistics.avg_domain_coverage?.toFixed(1)}%
+              </div>
+              <div className="text-sm text-gray-600">Avg Coverage</div>
+            </Card>
           </div>
 
-          {/* Main Content Layout */}
-          <div className={`${selectedDomain ? 'grid grid-cols-1 xl:grid-cols-4 gap-6' : 'w-full'}`}>
-            {/* Main Content Area */}
-            <div className={selectedDomain ? 'xl:col-span-3' : 'w-full'}>
-              {loading ? (
-                <Card className="p-8 text-center">
-                  <LoadingSpinner />
-                  <p className="mt-4 text-gray-600">Loading data...</p>
-                </Card>
-              ) : error ? (
-                <Card className="p-8 text-center">
-                  <div className="text-red-600 mb-4">Error: {error}</div>
-                  <Button onClick={() => viewMode === 'architecture' ? fetchArchitectureData() : fetchDomains(pagination.page)}>Retry</Button>
-                </Card>
-              ) : viewMode === 'architecture' ? (
-                <ArchitectureGroupedTable
-                  architectureGroups={architectureGroups}
-                  onProteinClick={handleViewProtein}
-                  onDomainClick={handleDomainClick}
-                  onArchitecturePageChange={handleArchitecturePageChange}
-                  renderClassificationBadge={renderClassificationBadge}
-                  loading={loading}
-                />
-              ) : viewMode === 'table' ? (
-                domains.length === 0 ? (
-                  <Card className="p-8 text-center">
-                    <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <div className="text-gray-500 mb-4">No domains found</div>
-                    <p className="text-sm text-gray-400">
-                      Try adjusting your filters or check if data is available in the database.
-                    </p>
-                    <Button
-                      onClick={() => fetchDomains(1)}
-                      className="mt-4"
-                      variant="outline"
-                    >
-                      Load Data
-                    </Button>
-                  </Card>
-                ) : (
-                  <div className="w-full">
-                    <DataTable
-                      data={domains}
-                      columns={columns}
-                      pagination={pagination}
-                      onPageChange={handlePageChange}
-                      onRowClick={handleDomainClick}
-                      loading={loading}
-                    />
+          {/* Audit Alert (only show if there are issues) */}
+          {viewMode !== 'audit' && auditSummary.totalIssues > 0 && (
+            <Card className="p-4 border-orange-200 bg-orange-50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-orange-600" />
+                  <div>
+                    <div className="font-medium text-orange-800">
+                      {auditSummary.totalIssues} pipeline issues detected
+                    </div>
+                    <div className="text-sm text-orange-700">
+                      {auditSummary.criticalIssues} critical • {auditSummary.chainBlastProblems} chain BLAST problems
+                    </div>
                   </div>
-                )
-              ) : (
-                <div className="space-y-6">
-                  {/* Visualization Content - keeping existing implementation */}
-                  {Object.entries(
-                    domains.reduce((acc, domain) => {
-                      const key = `${domain.pdb_id}_${domain.chain_id}`
-                      if (!acc[key]) acc[key] = []
-                      acc[key].push(domain)
-                      return acc
-                    }, {} as Record<string, DomainSummary[]>)
-                  ).map(([proteinKey, proteinDomains]) => {
-                    const firstDomain = proteinDomains[0]
-
-                    // Separate putative and reference domains
-                    const putativeDomains = proteinDomains.filter(d =>
-                      d.domain_type === 'putative' || !d.domain_type
-                    )
-                    const referenceDomains = proteinDomains.filter(d =>
-                      d.domain_type === 'reference'
-                    )
-
-                    // Use actual sequence length from domain data, or estimate from ranges
-                    let sequenceLength = firstDomain.protein_sequence_length
-
-                    if (!sequenceLength) {
-                      // Fallback: estimate from maximum domain range
-                      sequenceLength = Math.max(
-                        ...proteinDomains.map(d => {
-                          const rangeParts = d.range?.split(',') || []
-                          let maxPos = 0
-                          for (const part of rangeParts) {
-                            const withoutChain = part.includes(':') ? part.split(':')[1] : part
-                            const endPos = parseInt(withoutChain.split('-')[1] || '0')
-                            if (!isNaN(endPos)) {
-                              maxPos = Math.max(maxPos, endPos)
-                            }
-                          }
-                          return maxPos
-                        })
-                      )
-
-                      // Add some padding to the estimated length
-                      if (sequenceLength > 0) {
-                        sequenceLength = Math.ceil(sequenceLength * 1.1)
-                      }
-
-                      // If we still don't have a length, use a default
-                      if (!sequenceLength || sequenceLength <= 0) {
-                        sequenceLength = 500
-                      }
-                    }
-
-                    return visualizationMode === 'simple' ? (
-                      // Simple visualization - only putative domains
-                      <Card key={proteinKey} className="p-4">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-4">
-                            <h3 className="text-lg font-semibold">
-                              Protein: {firstDomain.pdb_id}_{firstDomain.chain_id}
-                            </h3>
-                            <div className="text-sm text-gray-600">
-                              {putativeDomains.length} putative domain{putativeDomains.length !== 1 ? 's' : ''} | {sequenceLength} residues
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleViewProtein(firstDomain)}
-                          >
-                            <Eye className="w-4 h-4 mr-1" />
-                            View Details
-                          </Button>
-                        </div>
-
-                        <BoundaryVisualization
-                          protein={{
-                            id: firstDomain.protein_id,
-                            pdb_id: firstDomain.pdb_id,
-                            chain_id: firstDomain.chain_id,
-                            sequence_length: sequenceLength
-                          }}
-                          domains={putativeDomains}
-                          onDomainClick={handleDomainClick}
-                        />
-
-                        {referenceDomains.length > 0 && (
-                          <div className="mt-3 text-sm text-gray-600 bg-blue-50 p-3 rounded">
-                            💡 This protein also has {referenceDomains.length} reference domains from ECOD used as supporting evidence.
-                          </div>
-                        )}
-                      </Card>
-                    ) : (
-                      // Detailed multi-track visualization
-                      <MultiTrackDomainVisualization
-                        key={proteinKey}
-                        protein={{
-                          id: firstDomain.protein_id,
-                          pdb_id: firstDomain.pdb_id,
-                          chain_id: firstDomain.chain_id,
-                          sequence_length: sequenceLength
-                        }}
-                        putativeDomains={putativeDomains}
-                        referenceDomains={referenceDomains}
-                        onDomainClick={handleDomainClick}
-                      />
-                    )
-                  })}
                 </div>
-              )}
-            </div>
-
-            {/* Side Panel - Domain Details */}
-            {selectedDomain && (
-              <div className="xl:col-span-1">
-                <Card className="p-6 sticky top-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">Domain Details</h3>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setSelectedDomain(null)}
-                    >
-                      ✕
-                    </Button>
-                  </div>
-
-                  <div className="space-y-4">
-                    {/* Basic Information */}
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">Protein</label>
-                      <div className="text-sm font-mono">{selectedDomain.pdb_id}_{selectedDomain.chain_id}</div>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">Domain Number</label>
-                      <div className="text-sm">{selectedDomain.domain_number}</div>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">Range</label>
-                      <div className="text-sm font-mono">{selectedDomain.range}</div>
-                    </div>
-
-                    {/* Quality Metrics */}
-                    <div className="border-t pt-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Quality Metrics</h4>
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Confidence:</span>
-                          <span className={`text-sm font-medium ${
-                            selectedDomain.confidence && selectedDomain.confidence >= 0.8 ? 'text-green-600' :
-                            selectedDomain.confidence && selectedDomain.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'
-                          }`}>
-                            {selectedDomain.confidence ? selectedDomain.confidence.toFixed(3) : 'N/A'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Evidence Count:</span>
-                          <span className="text-sm font-medium">{selectedDomain.evidence_count}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Evidence Types:</span>
-                          <span className="text-sm">{selectedDomain.evidence_types}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Classification */}
-                    <div className="border-t pt-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Classification</h4>
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">T-Group:</span>
-                          <span className={`text-sm px-2 py-1 rounded ${
-                            selectedDomain.t_group ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'
-                          }`}>
-                            {selectedDomain.t_group || 'Not assigned'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">H-Group:</span>
-                          <span className={`text-sm px-2 py-1 rounded ${
-                            selectedDomain.h_group ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-500'
-                          }`}>
-                            {selectedDomain.h_group || 'Not assigned'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">X-Group:</span>
-                          <span className={`text-sm px-2 py-1 rounded ${
-                            selectedDomain.x_group ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
-                          }`}>
-                            {selectedDomain.x_group || 'Not assigned'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">A-Group:</span>
-                          <span className={`text-sm px-2 py-1 rounded ${
-                            selectedDomain.a_group ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-500'
-                          }`}>
-                            {selectedDomain.a_group || 'Not assigned'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Processing Information */}
-                    <div className="border-t pt-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Processing Info</h4>
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Batch:</span>
-                          <span className="text-sm">{selectedDomain.batch_id || 'N/A'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Reference:</span>
-                          <span className="text-sm">{selectedDomain.reference_version || 'N/A'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">Timestamp:</span>
-                          <span className="text-sm">
-                            {selectedDomain.timestamp ? new Date(selectedDomain.timestamp).toLocaleDateString() : 'N/A'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="border-t pt-4 space-y-2">
-                      <Button
-                        className="w-full"
-                        onClick={() => handleViewDomain(selectedDomain)}
-                      >
-                        <Eye className="w-4 h-4 mr-2" />
-                        View Full Details
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => handleViewProtein(selectedDomain)}
-                      >
-                        <BarChart3 className="w-4 h-4 mr-2" />
-                        View Protein
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setViewMode('audit')}
+                  className="border-orange-300 text-orange-700 hover:bg-orange-100"
+                >
+                  View Audit
+                </Button>
               </div>
-            )}
-          </div>
+            </Card>
+          )}
+
+          {/* Filters (hide for audit view) */}
+          {viewMode !== 'audit' && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg">
+              <FilterPanel
+                filters={filters}
+                onFiltersChange={handleFiltersChange}
+                onReset={handleResetFilters}
+              />
+            </div>
+          )}
+
+          {/* Main Content */}
+          {loading ? (
+            <Card className="p-8 text-center">
+              <LoadingSpinner />
+              <p className="mt-4 text-gray-600">Loading data...</p>
+            </Card>
+          ) : error ? (
+            <Card className="p-8 text-center">
+              <div className="text-red-600 mb-4">Error: {error}</div>
+              <Button onClick={() => {
+                if (viewMode === 'proteins') fetchProteins(pagination.page)
+                else if (viewMode === 'architecture') fetchArchitectureData()
+                else if (viewMode === 'audit') runAudit(selectedBatch || undefined)
+              }}>
+                Retry
+              </Button>
+            </Card>
+          ) : viewMode === 'proteins' ? (
+            <ProteinTable
+              proteins={proteins}
+              pagination={pagination}
+              onPageChange={handlePageChange}
+              onProteinClick={handleProteinClick}
+              loading={loading}
+            />
+          ) : viewMode === 'architecture' ? (
+            <ArchitectureGroupedTable
+              architectureGroups={architectureGroups}
+              onProteinClick={handleProteinClick}
+              onDomainClick={() => {}} // TODO: implement
+              renderClassificationBadge={() => <></> } // TODO: implement
+              loading={loading}
+            />
+          ) : (
+            <AuditView
+              auditData={auditData}
+              loading={auditLoading}
+              selectedBatch={selectedBatch}
+              onBatchChange={setSelectedBatch}
+              onRefresh={() => runAudit(selectedBatch || undefined)}
+            />
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-// Utility function for CSV export
-function downloadAsCSV(data: any[], filename: string) {
-  const headers = Object.keys(data[0])
-  const csvContent = [
-    headers.join(','),
-    ...data.map(row =>
-      headers.map(key => {
-        const value = row[key]
-        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-          return `"${value.replace(/"/g, '""')}"`
-        }
-        return value || ''
-      }).join(',')
+// Audit View Component
+interface AuditViewProps {
+  auditData: AuditData
+  loading: boolean
+  selectedBatch: number | null
+  onBatchChange: (batchId: number | null) => void
+  onRefresh: () => void
+}
+
+function AuditView({ auditData, loading, selectedBatch, onBatchChange, onRefresh }: AuditViewProps) {
+  if (loading) {
+    return (
+      <Card className="p-8 text-center">
+        <LoadingSpinner />
+        <p className="mt-4 text-gray-600">Running pipeline audit...</p>
+      </Card>
     )
-  ].join('\n')
-
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-
-  if (link.download !== undefined) {
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', filename)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
   }
+
+  return (
+    <div className="space-y-6">
+      {/* Audit Controls */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h3 className="text-lg font-semibold">Pipeline Audit</h3>
+            <select
+              value={selectedBatch || ''}
+              onChange={(e) => onBatchChange(e.target.value ? parseInt(e.target.value) : null)}
+              className="border rounded px-3 py-1 text-sm"
+            >
+              <option value="">All Batches</option>
+              {/* TODO: Add batch options */}
+            </select>
+          </div>
+          <Button onClick={onRefresh} className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" />
+            Refresh Audit
+          </Button>
+        </div>
+      </Card>
+
+      {/* Missing Partitions */}
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold text-red-800 mb-4 flex items-center gap-2">
+          <XCircle className="w-5 h-5" />
+          Missing Partitions
+        </h3>
+
+        {auditData.missingPartitions.length === 0 ? (
+          <div className="text-green-600 flex items-center gap-2">
+            <CheckCircle className="w-4 h-4" />
+            No missing partitions detected
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {auditData.missingPartitions.map((batch) => (
+              <div key={batch.batch_id} className="border rounded p-4 bg-red-50">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <h4 className="font-medium">{batch.batch_name}</h4>
+                    <div className="text-sm text-gray-600">Batch ID: {batch.batch_id}</div>
+                  </div>
+                  <Badge variant="destructive">{batch.missing_proteins} missing</Badge>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+                  <div className="text-center">
+                    <div className="font-semibold text-red-600">{batch.proteins_without_domains}</div>
+                    <div className="text-xs text-gray-600">No Domains</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="font-semibold text-orange-600">{batch.domains_without_evidence}</div>
+                    <div className="text-xs text-gray-600">No Evidence</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="font-semibold text-yellow-600">{batch.classification_failures}</div>
+                    <div className="text-xs text-gray-600">Classification Failed</div>
+                  </div>
+                </div>
+
+                {batch.sample_issues.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-sm font-medium text-gray-700">Sample Issues:</div>
+                    <div className="text-xs text-gray-600 mt-1">
+                      {batch.sample_issues.slice(0, 5).join(', ')}
+                      {batch.sample_issues.length > 5 && ` and ${batch.sample_issues.length - 5} more...`}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Evidence Conflicts */}
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold text-orange-800 mb-4 flex items-center gap-2">
+          <AlertCircle className="w-5 h-5" />
+          Evidence Conflicts & Tuning Suggestions
+        </h3>
+
+        {auditData.evidenceConflicts.length === 0 ? (
+          <div className="text-green-600 flex items-center gap-2">
+            <CheckCircle className="w-4 h-4" />
+            No evidence conflicts detected
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {auditData.evidenceConflicts.map((conflict, index) => (
+              <div key={index} className="border rounded p-4 bg-orange-50">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <h4 className="font-medium">{conflict.conflict_type.replace(/_/g, ' ')}</h4>
+                    <div className="text-sm text-orange-700">{conflict.tuning_suggestion.replace(/_/g, ' ')}</div>
+                  </div>
+                  <Badge variant="outline">{conflict.case_count} cases</Badge>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+                  <div className="text-center">
+                    <div className="font-semibold">{conflict.avg_final_confidence?.toFixed(3)}</div>
+                    <div className="text-xs text-gray-600">Avg Final Confidence</div>
+                  </div>
+                </div>
+
+                {conflict.sample_cases.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-sm font-medium text-gray-700">Sample Cases:</div>
+                    <div className="text-xs text-gray-600 mt-1 font-mono">
+                      {conflict.sample_cases.slice(0, 3).join(', ')}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Chain BLAST Issues */}
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold text-yellow-800 mb-4 flex items-center gap-2">
+          <Zap className="w-5 h-5" />
+          Chain BLAST Issues
+        </h3>
+
+        {auditData.chainBlastIssues.length === 0 ? (
+          <div className="text-green-600 flex items-center gap-2">
+            <CheckCircle className="w-4 h-4" />
+            No chain BLAST issues detected
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {auditData.chainBlastIssues.map((issue, index) => (
+              <div key={index} className="border rounded p-4 bg-yellow-50">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <h4 className="font-medium">{issue.chain_blast_issue.replace(/_/g, ' ')}</h4>
+                  </div>
+                  <Badge variant="outline">{issue.protein_count} proteins</Badge>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                  <div className="text-center">
+                    <div className="font-semibold">{issue.avg_chain_blast_hits?.toFixed(1)}</div>
+                    <div className="text-xs text-gray-600">Avg Chain BLAST Hits</div>
+                  </div>
+                </div>
+
+                {issue.sample_proteins.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-sm font-medium text-gray-700">Sample Proteins:</div>
+                    <div className="text-xs text-gray-600 mt-1 font-mono">
+                      {issue.sample_proteins.slice(0, 3).join(', ')}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
 }

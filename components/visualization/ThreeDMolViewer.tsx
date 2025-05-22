@@ -133,7 +133,14 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
           try {
             // Apply the original domain styling
             applyDomainStyling(viewerRef.current);
-            viewerRef.current.zoomTo();
+
+            // Focus on the chain if specified
+            if (chainId) {
+              viewerRef.current.zoomTo({chain: chainId});
+            } else {
+              viewerRef.current.zoomTo();
+            }
+
             viewerRef.current.render();
           } catch (error) {
             debugLog('Error in reset:', error);
@@ -260,29 +267,21 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
         end: domain.end,
         pdb_range: domain.pdb_range,
         pdb_start: domain.pdb_start,
-        pdb_end: domain.pdb_end
+        pdb_end: domain.pdb_end,
+        color: domain.color
       });
     });
 
     // Cache the domains we're applying styling for
     lastAppliedDomainsRef.current = [...domains];
 
-    // Set base style for all atoms with reduced opacity
-    viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.4 } });
-
-    // Highlight specific chain if provided
-    if (chainId) {
-      debugLog(`Setting style for chain: ${chainId}`);
-      viewer.setStyle({chain: chainId}, {
-        cartoon: {
-          color: 'gray',
-          opacity: 0.7
-        }
-      });
-    }
-
-    // Apply styling for each domain
     if (domains.length > 0) {
+      // When we have domains, style them individually and hide everything else
+
+      // First, hide all atoms with very low opacity
+      viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.2 } });
+
+      // Apply styling for each domain with bright colors
       domains.forEach((domain, index) => {
         try {
           // Determine the best range to use for selection
@@ -358,12 +357,13 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             }
           }
 
-          debugLog(`Setting style for domain ${index}:`, selection);
+          const domainColor = domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`;
+          debugLog(`Setting style for domain ${index} with color ${domainColor}:`, selection);
 
-          // Apply style with full opacity for the domain
+          // Apply bright domain color with full opacity
           viewer.setStyle(selection, {
             cartoon: {
-              color: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+              color: domainColor,
               opacity: 1.0
             }
           });
@@ -373,7 +373,7 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
             try {
               viewer.addLabel(domain.label, {
                 position: { resi: Math.floor((start + end) / 2), chain: domainChainId },
-                backgroundColor: domain.color || `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+                backgroundColor: domainColor,
                 fontColor: "#ffffff",
                 fontSize: 12,
                 alignment: "center",
@@ -387,6 +387,18 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
           debugLog(`Error applying domain ${domain.id}:`, domainError);
         }
       });
+    } else {
+      // No domains - just show the chain in a neutral color
+      if (chainId) {
+        debugLog(`No domains, showing chain ${chainId} in neutral color`);
+        viewer.setStyle({}, { cartoon: { color: 'lightgray', opacity: 0.4 } });
+        viewer.setStyle({chain: chainId}, {
+          cartoon: {
+            color: 'gray',
+            opacity: 0.8
+          }
+        });
+      }
     }
 
     // Final render
@@ -449,11 +461,23 @@ const ThreeDMolViewer = forwardRef<any, ThreeDMolViewerProps>(({
 
             debugLog('PDB model loaded successfully');
 
-            // Apply domain styling
+            // Apply domain styling first
             applyDomainStyling(viewer);
 
-            // Zoom to fit the model
-            viewer.zoomTo();
+            // Focus on the specific chain if provided, otherwise zoom to all
+            if (chainId) {
+              debugLog(`Focusing on chain: ${chainId}`);
+              try {
+                // Zoom to the specific chain
+                viewer.zoomTo({chain: chainId});
+              } catch (e) {
+                debugLog('Error zooming to chain, using default zoom:', e);
+                viewer.zoomTo();
+              }
+            } else {
+              // Zoom to fit the entire model
+              viewer.zoomTo();
+            }
 
             // Update loading state
             setIsLoading(false);

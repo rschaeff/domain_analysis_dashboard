@@ -23,19 +23,19 @@ const DOMAIN_COLORS = [
   '#FF6600', '#9900CC', '#669900', '#FF99CC', '#666666', '#336699'
 ]
 
-interface EnhancedStructureViewerProps {
+interface StructureViewerProps {
   pdb_id: string
   chain_id: string
   domains?: any[]
   onDomainClick?: (domain: any) => void
 }
 
-export function EnhancedStructureViewer({
+export function StructureViewer({
   pdb_id,
   chain_id,
   domains = [],
   onDomainClick
-}: EnhancedStructureViewerProps) {
+}: StructureViewerProps) {
   const [isViewerReady, setIsViewerReady] = useState(false)
   const [selectedDomain, setSelectedDomain] = useState<number | null>(null)
   const [viewerError, setViewerError] = useState<string | null>(null)

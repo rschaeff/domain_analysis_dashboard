@@ -112,7 +112,6 @@ export function DomainSummaryParser({
   const [parsing, setParsing] = useState(false)
   const [summaryData, setSummaryData] = useState<DomainSummaryData | null>(null)
   const [coverageAnalysis, setCoverageAnalysis] = useState<CoverageAnalysis[]>([])
-  const [coverageThreshold, setCoverageThreshold] = useState(0.7)
   const [minAlignmentLength, setMinAlignmentLength] = useState(30)
   const [error, setError] = useState<string | null>(null)
   const [selectedAnalysis, setSelectedAnalysis] = useState<number | null>(null)
@@ -143,7 +142,7 @@ export function DomainSummaryParser({
 
     return {
       query_coverage: queryLength / sequenceLength,
-      hit_coverage: refLength ? hitLength / refLength : hitLength / hitLength, // fallback if no ref length
+      hit_coverage: refLength && refLength > 0 ? hitLength / refLength : hitLength / 100, // Default to assuming 100-residue reference if unknown
       alignment_length: queryLength
     }
   }
@@ -365,28 +364,34 @@ export function DomainSummaryParser({
       let isFragment = false
       let supportsCurrentDomains = false
 
-      // Fragment detection
+      // Fragment detection based on ABSOLUTE SIZE, not percentage
       if (hit.alignment_length < minAlignmentLength) {
         quality = 'fragment'
         isFragment = true
-        issues.push(`Very short alignment (${hit.alignment_length} residues)`)
-        recommendations.push('Consider filtering out - likely a fragment')
-      } else if (hit.query_coverage < 0.1) {
-        quality = 'fragment'
-        isFragment = true
-        issues.push(`Very low query coverage (${(hit.query_coverage * 100).toFixed(1)}%)`)
-        recommendations.push('Consider filtering out or merging with adjacent domains')
-      } else if (hit.query_coverage < 0.3) {
+        issues.push(`Too short (${hit.alignment_length} < ${minAlignmentLength} residues)`)
+        recommendations.push('Filter out - insufficient for meaningful domain')
+      } else if (hit.alignment_length < 40) {
         quality = 'poor'
-        issues.push(`Low query coverage (${(hit.query_coverage * 100).toFixed(1)}%)`)
-        recommendations.push('Investigate if this should be part of a larger domain')
-      } else if (hit.query_coverage < coverageThreshold) {
+        issues.push(`Short alignment (${hit.alignment_length} residues)`)
+        recommendations.push('Short but potentially valid - verify structural content')
+      } else if (hit.alignment_length < 60) {
         quality = 'good'
-        issues.push(`Moderate query coverage (${(hit.query_coverage * 100).toFixed(1)}%)`)
-        recommendations.push('Good coverage but could be improved')
+        recommendations.push('Reasonable domain size - validate boundaries')
       } else {
         quality = 'excellent'
-        recommendations.push('Excellent coverage - reliable for boundary definition')
+        recommendations.push('Good domain size - reliable for classification')
+      }
+
+      // Additional quality checks based on reference coverage (percentages make sense here)
+      if (hit.hit_coverage < 0.3) {
+        if (quality === 'excellent') quality = 'good'
+        issues.push(`Low reference coverage (${(hit.hit_coverage * 100).toFixed(1)}%)`)
+        recommendations.push('May not represent complete reference domain')
+      }
+
+      // Very high query coverage might indicate single-domain protein
+      if (hit.query_coverage > 0.8) {
+        recommendations.push('High sequence coverage - may indicate single-domain protein')
       }
 
       // Check significance
@@ -587,14 +592,19 @@ export function DomainSummaryParser({
       render: (_: any, analysis: CoverageAnalysis) => (
         <div className="text-sm">
           <div className={`font-medium ${
-            analysis.hit.query_coverage >= 0.7 ? 'text-green-600' :
-            analysis.hit.query_coverage >= 0.5 ? 'text-yellow-600' : 'text-red-600'
+            analysis.hit.alignment_length >= 50 ? 'text-green-600' :
+            analysis.hit.alignment_length >= 30 ? 'text-yellow-600' : 'text-red-600'
           }`}>
-            {(analysis.hit.query_coverage * 100).toFixed(1)}%
+            {analysis.hit.alignment_length} res
           </div>
           <div className="text-xs text-gray-500">
-            of sequence
+            Q: {(analysis.hit.query_coverage * 100).toFixed(1)}%
           </div>
+          {analysis.hit.hit_coverage > 0 && analysis.hit.hit_coverage < 1 && (
+            <div className="text-xs text-gray-500">
+              R: {(analysis.hit.hit_coverage * 100).toFixed(1)}%
+            </div>
+          )}
         </div>
       )
     },
@@ -706,35 +716,15 @@ export function DomainSummaryParser({
 
           {/* Thresholds */}
           {summaryData && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Coverage Threshold: {(coverageThreshold * 100).toFixed(0)}%
-                </label>
-                <input
-                  type="range"
-                  min="0.3"
-                  max="1.0"
-                  step="0.05"
-                  value={coverageThreshold}
-                  onChange={(e) => {
-                    setCoverageThreshold(parseFloat(e.target.value))
-                    if (summaryData) {
-                      const analysis = analyzeCoverage(summaryData)
-                      setCoverageAnalysis(analysis)
-                    }
-                  }}
-                  className="w-full"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Min Alignment Length: {minAlignmentLength} residues
+                  Min Domain Length: {minAlignmentLength} residues
                 </label>
                 <input
                   type="range"
                   min="20"
-                  max="100"
+                  max="80"
                   step="5"
                   value={minAlignmentLength}
                   onChange={(e) => {
@@ -746,6 +736,9 @@ export function DomainSummaryParser({
                   }}
                   className="w-full"
                 />
+                <div className="text-xs text-gray-500 mt-1">
+                  Alignments shorter than this are considered fragments
+                </div>
               </div>
             </div>
           )}
@@ -797,7 +790,7 @@ export function DomainSummaryParser({
               <div className="text-2xl font-bold text-red-600">
                 {coverageAnalysis.filter(a => a.is_fragment).length}
               </div>
-              <div className="text-gray-600">Fragments</div>
+              <div className="text-gray-600">Fragments (< {minAlignmentLength} res)</div>
             </div>
           </div>
         </Card>
@@ -909,19 +902,19 @@ export function DomainSummaryParser({
                   ⚠️ Fragments Detected ({coverageAnalysis.filter(a => a.is_fragment).length})
                 </div>
                 <div className="text-red-700">
-                  These alignments are likely too short to represent meaningful domains. Consider filtering them out or increasing coverage thresholds upstream.
+                  These alignments are too short (< {minAlignmentLength} residues) to represent meaningful domains. Consider filtering them out or adjusting the minimum length threshold.
                 </div>
               </div>
             )}
 
-            {/* Coverage issues */}
+            {/* Short domains */}
             {coverageAnalysis.filter(a => a.coverage_quality === 'poor' && !a.is_fragment).length > 0 && (
               <div className="p-3 bg-yellow-50 rounded-lg">
                 <div className="font-medium text-yellow-800 mb-1">
-                  🔍 Poor Coverage ({coverageAnalysis.filter(a => a.coverage_quality === 'poor' && !a.is_fragment).length})
+                  🔍 Short Domains ({coverageAnalysis.filter(a => a.coverage_quality === 'poor' && !a.is_fragment).length})
                 </div>
                 <div className="text-yellow-700">
-                  These alignments have low sequence coverage. They may represent domain fragments that should be merged with adjacent domains or extended.
+                  These alignments are short but potentially valid domains. Verify they have sufficient secondary structure content and aren't fragments of larger domains.
                 </div>
               </div>
             )}
@@ -945,7 +938,7 @@ export function DomainSummaryParser({
                   ✅ High Quality Evidence ({coverageAnalysis.filter(a => a.coverage_quality === 'excellent').length})
                 </div>
                 <div className="text-green-700">
-                  These alignments meet coverage thresholds and provide strong evidence for domain boundaries.
+                  These alignments are long enough (≥60 residues) to represent meaningful domains and provide strong evidence for domain boundaries.
                 </div>
               </div>
             )}
@@ -958,6 +951,18 @@ export function DomainSummaryParser({
                 </div>
                 <div className="text-gray-700">
                   The domain summary file was parsed but no alignment evidence was found. This could indicate an issue with the file format or content.
+                </div>
+              </div>
+            )}
+
+            {/* All fragments */}
+            {coverageAnalysis.length > 0 && coverageAnalysis.every(a => a.is_fragment) && (
+              <div className="p-3 bg-orange-50 rounded-lg">
+                <div className="font-medium text-orange-800 mb-1">
+                  🔬 All Evidence Too Short
+                </div>
+                <div className="text-orange-700">
+                  All alignment evidence is shorter than {minAlignmentLength} residues. This protein may be unstructured, or the alignment parameters need adjustment.
                 </div>
               </div>
             )}

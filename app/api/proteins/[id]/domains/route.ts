@@ -119,7 +119,7 @@ export async function GET(
     const domainsResult = await prisma.$queryRawUnsafe(domainsQuery, pdbId, chainId)
     const domains = serializeBigInt(domainsResult)
 
-    // Get evidence with explicit CAST
+    // Get evidence with explicit CAST for COUNT functions
     const evidenceQuery = `
       SELECT
         CAST(de.domain_id AS INTEGER) as domain_id,
@@ -129,7 +129,8 @@ export async function GET(
         de.evalue,
         de.probability,
         de.query_range,
-        de.hit_range
+        de.hit_range,
+        CAST(COUNT(*) OVER (PARTITION BY de.domain_id) AS INTEGER) as domain_evidence_count
       FROM pdb_analysis.domain_evidence de
       JOIN pdb_analysis.partition_domains pd ON de.domain_id = pd.id
       JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id

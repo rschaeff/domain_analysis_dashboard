@@ -770,7 +770,7 @@ export function DomainSummaryParser({
               <div className="text-2xl font-bold text-red-600">
                 {coverageAnalysis.filter(a => a.is_fragment).length}
               </div>
-              <div className="text-gray-600">Fragments (< {minAlignmentLength} res)</div>
+              <div className="text-gray-600">Fragments (under {minAlignmentLength} res)</div>
             </div>
           </div>
         </Card>

@@ -1,6 +1,31 @@
-// app/api/proteins/[id]/domains/route.ts - FIXED VERSION
+// app/api/proteins/[id]/domains/route.ts - ROBUST BIGINT VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
+
+// Robust BigInt serializer
+function serializeBigInt(obj: any): any {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  if (typeof obj === 'bigint') {
+    return Number(obj);
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(serializeBigInt);
+  }
+
+  if (typeof obj === 'object') {
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = serializeBigInt(value);
+    }
+    return result;
+  }
+
+  return obj;
+}
 
 export async function GET(
   request: NextRequest,
@@ -12,12 +37,12 @@ export async function GET(
     let pdbId: string
     let chainId: string
 
-    // Parse source_id format (e.g., "1914_A")
+    // Parse source_id format (e.g., "5c3l_B")
     if (id.includes('_')) {
       const parts = id.split('_')
       if (parts.length !== 2 || !parts[0] || !parts[1]) {
         return NextResponse.json(
-          { error: 'Invalid source ID format. Expected format: PDB_CHAIN (e.g., 1914_A)' },
+          { error: 'Invalid source ID format. Expected format: PDB_CHAIN (e.g., 5c3l_B)' },
           { status: 400 }
         )
       }
@@ -25,33 +50,30 @@ export async function GET(
       chainId = parts[1]
     } else {
       return NextResponse.json(
-        { error: 'Invalid protein ID format. Use source_id format (1914_A).' },
+        { error: 'Invalid protein ID format. Use source_id format (5c3l_B).' },
         { status: 400 }
       )
     }
 
-    // Get protein processing record from partition system
+    // Use explicit CAST to avoid BigInt issues
     const proteinQuery = `
       SELECT
-        processing_id,
-        pdb_id,
-        chain_id,
-        source_id,
-        batch_id,
-        reference_version,
-        processing_date,
-        sequence_length,
-        domains_found,
-        domains_classified,
-        classification_status
-      FROM pdb_analysis.pipeline_performance_summary
-      WHERE pdb_id = $1 AND chain_id = $2
+        CAST(pp.id AS INTEGER) as processing_id,
+        pp.pdb_id,
+        pp.chain_id,
+        pp.pdb_id || '_' || pp.chain_id as source_id,
+        CAST(pp.batch_id AS INTEGER) as batch_id,
+        pp.reference_version,
+        pp.timestamp as processing_date,
+        CAST(pp.sequence_length AS INTEGER) as sequence_length,
+        pp.is_classified,
+        pp.coverage
+      FROM pdb_analysis.partition_proteins pp
+      WHERE pp.pdb_id = $1 AND pp.chain_id = $2
     `
 
     const proteinResult = await prisma.$queryRawUnsafe(proteinQuery, pdbId, chainId)
-    const serializedProteinResult = JSON.parse(JSON.stringify(proteinResult, (key, value) =>
-      typeof value === 'bigint' ? Number(value) : value
-    ))
+    const serializedProteinResult = serializeBigInt(proteinResult)
 
     if (!serializedProteinResult || serializedProteinResult.length === 0) {
       return NextResponse.json(
@@ -60,17 +82,17 @@ export async function GET(
       )
     }
 
-    const protein = (proteinResult as any[])[0]
+    const protein = serializedProteinResult[0]
 
-    // Get domains directly from partition_domains
+    // Get domains with explicit CAST to avoid BigInt issues
     const domainsQuery = `
       SELECT
-        pd.id,
-        pd.protein_id,
-        pd.domain_number,
+        CAST(pd.id AS INTEGER) as id,
+        CAST(pd.protein_id AS INTEGER) as protein_id,
+        CAST(pd.domain_number AS INTEGER) as domain_number,
         pd.domain_id,
-        pd.start_pos,
-        pd.end_pos,
+        CAST(pd.start_pos AS INTEGER) as start_pos,
+        CAST(pd.end_pos AS INTEGER) as end_pos,
         pd.range,
         pd.pdb_range,
         pd.pdb_start,
@@ -86,7 +108,7 @@ export async function GET(
         pd.is_f70,
         pd.is_f40,
         pd.is_f99,
-        pd.length,
+        CAST(pd.length AS INTEGER) as length,
         'putative' as domain_type
       FROM pdb_analysis.partition_domains pd
       JOIN pdb_analysis.partition_proteins pp ON pd.protein_id = pp.id
@@ -94,12 +116,13 @@ export async function GET(
       ORDER BY pd.domain_number
     `
 
-    const domains = await prisma.$queryRawUnsafe(domainsQuery, pdbId, chainId)
+    const domainsResult = await prisma.$queryRawUnsafe(domainsQuery, pdbId, chainId)
+    const domains = serializeBigInt(domainsResult)
 
-    // Get evidence for these domains
+    // Get evidence with explicit CAST
     const evidenceQuery = `
       SELECT
-        de.domain_id,
+        CAST(de.domain_id AS INTEGER) as domain_id,
         de.evidence_type,
         de.source_id,
         de.confidence,
@@ -114,43 +137,47 @@ export async function GET(
       ORDER BY de.domain_id, de.confidence DESC
     `
 
-    const evidence = await prisma.$queryRawUnsafe(evidenceQuery, pdbId, chainId)
+    const evidenceResult = await prisma.$queryRawUnsafe(evidenceQuery, pdbId, chainId)
+    const evidence = serializeBigInt(evidenceResult)
 
     // Group evidence by domain
-    const evidenceByDomain = evidence.reduce((acc, ev) => {
+    const evidenceByDomain = evidence.reduce((acc: any, ev: any) => {
       if (!acc[ev.domain_id]) acc[ev.domain_id] = []
       acc[ev.domain_id].push(ev)
       return acc
     }, {})
 
     // Process domains with evidence
-    const processedDomains = domains.map(domain => ({
+    const processedDomains = domains.map((domain: any) => ({
       ...domain,
       evidence: evidenceByDomain[domain.id] || [],
       evidence_count: (evidenceByDomain[domain.id] || []).length
     }))
 
-    // Consistency check
+    // Calculate summary stats
     const actualDomainCount = processedDomains.length
-    const expectedDomainCount = Number(protein.domains_found)
+    const totalEvidenceItems = Object.values(evidenceByDomain).flat().length
 
-    return NextResponse.json({
+    const response = {
       protein: {
         ...protein,
-        consistency_check: {
-          expected_domains: expectedDomainCount,
-          actual_domains: actualDomainCount,
-          is_consistent: actualDomainCount === expectedDomainCount
-        }
+        domain_count: actualDomainCount,
+        total_evidence_items: totalEvidenceItems
       },
       domains: processedDomains,
       metadata: {
         source: 'partition_domains_direct',
         data_architecture: 'pipeline_native',
         total_domains: actualDomainCount,
-        total_evidence_items: Object.values(evidenceByDomain).flat().length
+        total_evidence_items: totalEvidenceItems,
+        bigint_serialized: true
       }
-    })
+    }
+
+    // Final serialization check
+    const finalResponse = serializeBigInt(response)
+
+    return NextResponse.json(finalResponse)
 
   } catch (error) {
     console.error('Error fetching partition domains:', error)

@@ -9,6 +9,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const batchId = searchParams.get('batch_id')
 
+    // Convert batchId to integer or null
+    const batchIdParam = batchId ? parseInt(batchId) : null
+
     const partitionAudit = await prisma.$queryRawUnsafe(`
       WITH batch_overview AS (
         -- Get batch metadata and expectations
@@ -21,7 +24,7 @@ export async function GET(request: NextRequest) {
           b.status as batch_status,
           b.ref_version
         FROM ecod_schema.batch b
-        WHERE ($1 IS NULL OR b.id = $1)
+        WHERE ($1::integer IS NULL OR b.id = $1::integer)
           AND b.type IN ('pdb_hhsearch', 'domain_analysis')
       ),
       batch_proteins AS (
@@ -33,7 +36,7 @@ export async function GET(request: NextRequest) {
           array_agg(DISTINCT ps.current_stage) as stages_present
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
-        WHERE ($1 IS NULL OR ps.batch_id = $1)
+        WHERE ($1::integer IS NULL OR ps.batch_id = $1::integer)
         GROUP BY ps.batch_id
       ),
       partition_results AS (
@@ -41,32 +44,32 @@ export async function GET(request: NextRequest) {
         SELECT
           ps.batch_id,
           COUNT(pp.id) as partitions_attempted,
-          COUNT(CASE WHEN pp.is_classified THEN 1 END) as partitions_classified,
-          COUNT(CASE WHEN NOT pp.is_classified THEN 1 END) as partitions_unclassified,
-          COUNT(CASE WHEN pp.is_peptide THEN 1 END) as partitions_peptide,
+          COUNT(CASE WHEN pp.is_classified = true THEN 1 END) as partitions_classified,
+          COUNT(CASE WHEN pp.is_classified = false THEN 1 END) as partitions_unclassified,
+          COUNT(CASE WHEN pp.is_peptide = true THEN 1 END) as partitions_peptide,
           COUNT(pd.id) as total_domains_found,
           COUNT(de.id) as total_evidence_items,
 
           -- Sample unclassified proteins
-          array_agg(
-            CASE WHEN NOT pp.is_classified AND NOT pp.is_peptide
+          array_remove(array_agg(
+            CASE WHEN pp.is_classified = false AND (pp.is_peptide = false OR pp.is_peptide IS NULL)
             THEN pp.pdb_id || '_' || pp.chain_id
-            END
-          ) FILTER (WHERE NOT pp.is_classified AND NOT pp.is_peptide) as sample_unclassified,
+            ELSE NULL END
+          ), NULL) as sample_unclassified,
 
           -- Sample classified proteins
-          array_agg(
-            CASE WHEN pp.is_classified
+          array_remove(array_agg(
+            CASE WHEN pp.is_classified = true
             THEN pp.pdb_id || '_' || pp.chain_id
-            END
-          ) FILTER (WHERE pp.is_classified) as sample_classified
+            ELSE NULL END
+          ), NULL) as sample_classified
 
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
-        LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = pp.pdb_id || '_' || pp.chain_id
+        LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = (pp.pdb_id || '_' || pp.chain_id)
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-        WHERE ($1 IS NULL OR ps.batch_id = $1)
+        WHERE ($1::integer IS NULL OR ps.batch_id = $1::integer)
         GROUP BY ps.batch_id
       ),
       missing_analysis AS (
@@ -77,8 +80,8 @@ export async function GET(request: NextRequest) {
           array_agg(ep.source_id ORDER BY ep.source_id) as sample_missing_proteins
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
-        LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = pp.pdb_id || '_' || pp.chain_id
-        WHERE ($1 IS NULL OR ps.batch_id = $1)
+        LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = (pp.pdb_id || '_' || pp.chain_id)
+        WHERE ($1::integer IS NULL OR ps.batch_id = $1::integer)
           AND pp.id IS NULL  -- No partition result found
         GROUP BY ps.batch_id
       ),
@@ -86,13 +89,13 @@ export async function GET(request: NextRequest) {
         -- Check what files exist for missing partitions
         SELECT
           ps.batch_id,
-          COUNT(CASE WHEN pf.file_type = 'fasta' AND pf.file_exists THEN 1 END) as fasta_files_exist,
-          COUNT(CASE WHEN pf.file_type LIKE '%blast%' AND pf.file_exists THEN 1 END) as blast_files_exist,
-          COUNT(CASE WHEN pf.file_type LIKE '%hhsearch%' AND pf.file_exists THEN 1 END) as hhsearch_files_exist,
-          COUNT(CASE WHEN pf.file_type LIKE '%partition%' AND pf.file_exists THEN 1 END) as partition_files_exist
+          COUNT(CASE WHEN pf.file_type = 'fasta' AND pf.file_exists = true THEN 1 END) as fasta_files_exist,
+          COUNT(CASE WHEN pf.file_type LIKE '%blast%' AND pf.file_exists = true THEN 1 END) as blast_files_exist,
+          COUNT(CASE WHEN pf.file_type LIKE '%hhsearch%' AND pf.file_exists = true THEN 1 END) as hhsearch_files_exist,
+          COUNT(CASE WHEN pf.file_type LIKE '%partition%' AND pf.file_exists = true THEN 1 END) as partition_files_exist
         FROM ecod_schema.process_status ps
         LEFT JOIN ecod_schema.process_file pf ON ps.id = pf.process_id
-        WHERE ($1 IS NULL OR ps.batch_id = $1)
+        WHERE ($1::integer IS NULL OR ps.batch_id = $1::integer)
         GROUP BY ps.batch_id
       )
       SELECT
@@ -127,29 +130,29 @@ export async function GET(request: NextRequest) {
         COALESCE(fa.hhsearch_files_exist, 0) as hhsearch_files_exist,
         COALESCE(fa.partition_files_exist, 0) as partition_files_exist,
 
-        -- Samples and Details (slice arrays to first 5 elements)
-        bp.stages_present,
-        COALESCE(pr.sample_unclassified[1:5], ARRAY[]::text[]) as sample_unclassified,
-        COALESCE(pr.sample_classified[1:3], ARRAY[]::text[]) as sample_classified,
-        COALESCE(ma.sample_missing_proteins[1:5], ARRAY[]::text[]) as sample_missing_proteins,
+        -- Samples and Details (slice arrays to first few elements)
+        COALESCE(bp.stages_present, ARRAY[]::text[]) as stages_present,
+        COALESCE((pr.sample_unclassified)[1:5], ARRAY[]::text[]) as sample_unclassified,
+        COALESCE((pr.sample_classified)[1:3], ARRAY[]::text[]) as sample_classified,
+        COALESCE((ma.sample_missing_proteins)[1:5], ARRAY[]::text[]) as sample_missing_proteins,
 
         -- Calculated Quality Metrics
         CASE
           WHEN COALESCE(bp.proteins_in_batch, 0) > 0
           THEN ROUND((COALESCE(pr.partitions_attempted, 0)::numeric / bp.proteins_in_batch::numeric) * 100, 1)
-          ELSE 0
+          ELSE 0.0
         END as partition_attempt_rate,
 
         CASE
           WHEN COALESCE(pr.partitions_attempted, 0) > 0
           THEN ROUND((COALESCE(pr.partitions_classified, 0)::numeric / pr.partitions_attempted::numeric) * 100, 1)
-          ELSE 0
+          ELSE 0.0
         END as classification_success_rate,
 
         CASE
           WHEN COALESCE(bp.proteins_in_batch, 0) > 0
           THEN ROUND((COALESCE(pr.partitions_classified, 0)::numeric / bp.proteins_in_batch::numeric) * 100, 1)
-          ELSE 0
+          ELSE 0.0
         END as overall_success_rate
 
       FROM batch_overview bo
@@ -161,7 +164,7 @@ export async function GET(request: NextRequest) {
         bo.batch_id DESC,
         proteins_missing_partitions DESC,
         partition_gap DESC
-    `, [batchId ? parseInt(batchId) : null])
+    `, [batchIdParam])
 
     return NextResponse.json({ partition_audit: partitionAudit })
   } catch (error) {

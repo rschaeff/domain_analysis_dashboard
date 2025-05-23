@@ -30,8 +30,7 @@ export async function GET(request: NextRequest) {
           ps.batch_id,
           COUNT(*) as proteins_in_batch,
           COUNT(CASE WHEN ps.current_stage IN ('completed', 'classified') THEN 1 END) as proteins_reported_done,
-          array_agg(DISTINCT ps.current_stage) as stages_present,
-          array_agg(ep.source_id ORDER BY ep.source_id) as sample_proteins
+          array_agg(DISTINCT ps.current_stage) as stages_present
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
         WHERE ($1 IS NULL OR ps.batch_id = $1)
@@ -75,7 +74,7 @@ export async function GET(request: NextRequest) {
         SELECT
           ps.batch_id,
           COUNT(*) as proteins_missing_partitions,
-          array_agg(ep.source_id ORDER BY ep.source_id LIMIT 10) as sample_missing_proteins
+          array_agg(ep.source_id ORDER BY ep.source_id) as sample_missing_proteins
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
         LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = pp.pdb_id || '_' || pp.chain_id
@@ -128,11 +127,11 @@ export async function GET(request: NextRequest) {
         COALESCE(fa.hhsearch_files_exist, 0) as hhsearch_files_exist,
         COALESCE(fa.partition_files_exist, 0) as partition_files_exist,
 
-        -- Samples and Details
+        -- Samples and Details (slice arrays to first 5 elements)
         bp.stages_present,
-        pr.sample_unclassified[1:5] as sample_unclassified,
-        pr.sample_classified[1:3] as sample_classified,
-        ma.sample_missing_proteins[1:5] as sample_missing_proteins,
+        COALESCE(pr.sample_unclassified[1:5], ARRAY[]::text[]) as sample_unclassified,
+        COALESCE(pr.sample_classified[1:3], ARRAY[]::text[]) as sample_classified,
+        COALESCE(ma.sample_missing_proteins[1:5], ARRAY[]::text[]) as sample_missing_proteins,
 
         -- Calculated Quality Metrics
         CASE

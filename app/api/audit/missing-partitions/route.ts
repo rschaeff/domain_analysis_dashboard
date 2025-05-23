@@ -34,8 +34,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const batchId = searchParams.get('batch_id')
 
-    // Convert batchId to integer or null
-    const batchIdParam = batchId ? parseInt(batchId) : null
+    // Build the WHERE clause dynamically to avoid parameter type confusion
+    const batchFilter = batchId ? `AND b.id = ${parseInt(batchId)}` : ''
+    const batchFilterPS = batchId ? `AND ps.batch_id = ${parseInt(batchId)}` : ''
 
     const rawPartitionAudit = await prisma.$queryRawUnsafe(`
       WITH batch_overview AS (
@@ -49,8 +50,8 @@ export async function GET(request: NextRequest) {
           b.status as batch_status,
           b.ref_version
         FROM ecod_schema.batch b
-        WHERE ($1::integer IS NULL OR b.id = $1::integer)
-          AND b.type IN ('pdb_hhsearch', 'domain_analysis')
+        WHERE b.type IN ('pdb_hhsearch', 'domain_analysis')
+          ${batchFilter}
       ),
       batch_proteins AS (
         -- Get proteins actually assigned to each batch via process_status
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
           array_agg(DISTINCT ps.current_stage) as stages_present
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
-        WHERE ($1::integer IS NULL OR ps.batch_id = $1::integer)
+        WHERE 1=1 ${batchFilterPS}
         GROUP BY ps.batch_id
       ),
       partition_results AS (
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest) {
         LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = (pp.pdb_id || '_' || pp.chain_id)
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-        WHERE ($1::integer IS NULL OR ps.batch_id = $1::integer)
+        WHERE 1=1 ${batchFilterPS}
         GROUP BY ps.batch_id
       ),
       missing_analysis AS (
@@ -106,8 +107,7 @@ export async function GET(request: NextRequest) {
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
         LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = (pp.pdb_id || '_' || pp.chain_id)
-        WHERE ($1::integer IS NULL OR ps.batch_id = $1::integer)
-          AND pp.id IS NULL  -- No partition result found
+        WHERE pp.id IS NULL ${batchFilterPS}
         GROUP BY ps.batch_id
       ),
       file_analysis AS (
@@ -120,7 +120,7 @@ export async function GET(request: NextRequest) {
           COUNT(CASE WHEN pf.file_type LIKE '%partition%' AND pf.file_exists = true THEN 1 END) as partition_files_exist
         FROM ecod_schema.process_status ps
         LEFT JOIN ecod_schema.process_file pf ON ps.id = pf.process_id
-        WHERE ($1::integer IS NULL OR ps.batch_id = $1::integer)
+        WHERE 1=1 ${batchFilterPS}
         GROUP BY ps.batch_id
       )
       SELECT
@@ -189,7 +189,7 @@ export async function GET(request: NextRequest) {
         bo.batch_id DESC,
         proteins_missing_partitions DESC,
         partition_gap DESC
-    `, [batchIdParam])
+    `)
 
     // Convert BigInt values to numbers using helper function
     const partitionAudit = convertBigIntToNumber(rawPartitionAudit)

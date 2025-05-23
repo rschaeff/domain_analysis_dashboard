@@ -31,9 +31,9 @@ interface ProteinSummary {
   reference_version: string
   is_classified: boolean
 
-  // Domain summary
+  // Domain summary - FIXED FIELD NAMES
   domain_count: number
-  classified_domains: number
+  domains_classified: number  // ← This matches API response
   avg_confidence: number
   best_confidence: number
   coverage: number

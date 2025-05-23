@@ -72,13 +72,13 @@ export async function GET(request: NextRequest) {
           COUNT(pp.id) as partitions_attempted,
           COUNT(CASE WHEN pp.is_classified = true THEN 1 END) as partitions_classified,
           COUNT(CASE WHEN pp.is_classified = false THEN 1 END) as partitions_unclassified,
-          COUNT(CASE WHEN pp.is_peptide = true THEN 1 END) as partitions_peptide,
+          COUNT(CASE WHEN pp.sequence_length < 30 THEN 1 END) as partitions_peptide,
           COUNT(pd.id) as total_domains_found,
           COUNT(de.id) as total_evidence_items,
 
           -- Sample unclassified proteins
           array_remove(array_agg(
-            CASE WHEN pp.is_classified = false AND (pp.is_peptide = false OR pp.is_peptide IS NULL)
+            CASE WHEN pp.is_classified = false
             THEN pp.pdb_id || '_' || pp.chain_id
             ELSE NULL END
           ), NULL) as sample_unclassified,

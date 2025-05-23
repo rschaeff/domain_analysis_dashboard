@@ -15,7 +15,7 @@ import {
   Star,
   Target,
   Layers,
-  Hash,
+  FileText,
   RotateCcw,
   AlertCircle,
   CheckCircle2
@@ -79,7 +79,7 @@ const FILTER_PRESETS = [
   {
     id: 'blast_supported',
     name: 'BLAST Evidence',
-    icon: Hash,
+    icon: FileText,
     description: 'Domains with BLAST evidence support',
     filters: {
       evidence_types: 'blast'

@@ -13,7 +13,8 @@ import { Badge } from '@/components/ui/Badge'
 import {
   Eye, Download, BarChart3, Users, Table, Grid, Layers, List,
   AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
-  TrendingUp, Database, Zap, Activity, Clock, Target, Star
+  TrendingUp, Database, Zap, Activity, Clock, Target, Star,
+  FileText
 } from 'lucide-react'
 
 // Enhanced statistics interface with all expected fields
@@ -703,7 +704,7 @@ export default function EnhancedDashboard() {
                   </div>
                   <div className="text-xs text-gray-600">Domains with Evidence</div>
                 </div>
-                <Hash className="w-6 h-6 text-teal-600 opacity-20" />
+                <FileText className="w-6 h-6 text-teal-600 opacity-20" />
               </div>
             </Card>
 

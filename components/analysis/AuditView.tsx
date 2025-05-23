@@ -61,6 +61,17 @@ interface BatchOption {
   status: string
 }
 
+// Helper function to safely format numbers
+const safeNumber = (value: any, defaultValue: number = 0): number => {
+  const num = Number(value)
+  return isNaN(num) ? defaultValue : num
+}
+
+// Helper function to safely format integers with locale string
+const safeToLocaleString = (value: any, defaultValue: number = 0): string => {
+  return safeNumber(value, defaultValue).toLocaleString()
+}
+
 export function AuditView() {
   const [partitionAudit, setPartitionAudit] = useState<PartitionAuditData[]>([])
   const [batchOptions, setBatchOptions] = useState<BatchOption[]>([])
@@ -121,12 +132,12 @@ export function AuditView() {
 
   // Calculate summary statistics
   const auditSummary = React.useMemo(() => {
-    const totalProteins = partitionAudit.reduce((sum, batch) => sum + batch.actual_proteins_in_batch, 0)
-    const totalAttempted = partitionAudit.reduce((sum, batch) => sum + batch.partitions_attempted, 0)
-    const totalClassified = partitionAudit.reduce((sum, batch) => sum + batch.partitions_classified, 0)
-    const totalMissing = partitionAudit.reduce((sum, batch) => sum + batch.proteins_missing_partitions, 0)
+    const totalProteins = partitionAudit.reduce((sum, batch) => sum + (batch.actual_proteins_in_batch ?? 0), 0)
+    const totalAttempted = partitionAudit.reduce((sum, batch) => sum + (batch.partitions_attempted ?? 0), 0)
+    const totalClassified = partitionAudit.reduce((sum, batch) => sum + (batch.partitions_classified ?? 0), 0)
+    const totalMissing = partitionAudit.reduce((sum, batch) => sum + (batch.proteins_missing_partitions ?? 0), 0)
     const criticalBatches = partitionAudit.filter(batch =>
-      batch.proteins_missing_partitions > 50 || batch.overall_success_rate < 50
+      (batch.proteins_missing_partitions ?? 0) > 50 || (batch.overall_success_rate ?? 0) < 50
     ).length
 
     return {
@@ -212,11 +223,11 @@ export function AuditView() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold text-blue-600">
-                {auditSummary.totalProteins.toLocaleString()}
+                {safeToLocaleString(auditSummary.totalProteins)}
               </div>
               <div className="text-sm text-gray-600">Total Proteins</div>
               <div className="text-xs text-gray-500">
-                {auditSummary.overallAttemptRate.toFixed(1)}% attempted
+                {safeNumber(auditSummary.overallAttemptRate).toFixed(1)}% attempted
               </div>
             </div>
             <Database className="w-8 h-8 text-blue-600 opacity-20" />
@@ -227,11 +238,11 @@ export function AuditView() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold text-green-600">
-                {auditSummary.totalClassified.toLocaleString()}
+                {safeToLocaleString(auditSummary.totalClassified)}
               </div>
               <div className="text-sm text-gray-600">Classified</div>
               <div className="text-xs text-gray-500">
-                {auditSummary.overallSuccessRate.toFixed(1)}% success rate
+                {safeNumber(auditSummary.overallSuccessRate).toFixed(1)}% success rate
               </div>
             </div>
             <CheckCircle className="w-8 h-8 text-green-600 opacity-20" />
@@ -242,7 +253,7 @@ export function AuditView() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold text-red-600">
-                {auditSummary.totalMissing.toLocaleString()}
+                {safeToLocaleString(auditSummary.totalMissing)}
               </div>
               <div className="text-sm text-gray-600">Missing Partitions</div>
               <div className="text-xs text-gray-500">
@@ -257,7 +268,7 @@ export function AuditView() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold text-orange-600">
-                {auditSummary.criticalBatches}
+                {safeToLocaleString(auditSummary.criticalBatches)}
               </div>
               <div className="text-sm text-gray-600">Critical Batches</div>
               <div className="text-xs text-gray-500">
@@ -300,7 +311,7 @@ export function AuditView() {
                     </div>
                     <div className="text-right">
                       <div className="text-lg font-semibold">
-                        {batch.overall_success_rate.toFixed(1)}%
+                        {safeNumber(batch.overall_success_rate).toFixed(1)}%
                       </div>
                       <div className="text-sm text-gray-600">Overall Success</div>
                     </div>
@@ -310,65 +321,65 @@ export function AuditView() {
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                     <div className="text-center">
                       <div className="text-xl font-bold text-blue-600">
-                        {batch.actual_proteins_in_batch.toLocaleString()}
+                        {safeToLocaleString(batch.actual_proteins_in_batch)}
                       </div>
                       <div className="text-xs text-gray-600">In Batch</div>
                     </div>
 
                     <div className="text-center">
                       <div className="text-xl font-bold text-green-600">
-                        {batch.partitions_attempted.toLocaleString()}
+                        {safeToLocaleString(batch.partitions_attempted)}
                       </div>
                       <div className="text-xs text-gray-600">Attempted</div>
                       <div className="text-xs text-gray-500">
-                        {batch.partition_attempt_rate.toFixed(1)}%
+                        {safeNumber(batch.partition_attempt_rate).toFixed(1)}%
                       </div>
                     </div>
 
                     <div className="text-center">
                       <div className="text-xl font-bold text-emerald-600">
-                        {batch.partitions_classified.toLocaleString()}
+                        {safeToLocaleString(batch.partitions_classified)}
                       </div>
                       <div className="text-xs text-gray-600">Classified</div>
                       <div className="text-xs text-gray-500">
-                        {batch.classification_success_rate.toFixed(1)}%
+                        {safeNumber(batch.classification_success_rate).toFixed(1)}%
                       </div>
                     </div>
 
                     <div className="text-center">
                       <div className="text-xl font-bold text-yellow-600">
-                        {batch.partitions_unclassified.toLocaleString()}
+                        {safeToLocaleString(batch.partitions_unclassified)}
                       </div>
                       <div className="text-xs text-gray-600">Unclassified</div>
                     </div>
 
                     <div className="text-center">
                       <div className="text-xl font-bold text-red-600">
-                        {batch.proteins_missing_partitions.toLocaleString()}
+                        {safeToLocaleString(batch.proteins_missing_partitions)}
                       </div>
                       <div className="text-xs text-gray-600">Missing</div>
                     </div>
 
                     <div className="text-center">
                       <div className="text-xl font-bold text-purple-600">
-                        {batch.total_domains_found.toLocaleString()}
+                        {safeToLocaleString(batch.total_domains_found)}
                       </div>
                       <div className="text-xs text-gray-600">Domains</div>
                     </div>
                   </div>
 
                   {/* Issues and Gaps */}
-                  {(batch.proteins_missing_partitions > 0 || batch.partition_gap > 0 || batch.batch_definition_gap > 0) && (
+                  {(safeNumber(batch.proteins_missing_partitions) > 0 || safeNumber(batch.partition_gap) > 0 || safeNumber(batch.batch_definition_gap) > 0) && (
                     <div className="border-t pt-4">
                       <h5 className="font-medium text-red-800 mb-2 flex items-center gap-2">
                         <AlertTriangle className="w-4 h-4" />
                         Issues Detected
                       </h5>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {batch.proteins_missing_partitions > 0 && (
+                        {safeNumber(batch.proteins_missing_partitions) > 0 && (
                           <div className="bg-red-50 p-3 rounded">
                             <div className="font-semibold text-red-800">
-                              {batch.proteins_missing_partitions} Missing Partitions
+                              {safeToLocaleString(batch.proteins_missing_partitions)} Missing Partitions
                             </div>
                             <div className="text-sm text-red-700">
                               Proteins in batch but no partition results
@@ -376,10 +387,10 @@ export function AuditView() {
                           </div>
                         )}
 
-                        {batch.partition_gap > 0 && (
+                        {safeNumber(batch.partition_gap) > 0 && (
                           <div className="bg-orange-50 p-3 rounded">
                             <div className="font-semibold text-orange-800">
-                              {batch.partition_gap} Partition Gap
+                              {safeToLocaleString(batch.partition_gap)} Partition Gap
                             </div>
                             <div className="text-sm text-orange-700">
                               Difference between expected and attempted
@@ -387,10 +398,10 @@ export function AuditView() {
                           </div>
                         )}
 
-                        {batch.batch_definition_gap > 0 && (
+                        {safeNumber(batch.batch_definition_gap) > 0 && (
                           <div className="bg-yellow-50 p-3 rounded">
                             <div className="font-semibold text-yellow-800">
-                              {batch.batch_definition_gap} Definition Gap
+                              {safeToLocaleString(batch.batch_definition_gap)} Definition Gap
                             </div>
                             <div className="text-sm text-yellow-700">
                               Reported total vs actual proteins
@@ -409,19 +420,19 @@ export function AuditView() {
                     </h5>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div className="text-center">
-                        <div className="font-semibold text-blue-600">{batch.fasta_files_exist}</div>
+                        <div className="font-semibold text-blue-600">{safeToLocaleString(batch.fasta_files_exist)}</div>
                         <div className="text-xs text-gray-600">FASTA</div>
                       </div>
                       <div className="text-center">
-                        <div className="font-semibold text-green-600">{batch.blast_files_exist}</div>
+                        <div className="font-semibold text-green-600">{safeToLocaleString(batch.blast_files_exist)}</div>
                         <div className="text-xs text-gray-600">BLAST</div>
                       </div>
                       <div className="text-center">
-                        <div className="font-semibold text-purple-600">{batch.hhsearch_files_exist}</div>
+                        <div className="font-semibold text-purple-600">{safeToLocaleString(batch.hhsearch_files_exist)}</div>
                         <div className="text-xs text-gray-600">HHSearch</div>
                       </div>
                       <div className="text-center">
-                        <div className="font-semibold text-orange-600">{batch.partition_files_exist}</div>
+                        <div className="font-semibold text-orange-600">{safeToLocaleString(batch.partition_files_exist)}</div>
                         <div className="text-xs text-gray-600">Partitions</div>
                       </div>
                     </div>

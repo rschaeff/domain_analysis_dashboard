@@ -193,7 +193,7 @@ const toggleProteinExpansion = async (protein: ProteinSummary) => {
       )
     }
 
-    if (protein.classified_domains === protein.domain_count && protein.domain_count > 0) {
+    if (protein.domains_classified === protein.domain_count && protein.domain_count > 0) {
       return (
         <div className="flex items-center gap-2">
           <CheckCircle className="w-4 h-4 text-green-500" />
@@ -206,7 +206,7 @@ const toggleProteinExpansion = async (protein: ProteinSummary) => {
       <div className="flex items-center gap-2">
         <AlertCircle className="w-4 h-4 text-yellow-500" />
         <span className="text-yellow-700">
-          Partially ({protein.classified_domains}/{protein.domain_count})
+          Partially ({protein.domains_classified}/{protein.domain_count})
         </span>
       </div>
     )
@@ -341,7 +341,7 @@ const toggleProteinExpansion = async (protein: ProteinSummary) => {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {proteins.map((protein) => (
-                <React.Fragment key={protein.id}>
+                 <React.Fragment key={`${protein.source_id}-${protein.batch_id}-${index}`}>
                   {/* Main protein row */}
                   <tr key={`protein-${protein.id}`} className="hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-4">

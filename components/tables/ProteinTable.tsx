@@ -341,9 +341,9 @@ const toggleProteinExpansion = async (protein: ProteinSummary) => {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {proteins.map((protein) => (
-                <React.Fragment>
+                <React.Fragment key={protein.id}>
                   {/* Main protein row */}
-                  <tr key={`${protein.id}-main`} className="hover:bg-gray-50 transition-colors">
+                  <tr className="hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         <button
@@ -455,7 +455,7 @@ const toggleProteinExpansion = async (protein: ProteinSummary) => {
 
                   {/* Expanded domain details */}
                   {expandedProteins.has(protein.id) && (
-                    <tr key={`${protein.id}-expanded`}>
+                    <tr>
                       <td colSpan={8} className="py-0 bg-gray-50">
                         <div className="px-8 py-4">
                           {loadingDomains.has(protein.id) ? (

@@ -7,10 +7,10 @@ import { FilterPanel } from '@/components/filters/FilterPanel'
 import { ProteinTable } from '@/components/tables/ProteinTable'
 import { ArchitectureGroupedTable } from '@/components/tables/ArchitectureGroupedTable'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { AuditView } from '@/components/analysis/AuditView'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
-import { AuditView } from '@/components/analysis/AuditView'
 import {
   Eye, Download, BarChart3, Users, Table, Grid, Layers, List,
   AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
@@ -65,23 +65,6 @@ interface ProteinSummary {
   residues_assigned: number
   classification_status: string
   evidence_quality: string
-}
-
-interface AuditData {
-  partitionAudit: PartitionAuditData[]
-  evidenceConflicts: Array<{
-    conflict_type: string
-    tuning_suggestion: string
-    case_count: number
-    avg_final_confidence: number
-    sample_cases: string[]
-  }>
-  chainBlastIssues: Array<{
-    chain_blast_issue: string
-    protein_count: number
-    avg_chain_blast_hits: number
-    sample_proteins: string[]
-  }>
 }
 
 // Safe number formatting helper
@@ -262,15 +245,8 @@ export default function EnhancedDashboard() {
     total_evidence_items: 0
   })
 
-  // Audit state
-    const [auditData, setAuditData] = useState<AuditData>({
-      partitionAudit: [],
-      evidenceConflicts: [],
-      chainBlastIssues: []
-    })
-
-  const [auditLoading, setAuditLoading] = useState(false)
-  const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
+  // Simplified audit state - just for the alert
+  const [auditIssues, setAuditIssues] = useState(0)
 
   // URL state derived values
   const filters = urlState.filters
@@ -315,6 +291,22 @@ export default function EnhancedDashboard() {
       setError('Failed to load dashboard statistics')
     } finally {
       setStatisticsLoading(false)
+    }
+  }, [])
+
+  // Quick audit check for alert
+  const checkAuditIssues = useCallback(async () => {
+    try {
+      const response = await fetch('/api/audit/missing-partitions')
+      if (response.ok) {
+        const data = await response.json()
+        const partitionIssues = data.partition_audit?.reduce((sum: number, batch: any) =>
+          sum + batch.proteins_missing_partitions + Math.max(0, batch.actual_proteins_in_batch - batch.partitions_attempted), 0
+        ) || 0
+        setAuditIssues(partitionIssues)
+      }
+    } catch (err) {
+      console.error('Error checking audit issues:', err)
     }
   }, [])
 
@@ -408,43 +400,6 @@ export default function EnhancedDashboard() {
     }
   }, [urlState.filters])
 
-  // Run comprehensive audit
-const runAudit = useCallback(async (batchId?: number) => {
-  setAuditLoading(true)
-  setError(null)
-
-  try {
-    const batchParam = batchId ? `?batch_id=${batchId}` : ''
-
-    const [partitionResponse, evidenceResponse, chainBlastResponse] = await Promise.all([
-      fetch(`/api/audit/missing-partitions${batchParam}`),
-      fetch(`/api/audit/evidence-analysis${batchParam}`),
-      fetch('/api/audit/chain-blast-diagnostic')
-    ])
-
-    if (!partitionResponse.ok || !evidenceResponse.ok || !chainBlastResponse.ok) {
-      throw new Error('One or more audit requests failed')
-    }
-
-    const [partitionData, evidenceData, chainBlastData] = await Promise.all([
-      partitionResponse.json(),
-      evidenceResponse.json(),
-      chainBlastResponse.json()
-    ])
-
-    // Update auditData structure
-    setAuditData({
-      partitionAudit: partitionData.partition_audit || [],
-      evidenceConflicts: evidenceData.evidence_analysis || [],
-      chainBlastIssues: chainBlastData.chain_blast_diagnostic || []
-    })
-  } catch (err) {
-    setError(err instanceof Error ? err.message : 'Audit failed')
-  } finally {
-    setAuditLoading(false)
-  }
-}, [])
-
   // URL state change handlers
   const handleFiltersChange = useCallback((newFilters: DomainFilters) => {
     updateUrl({
@@ -491,41 +446,14 @@ const runAudit = useCallback(async (batchId?: number) => {
       fetchProteins()
     } else if (urlState.viewMode === 'architecture') {
       fetchArchitectureData()
-    } else if (urlState.viewMode === 'audit') {
-      runAudit(selectedBatch || undefined)
     }
-  }, [urlState.viewMode, urlState.page, urlState.size, urlState.sort, urlState.sortDirection, urlState.filters, fetchProteins, fetchArchitectureData, runAudit, selectedBatch])
+  }, [urlState.viewMode, urlState.page, urlState.size, urlState.sort, urlState.sortDirection, urlState.filters, fetchProteins, fetchArchitectureData])
 
   // Initial load
   useEffect(() => {
     fetchDashboardStats()
-  }, [fetchDashboardStats])
-
-  // Calculate audit summary
-const auditSummary = useMemo(() => {
-  const partitionIssues = auditData.partitionAudit?.reduce((sum, batch) =>
-    sum + batch.proteins_missing_partitions + Math.max(0, batch.actual_proteins_in_batch - batch.partitions_attempted), 0
-  ) || 0
-
-  const evidenceIssues = auditData.evidenceConflicts?.reduce((sum, conflict) =>
-    sum + conflict.case_count, 0
-  ) || 0
-
-  const chainBlastIssues = auditData.chainBlastIssues?.reduce((sum, issue) =>
-    sum + issue.protein_count, 0
-  ) || 0
-
-  const criticalBatches = auditData.partitionAudit?.filter(batch =>
-    batch.proteins_missing_partitions > 50 || batch.overall_success_rate < 50
-  ).length || 0
-
-  return {
-    totalIssues: partitionIssues + evidenceIssues + chainBlastIssues,
-    criticalIssues: criticalBatches,
-    chainBlastProblems: chainBlastIssues,
-    partitionIssues
-  }
-}, [auditData])
+    checkAuditIssues()
+  }, [fetchDashboardStats, checkAuditIssues])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -569,16 +497,19 @@ const auditSummary = useMemo(() => {
               >
                 <AlertTriangle className="w-4 h-4" />
                 Audit
-                {auditSummary.totalIssues > 0 && (
+                {auditIssues > 0 && (
                   <Badge variant="destructive" className="ml-1">
-                    {auditSummary.totalIssues}
+                    {auditIssues}
                   </Badge>
                 )}
               </Button>
               <Button
                 variant="outline"
                 className="flex items-center gap-2"
-                onClick={fetchDashboardStats}
+                onClick={() => {
+                  fetchDashboardStats()
+                  checkAuditIssues()
+                }}
                 disabled={statisticsLoading}
               >
                 <RefreshCw className={`w-4 h-4 ${statisticsLoading ? 'animate-spin' : ''}`} />
@@ -749,32 +680,32 @@ const auditSummary = useMemo(() => {
             </Card>
           </div>
 
-          {/* Audit Alert (only show if there are issues) */}
-            {viewMode !== 'audit' && auditSummary.partitionIssues > 0 && (
-              <Card className="p-4 border-orange-200 bg-orange-50">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <AlertTriangle className="w-5 h-5 text-orange-600" />
-                    <div>
-                      <div className="font-medium text-orange-800">
-                        {auditSummary.partitionIssues} partition issues detected
-                      </div>
-                      <div className="text-sm text-orange-700">
-                        {auditSummary.criticalIssues} critical batches • {auditSummary.chainBlastProblems} chain BLAST problems
-                      </div>
+          {/* Audit Alert (only show if there are issues and not in audit view) */}
+          {viewMode !== 'audit' && auditIssues > 0 && (
+            <Card className="p-4 border-orange-200 bg-orange-50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-orange-600" />
+                  <div>
+                    <div className="font-medium text-orange-800">
+                      {auditIssues} partition issues detected
+                    </div>
+                    <div className="text-sm text-orange-700">
+                      Some proteins may not have been processed correctly
                     </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleViewModeChange('audit')}
-                    className="border-orange-300 text-orange-700 hover:bg-orange-100"
-                  >
-                    View Audit
-                  </Button>
                 </div>
-              </Card>
-            )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleViewModeChange('audit')}
+                  className="border-orange-300 text-orange-700 hover:bg-orange-100"
+                >
+                  View Audit
+                </Button>
+              </div>
+            </Card>
+          )}
 
           {/* Filters and Sorting (hide for audit view) */}
           {viewMode !== 'audit' && (
@@ -862,204 +793,10 @@ const auditSummary = useMemo(() => {
               loading={loading}
             />
           ) : (
-            <AuditView
-              auditData={auditData}
-              loading={auditLoading}
-              selectedBatch={selectedBatch}
-              onBatchChange={setSelectedBatch}
-              onRefresh={() => runAudit(selectedBatch || undefined)}
-            />
+            <AuditView />
           )}
         </div>
       </div>
-    </div>
-  )
-}
-
-// Audit View Component
-interface AuditViewProps {
-  auditData: AuditData
-  loading: boolean
-  selectedBatch: number | null
-  onBatchChange: (batchId: number | null) => void
-  onRefresh: () => void
-}
-
-function AuditView({ auditData, loading, selectedBatch, onBatchChange, onRefresh }: AuditViewProps) {
-  if (loading) {
-    return (
-      <Card className="p-8 text-center">
-        <LoadingSpinner />
-        <p className="mt-4 text-gray-600">Running pipeline audit...</p>
-      </Card>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Audit Controls */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h3 className="text-lg font-semibold">Pipeline Audit</h3>
-            <select
-              value={selectedBatch || ''}
-              onChange={(e) => onBatchChange(e.target.value ? parseInt(e.target.value) : null)}
-              className="border rounded px-3 py-1 text-sm"
-            >
-              <option value="">All Batches</option>
-              {/* TODO: Add batch options from API */}
-            </select>
-          </div>
-          <Button onClick={onRefresh} className="flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" />
-            Refresh Audit
-          </Button>
-        </div>
-      </Card>
-
-      {/* Missing Partitions */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-red-800 mb-4 flex items-center gap-2">
-          <XCircle className="w-5 h-5" />
-          Missing Partitions
-        </h3>
-
-        {auditData.missingPartitions.length === 0 ? (
-          <div className="text-green-600 flex items-center gap-2">
-            <CheckCircle className="w-4 h-4" />
-            No missing partitions detected
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {auditData.missingPartitions.map((batch) => (
-              <div key={batch.batch_id} className="border rounded p-4 bg-red-50">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="font-medium">{batch.batch_name}</h4>
-                    <div className="text-sm text-gray-600">Batch ID: {batch.batch_id}</div>
-                  </div>
-                  <Badge variant="destructive">{batch.missing_proteins} missing</Badge>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
-                  <div className="text-center">
-                    <div className="font-semibold text-red-600">{batch.proteins_without_domains}</div>
-                    <div className="text-xs text-gray-600">No Domains</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="font-semibold text-orange-600">{batch.domains_without_evidence}</div>
-                    <div className="text-xs text-gray-600">No Evidence</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="font-semibold text-yellow-600">{batch.classification_failures}</div>
-                    <div className="text-xs text-gray-600">Classification Failed</div>
-                  </div>
-                </div>
-
-                {batch.sample_issues.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-sm font-medium text-gray-700">Sample Issues:</div>
-                    <div className="text-xs text-gray-600 mt-1">
-                      {batch.sample_issues.slice(0, 5).join(', ')}
-                      {batch.sample_issues.length > 5 && ` and ${batch.sample_issues.length - 5} more...`}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Evidence Conflicts */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-orange-800 mb-4 flex items-center gap-2">
-          <AlertCircle className="w-5 h-5" />
-          Evidence Conflicts & Tuning Suggestions
-        </h3>
-
-        {auditData.evidenceConflicts.length === 0 ? (
-          <div className="text-green-600 flex items-center gap-2">
-            <CheckCircle className="w-4 h-4" />
-            No evidence conflicts detected
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {auditData.evidenceConflicts.map((conflict, index) => (
-              <div key={index} className="border rounded p-4 bg-orange-50">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="font-medium">{conflict.conflict_type.replace(/_/g, ' ')}</h4>
-                    <div className="text-sm text-orange-700">{conflict.tuning_suggestion.replace(/_/g, ' ')}</div>
-                  </div>
-                  <Badge variant="outline">{conflict.case_count} cases</Badge>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
-                  <div className="text-center">
-                    <div className="font-semibold">{conflict.avg_final_confidence?.toFixed(3)}</div>
-                    <div className="text-xs text-gray-600">Avg Final Confidence</div>
-                  </div>
-                </div>
-
-                {conflict.sample_cases.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-sm font-medium text-gray-700">Sample Cases:</div>
-                    <div className="text-xs text-gray-600 mt-1 font-mono">
-                      {conflict.sample_cases.slice(0, 3).join(', ')}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Chain BLAST Issues */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-yellow-800 mb-4 flex items-center gap-2">
-          <Zap className="w-5 h-5" />
-          Chain BLAST Issues
-        </h3>
-
-        {auditData.chainBlastIssues.length === 0 ? (
-          <div className="text-green-600 flex items-center gap-2">
-            <CheckCircle className="w-4 h-4" />
-            No chain BLAST issues detected
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {auditData.chainBlastIssues.map((issue, index) => (
-              <div key={index} className="border rounded p-4 bg-yellow-50">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="font-medium">{issue.chain_blast_issue.replace(/_/g, ' ')}</h4>
-                  </div>
-                  <Badge variant="outline">{issue.protein_count} proteins</Badge>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                  <div className="text-center">
-                    <div className="font-semibold">{issue.avg_chain_blast_hits?.toFixed(1)}</div>
-                    <div className="text-xs text-gray-600">Avg Chain BLAST Hits</div>
-                  </div>
-                </div>
-
-                {issue.sample_proteins.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-sm font-medium text-gray-700">Sample Proteins:</div>
-                    <div className="text-xs text-gray-600 mt-1 font-mono">
-                      {issue.sample_proteins.slice(0, 3).join(', ')}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
     </div>
   )
 }

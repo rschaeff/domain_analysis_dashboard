@@ -1,4 +1,4 @@
-// app/api/audit/missing-partitions/route.ts
+// app/api/audit/missing-partitions/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 
@@ -71,10 +71,25 @@ export async function GET(request: NextRequest) {
         WHERE 1=1 ${batchFilterPS} ${representativeFilter}
         GROUP BY ps.batch_id
       ),
-      partition_results AS (
-        -- Get actual partition results by matching protein source_ids (representative only)
+      batch_protein_list AS (
+        -- Get the actual list of proteins in each batch for proper matching
         SELECT
           ps.batch_id,
+          ep.source_id,
+          ep.pdb_id,
+          ep.chain_id,
+          ps.is_representative
+        FROM ecod_schema.process_status ps
+        JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
+        WHERE 1=1 ${batchFilterPS} ${representativeFilter}
+      ),
+      -- IMPORTANT: The key fix is adding 'AND pp.batch_id = bpl.batch_id'
+      -- to prevent cross-batch contamination where the same protein chain
+      -- appears in multiple batches and we were counting ALL partition results
+      partition_results AS (
+        -- Get actual partition results CONSTRAINED to proteins actually in each batch
+        SELECT
+          bpl.batch_id,
           COUNT(pp.id) as partitions_attempted,
           COUNT(CASE WHEN pp.is_classified = true THEN 1 END) as partitions_classified,
           COUNT(CASE WHEN pp.is_classified = false THEN 1 END) as partitions_unclassified,
@@ -96,25 +111,28 @@ export async function GET(request: NextRequest) {
             ELSE NULL END
           ), NULL) as sample_classified
 
-        FROM ecod_schema.process_status ps
-        JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
-        LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = (pp.pdb_id || '_' || pp.chain_id)
+        FROM batch_protein_list bpl
+        LEFT JOIN pdb_analysis.partition_proteins pp ON (
+          bpl.source_id = (pp.pdb_id || '_' || pp.chain_id)
+          AND pp.batch_id = bpl.batch_id  -- CRITICAL: constrain by batch_id
+        )
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-        WHERE 1=1 ${batchFilterPS} ${representativeFilter}
-        GROUP BY ps.batch_id
+        GROUP BY bpl.batch_id
       ),
       missing_analysis AS (
         -- Identify representative proteins that should have been processed but weren't
         SELECT
-          ps.batch_id,
+          bpl.batch_id,
           COUNT(*) as proteins_missing_partitions,
-          array_agg(ep.source_id ORDER BY ep.source_id) as sample_missing_proteins
-        FROM ecod_schema.process_status ps
-        JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
-        LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = (pp.pdb_id || '_' || pp.chain_id)
-        WHERE pp.id IS NULL ${batchFilterPS} ${representativeFilter}
-        GROUP BY ps.batch_id
+          array_agg(bpl.source_id ORDER BY bpl.source_id) as sample_missing_proteins
+        FROM batch_protein_list bpl
+        LEFT JOIN pdb_analysis.partition_proteins pp ON (
+          bpl.source_id = (pp.pdb_id || '_' || pp.chain_id)
+          AND pp.batch_id = bpl.batch_id  -- CRITICAL: constrain by batch_id
+        )
+        WHERE pp.id IS NULL
+        GROUP BY bpl.batch_id
       ),
       file_analysis AS (
         -- Check what files exist for missing partitions (representative only)

@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import {
   AlertTriangle, CheckCircle, XCircle, RefreshCw,
-  Database, FileText
+  Database, FileText, Users, Filter
 } from 'lucide-react'
 
 interface PartitionAuditData {
@@ -21,6 +21,8 @@ interface PartitionAuditData {
   batch_reported_completed: number
   actual_proteins_in_batch: number
   proteins_reported_done: number
+  representative_count?: number
+  non_representative_count?: number
 
   // Partition Results
   partitions_attempted: number
@@ -51,6 +53,9 @@ interface PartitionAuditData {
   partition_attempt_rate: number
   classification_success_rate: number
   overall_success_rate: number
+
+  // Filter info
+  includes_non_representative?: boolean
 }
 
 interface BatchOption {
@@ -76,6 +81,8 @@ export function AuditView() {
   const [partitionAudit, setPartitionAudit] = useState<PartitionAuditData[]>([])
   const [batchOptions, setBatchOptions] = useState<BatchOption[]>([])
   const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
+  const [includeNonRepresentative, setIncludeNonRepresentative] = useState(false)
+  const [filterMode, setFilterMode] = useState<string>('representative_only')
 
   const [auditLoading, setAuditLoading] = useState(false)
   const [batchesLoading, setBatchesLoading] = useState(true)
@@ -99,13 +106,20 @@ export function AuditView() {
   }, [])
 
   // Run partition audit only
-  const runAudit = useCallback(async (batchId?: number) => {
+  const runAudit = useCallback(async (batchId?: number, includeNonRep: boolean = false) => {
     setAuditLoading(true)
     setError(null)
 
     try {
-      const batchParam = batchId ? `?batch_id=${batchId}` : ''
-      const response = await fetch(`/api/audit/missing-partitions${batchParam}`)
+      const params = new URLSearchParams()
+      if (batchId) {
+        params.set('batch_id', batchId.toString())
+      }
+      if (includeNonRep) {
+        params.set('include_non_representative', 'true')
+      }
+
+      const response = await fetch(`/api/audit/missing-partitions?${params}`)
 
       if (!response.ok) {
         throw new Error('Partition audit request failed')
@@ -113,6 +127,7 @@ export function AuditView() {
 
       const data = await response.json()
       setPartitionAudit(data.partition_audit || [])
+      setFilterMode(data.filter_mode || 'representative_only')
 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Audit failed')
@@ -127,8 +142,8 @@ export function AuditView() {
   }, [loadBatches])
 
   useEffect(() => {
-    runAudit(selectedBatch || undefined)
-  }, [selectedBatch, runAudit])
+    runAudit(selectedBatch || undefined, includeNonRepresentative)
+  }, [selectedBatch, includeNonRepresentative, runAudit])
 
   // Calculate summary statistics
   const auditSummary = React.useMemo(() => {
@@ -136,6 +151,8 @@ export function AuditView() {
     const totalAttempted = partitionAudit.reduce((sum, batch) => sum + (batch.partitions_attempted ?? 0), 0)
     const totalClassified = partitionAudit.reduce((sum, batch) => sum + (batch.partitions_classified ?? 0), 0)
     const totalMissing = partitionAudit.reduce((sum, batch) => sum + (batch.proteins_missing_partitions ?? 0), 0)
+    const totalRepresentative = partitionAudit.reduce((sum, batch) => sum + (batch.representative_count ?? 0), 0)
+    const totalNonRepresentative = partitionAudit.reduce((sum, batch) => sum + (batch.non_representative_count ?? 0), 0)
     const criticalBatches = partitionAudit.filter(batch =>
       (batch.proteins_missing_partitions ?? 0) > 50 || (batch.overall_success_rate ?? 0) < 50
     ).length
@@ -145,6 +162,8 @@ export function AuditView() {
       totalAttempted,
       totalClassified,
       totalMissing,
+      totalRepresentative,
+      totalNonRepresentative,
       criticalBatches,
       overallAttemptRate: totalProteins > 0 ? (totalAttempted / totalProteins) * 100 : 0,
       overallSuccessRate: totalAttempted > 0 ? (totalClassified / totalAttempted) * 100 : 0
@@ -152,11 +171,15 @@ export function AuditView() {
   }, [partitionAudit])
 
   const handleRefresh = useCallback(() => {
-    runAudit(selectedBatch || undefined)
-  }, [selectedBatch, runAudit])
+    runAudit(selectedBatch || undefined, includeNonRepresentative)
+  }, [selectedBatch, includeNonRepresentative, runAudit])
 
   const handleBatchChange = useCallback((batchId: number | null) => {
     setSelectedBatch(batchId)
+  }, [])
+
+  const handleFilterChange = useCallback((includeNonRep: boolean) => {
+    setIncludeNonRepresentative(includeNonRep)
   }, [])
 
   if (auditLoading && partitionAudit.length === 0) {
@@ -193,7 +216,7 @@ export function AuditView() {
 
       {/* Audit Controls */}
       <Card className="p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="flex items-center gap-4">
             <h3 className="text-lg font-semibold">Partition Pipeline Audit</h3>
             <select
@@ -210,11 +233,51 @@ export function AuditView() {
               ))}
             </select>
           </div>
-          <Button onClick={handleRefresh} className="flex items-center gap-2" disabled={auditLoading}>
-            <RefreshCw className={`w-4 h-4 ${auditLoading ? 'animate-spin' : ''}`} />
-            Refresh Audit
-          </Button>
+
+          <div className="flex items-center gap-4">
+            {/* Filter Toggle */}
+            <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded border">
+              <Filter className="w-4 h-4 text-gray-600" />
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeNonRepresentative}
+                  onChange={(e) => handleFilterChange(e.target.checked)}
+                  className="rounded"
+                  disabled={auditLoading}
+                />
+                Include non-representative
+              </label>
+            </div>
+
+            {/* Filter Status Badge */}
+            <Badge
+              variant={filterMode === 'representative_only' ? 'default' : 'secondary'}
+              className="flex items-center gap-1"
+            >
+              <Users className="w-3 h-3" />
+              {filterMode === 'representative_only' ? 'Representative Only' : 'All Proteins'}
+            </Badge>
+
+            <Button onClick={handleRefresh} className="flex items-center gap-2" disabled={auditLoading}>
+              <RefreshCw className={`w-4 h-4 ${auditLoading ? 'animate-spin' : ''}`} />
+              Refresh Audit
+            </Button>
+          </div>
         </div>
+
+        {/* Filter Info */}
+        {filterMode === 'representative_only' && auditSummary.totalNonRepresentative > 0 && (
+          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-blue-600" />
+              <span className="font-medium text-blue-800">Representative Filter Active</span>
+            </div>
+            <div className="text-blue-700 mt-1">
+              Showing only representative proteins. {safeToLocaleString(auditSummary.totalNonRepresentative)} non-representative proteins are excluded from analysis.
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Summary Cards */}
@@ -225,7 +288,9 @@ export function AuditView() {
               <div className="text-2xl font-bold text-blue-600">
                 {safeToLocaleString(auditSummary.totalProteins)}
               </div>
-              <div className="text-sm text-gray-600">Total Proteins</div>
+              <div className="text-sm text-gray-600">
+                {filterMode === 'representative_only' ? 'Representative Proteins' : 'Total Proteins'}
+              </div>
               <div className="text-xs text-gray-500">
                 {safeNumber(auditSummary.overallAttemptRate).toFixed(1)}% attempted
               </div>
@@ -280,11 +345,46 @@ export function AuditView() {
         </Card>
       </div>
 
+      {/* Additional breakdown for mixed mode */}
+      {filterMode === 'all_proteins' && auditSummary.totalRepresentative > 0 && auditSummary.totalNonRepresentative > 0 && (
+        <Card className="p-4">
+          <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            Protein Composition
+          </h4>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center">
+              <div className="text-lg font-bold text-blue-600">
+                {safeToLocaleString(auditSummary.totalRepresentative)}
+              </div>
+              <div className="text-xs text-gray-600">Representative</div>
+              <div className="text-xs text-gray-500">
+                {auditSummary.totalProteins > 0 ?
+                  ((auditSummary.totalRepresentative / auditSummary.totalProteins) * 100).toFixed(1) : 0}%
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-bold text-gray-600">
+                {safeToLocaleString(auditSummary.totalNonRepresentative)}
+              </div>
+              <div className="text-xs text-gray-600">Non-Representative</div>
+              <div className="text-xs text-gray-500">
+                {auditSummary.totalProteins > 0 ?
+                  ((auditSummary.totalNonRepresentative / auditSummary.totalProteins) * 100).toFixed(1) : 0}%
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Partition Audit Results */}
       <Card className="p-6">
         <h3 className="text-lg font-semibold text-red-800 mb-4 flex items-center gap-2">
           <Database className="w-5 h-5" />
           Partition Pipeline Results
+          <Badge variant="outline" className="ml-2 text-xs">
+            {filterMode === 'representative_only' ? 'Representative Only' : 'All Proteins'}
+          </Badge>
         </h3>
 
         {partitionAudit.length === 0 ? (
@@ -307,6 +407,14 @@ export function AuditView() {
                         <Badge variant={batch.batch_status === 'completed' ? 'default' : 'secondary'}>
                           {batch.batch_status}
                         </Badge>
+                        {batch.representative_count !== undefined && (
+                          <Badge variant="outline" className="text-xs">
+                            {safeToLocaleString(batch.representative_count)} rep
+                            {batch.non_representative_count && batch.non_representative_count > 0 &&
+                              ` / ${safeToLocaleString(batch.non_representative_count)} non-rep`
+                            }
+                          </Badge>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -382,7 +490,7 @@ export function AuditView() {
                               {safeToLocaleString(batch.proteins_missing_partitions)} Missing Partitions
                             </div>
                             <div className="text-sm text-red-700">
-                              Proteins in batch but no partition results
+                              {filterMode === 'representative_only' ? 'Representative proteins' : 'Proteins'} in batch but no partition results
                             </div>
                           </div>
                         )}

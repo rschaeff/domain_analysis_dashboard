@@ -33,10 +33,14 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const batchId = searchParams.get('batch_id')
+    const includeNonRep = searchParams.get('include_non_representative') === 'true'
 
-    // Build the WHERE clause dynamically to avoid parameter type confusion
+    // Build the WHERE clause dynamically
     const batchFilter = batchId ? `AND b.id = ${parseInt(batchId)}` : ''
     const batchFilterPS = batchId ? `AND ps.batch_id = ${parseInt(batchId)}` : ''
+
+    // Representative filter - add this unless explicitly including non-representative
+    const representativeFilter = includeNonRep ? '' : 'AND ps.is_representative = true'
 
     const rawPartitionAudit = await prisma.$queryRawUnsafe(`
       WITH batch_overview AS (
@@ -54,19 +58,21 @@ export async function GET(request: NextRequest) {
           ${batchFilter}
       ),
       batch_proteins AS (
-        -- Get proteins actually assigned to each batch via process_status
+        -- Get representative proteins actually assigned to each batch via process_status
         SELECT
           ps.batch_id,
           COUNT(*) as proteins_in_batch,
           COUNT(CASE WHEN ps.current_stage IN ('completed', 'classified') THEN 1 END) as proteins_reported_done,
+          COUNT(CASE WHEN ps.is_representative = true THEN 1 END) as representative_count,
+          COUNT(CASE WHEN ps.is_representative = false THEN 1 END) as non_representative_count,
           array_agg(DISTINCT ps.current_stage) as stages_present
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
-        WHERE 1=1 ${batchFilterPS}
+        WHERE 1=1 ${batchFilterPS} ${representativeFilter}
         GROUP BY ps.batch_id
       ),
       partition_results AS (
-        -- Get actual partition results by matching protein source_ids
+        -- Get actual partition results by matching protein source_ids (representative only)
         SELECT
           ps.batch_id,
           COUNT(pp.id) as partitions_attempted,
@@ -95,11 +101,11 @@ export async function GET(request: NextRequest) {
         LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = (pp.pdb_id || '_' || pp.chain_id)
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-        WHERE 1=1 ${batchFilterPS}
+        WHERE 1=1 ${batchFilterPS} ${representativeFilter}
         GROUP BY ps.batch_id
       ),
       missing_analysis AS (
-        -- Identify proteins that should have been processed but weren't
+        -- Identify representative proteins that should have been processed but weren't
         SELECT
           ps.batch_id,
           COUNT(*) as proteins_missing_partitions,
@@ -107,11 +113,11 @@ export async function GET(request: NextRequest) {
         FROM ecod_schema.process_status ps
         JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
         LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = (pp.pdb_id || '_' || pp.chain_id)
-        WHERE pp.id IS NULL ${batchFilterPS}
+        WHERE pp.id IS NULL ${batchFilterPS} ${representativeFilter}
         GROUP BY ps.batch_id
       ),
       file_analysis AS (
-        -- Check what files exist for missing partitions
+        -- Check what files exist for missing partitions (representative only)
         SELECT
           ps.batch_id,
           COUNT(CASE WHEN pf.file_type = 'fasta' AND pf.file_exists = true THEN 1 END) as fasta_files_exist,
@@ -120,7 +126,7 @@ export async function GET(request: NextRequest) {
           COUNT(CASE WHEN pf.file_type LIKE '%partition%' AND pf.file_exists = true THEN 1 END) as partition_files_exist
         FROM ecod_schema.process_status ps
         LEFT JOIN ecod_schema.process_file pf ON ps.id = pf.process_id
-        WHERE 1=1 ${batchFilterPS}
+        WHERE 1=1 ${batchFilterPS} ${representativeFilter}
         GROUP BY ps.batch_id
       )
       SELECT
@@ -135,6 +141,8 @@ export async function GET(request: NextRequest) {
         bo.reported_completed as batch_reported_completed,
         COALESCE(bp.proteins_in_batch, 0) as actual_proteins_in_batch,
         COALESCE(bp.proteins_reported_done, 0) as proteins_reported_done,
+        COALESCE(bp.representative_count, 0) as representative_count,
+        COALESCE(bp.non_representative_count, 0) as non_representative_count,
 
         -- Partition Results
         COALESCE(pr.partitions_attempted, 0) as partitions_attempted,
@@ -178,7 +186,10 @@ export async function GET(request: NextRequest) {
           WHEN COALESCE(bp.proteins_in_batch, 0) > 0
           THEN ROUND((COALESCE(pr.partitions_classified, 0)::numeric / bp.proteins_in_batch::numeric) * 100, 1)
           ELSE 0.0
-        END as overall_success_rate
+        END as overall_success_rate,
+
+        -- Include filter mode in results
+        ${includeNonRep ? 'true' : 'false'} as includes_non_representative
 
       FROM batch_overview bo
       LEFT JOIN batch_proteins bp ON bo.batch_id = bp.batch_id
@@ -194,7 +205,10 @@ export async function GET(request: NextRequest) {
     // Convert BigInt values to numbers using helper function
     const partitionAudit = convertBigIntToNumber(rawPartitionAudit)
 
-    return NextResponse.json({ partition_audit: partitionAudit })
+    return NextResponse.json({
+      partition_audit: partitionAudit,
+      filter_mode: includeNonRep ? 'all_proteins' : 'representative_only'
+    })
   } catch (error) {
     console.error('Partition audit error:', error)
     return NextResponse.json({

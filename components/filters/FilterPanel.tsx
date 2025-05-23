@@ -11,7 +11,7 @@ import {
   Filter,
   X,
   Search,
-  Loader,
+  Loader2,
   Star,
   Target,
   Layers,
@@ -252,7 +252,7 @@ function ClassificationAutocomplete({
           disabled={disabled}
         >
           {loading ? (
-            <Loader className="w-4 h-4 animate-spin text-gray-500" />
+            <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
           ) : error ? (
             <AlertCircle className="w-4 h-4 text-red-500" />
           ) : (
@@ -301,7 +301,7 @@ function ClassificationAutocomplete({
               ))}
               {loading && (
                 <div className="px-3 py-2 text-xs text-gray-500 border-t flex items-center gap-2">
-                  <Loader className="w-3 h-3 animate-spin" />
+                  <Loader2 className="w-3 h-3 animate-spin" />
                   Loading...
                 </div>
               )}
@@ -414,7 +414,7 @@ export function FilterPanel({
               <Filter className="w-5 h-5 text-gray-600" />
               <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
               {loading && (
-                <Loader className="w-4 h-4 animate-spin text-blue-600" />
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
               )}
             </div>
             {showAppliedCount && activeFilterCount > 0 && (
@@ -502,7 +502,7 @@ export function FilterPanel({
             <span className="text-sm font-medium text-gray-700">Quick Filters:</span>
             {loading && (
               <span className="text-xs text-blue-600 flex items-center gap-1">
-                <Loader className="w-3 h-3 animate-spin" />
+                <Loader2 className="w-3 h-3 animate-spin" />
                 Applying filters...
               </span>
             )}

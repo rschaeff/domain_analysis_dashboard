@@ -14,7 +14,7 @@ import {
   Eye, Download, BarChart3, Users, Table, Grid, Layers, List,
   AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
   TrendingUp, Database, Zap, Activity, Clock, Target, Star,
-  FileText
+  FileText, Loader2
 } from 'lucide-react'
 
 // Enhanced statistics interface with all expected fields
@@ -820,7 +820,7 @@ export default function EnhancedDashboard() {
                       Showing page {pagination.page} of {Math.ceil(pagination.total / pagination.size)}
                       {loading && (
                         <span className="ml-2 inline-flex items-center gap-1">
-                          <Loader className="w-3 h-3 animate-spin" />
+                          <Loader2 className="w-3 h-3 animate-spin" />
                           Loading...
                         </span>
                       )}

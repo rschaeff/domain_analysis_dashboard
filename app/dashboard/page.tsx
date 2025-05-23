@@ -10,6 +10,7 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { AuditView } from '@/components/analysis/AuditView'
 import {
   Eye, Download, BarChart3, Users, Table, Grid, Layers, List,
   AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
@@ -67,15 +68,7 @@ interface ProteinSummary {
 }
 
 interface AuditData {
-  missingPartitions: Array<{
-    batch_id: number
-    batch_name: string
-    missing_proteins: number
-    proteins_without_domains: number
-    domains_without_evidence: number
-    classification_failures: number
-    sample_issues: string[]
-  }>
+  partitionAudit: PartitionAuditData[]
   evidenceConflicts: Array<{
     conflict_type: string
     tuning_suggestion: string
@@ -270,11 +263,12 @@ export default function EnhancedDashboard() {
   })
 
   // Audit state
-  const [auditData, setAuditData] = useState<AuditData>({
-    missingPartitions: [],
-    evidenceConflicts: [],
-    chainBlastIssues: []
-  })
+    const [auditData, setAuditData] = useState<AuditData>({
+      partitionAudit: [],
+      evidenceConflicts: [],
+      chainBlastIssues: []
+    })
+
   const [auditLoading, setAuditLoading] = useState(false)
   const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
 
@@ -415,40 +409,41 @@ export default function EnhancedDashboard() {
   }, [urlState.filters])
 
   // Run comprehensive audit
-  const runAudit = useCallback(async (batchId?: number) => {
-    setAuditLoading(true)
-    setError(null)
+const runAudit = useCallback(async (batchId?: number) => {
+  setAuditLoading(true)
+  setError(null)
 
-    try {
-      const batchParam = batchId ? `?batch_id=${batchId}` : ''
+  try {
+    const batchParam = batchId ? `?batch_id=${batchId}` : ''
 
-      const [missingResponse, evidenceResponse, chainBlastResponse] = await Promise.all([
-        fetch(`/api/audit/missing-partitions${batchParam}`),
-        fetch(`/api/audit/evidence-analysis${batchParam}`),
-        fetch('/api/audit/chain-blast-diagnostic')
-      ])
+    const [partitionResponse, evidenceResponse, chainBlastResponse] = await Promise.all([
+      fetch(`/api/audit/missing-partitions${batchParam}`),
+      fetch(`/api/audit/evidence-analysis${batchParam}`),
+      fetch('/api/audit/chain-blast-diagnostic')
+    ])
 
-      if (!missingResponse.ok || !evidenceResponse.ok || !chainBlastResponse.ok) {
-        throw new Error('One or more audit requests failed')
-      }
-
-      const [missingData, evidenceData, chainBlastData] = await Promise.all([
-        missingResponse.json(),
-        evidenceResponse.json(),
-        chainBlastResponse.json()
-      ])
-
-      setAuditData({
-        missingPartitions: missingData.missing_partitions || [],
-        evidenceConflicts: evidenceData.evidence_analysis || [],
-        chainBlastIssues: chainBlastData.chain_blast_diagnostic || []
-      })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Audit failed')
-    } finally {
-      setAuditLoading(false)
+    if (!partitionResponse.ok || !evidenceResponse.ok || !chainBlastResponse.ok) {
+      throw new Error('One or more audit requests failed')
     }
-  }, [])
+
+    const [partitionData, evidenceData, chainBlastData] = await Promise.all([
+      partitionResponse.json(),
+      evidenceResponse.json(),
+      chainBlastResponse.json()
+    ])
+
+    // Update auditData structure
+    setAuditData({
+      partitionAudit: partitionData.partition_audit || [],
+      evidenceConflicts: evidenceData.evidence_analysis || [],
+      chainBlastIssues: chainBlastData.chain_blast_diagnostic || []
+    })
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Audit failed')
+  } finally {
+    setAuditLoading(false)
+  }
+}, [])
 
   // URL state change handlers
   const handleFiltersChange = useCallback((newFilters: DomainFilters) => {
@@ -507,17 +502,30 @@ export default function EnhancedDashboard() {
   }, [fetchDashboardStats])
 
   // Calculate audit summary
-  const auditSummary = useMemo(() => ({
-    totalIssues: auditData.missingPartitions.reduce((sum, batch) => sum + batch.missing_proteins, 0) +
-                 auditData.evidenceConflicts.reduce((sum, conflict) => sum + conflict.case_count, 0) +
-                 auditData.chainBlastIssues.reduce((sum, issue) => sum + issue.protein_count, 0),
-    criticalIssues: auditData.missingPartitions.filter(batch => batch.missing_proteins > 100).length +
-                   auditData.evidenceConflicts.filter(conflict => conflict.case_count > 50).length,
-    chainBlastProblems: auditData.chainBlastIssues.filter(issue =>
-      issue.chain_blast_issue === 'CHAIN_BLAST_NOT_USED' ||
-      issue.chain_blast_issue === 'HIGH_CONF_CHAIN_BLAST_IGNORED'
-    ).reduce((sum, issue) => sum + issue.protein_count, 0)
-  }), [auditData])
+const auditSummary = useMemo(() => {
+  const partitionIssues = auditData.partitionAudit?.reduce((sum, batch) =>
+    sum + batch.proteins_missing_partitions + Math.max(0, batch.actual_proteins_in_batch - batch.partitions_attempted), 0
+  ) || 0
+
+  const evidenceIssues = auditData.evidenceConflicts?.reduce((sum, conflict) =>
+    sum + conflict.case_count, 0
+  ) || 0
+
+  const chainBlastIssues = auditData.chainBlastIssues?.reduce((sum, issue) =>
+    sum + issue.protein_count, 0
+  ) || 0
+
+  const criticalBatches = auditData.partitionAudit?.filter(batch =>
+    batch.proteins_missing_partitions > 50 || batch.overall_success_rate < 50
+  ).length || 0
+
+  return {
+    totalIssues: partitionIssues + evidenceIssues + chainBlastIssues,
+    criticalIssues: criticalBatches,
+    chainBlastProblems: chainBlastIssues,
+    partitionIssues
+  }
+}, [auditData])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -742,31 +750,31 @@ export default function EnhancedDashboard() {
           </div>
 
           {/* Audit Alert (only show if there are issues) */}
-          {viewMode !== 'audit' && auditSummary.totalIssues > 0 && (
-            <Card className="p-4 border-orange-200 bg-orange-50">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="w-5 h-5 text-orange-600" />
-                  <div>
-                    <div className="font-medium text-orange-800">
-                      {auditSummary.totalIssues} pipeline issues detected
-                    </div>
-                    <div className="text-sm text-orange-700">
-                      {auditSummary.criticalIssues} critical • {auditSummary.chainBlastProblems} chain BLAST problems
+            {viewMode !== 'audit' && auditSummary.partitionIssues > 0 && (
+              <Card className="p-4 border-orange-200 bg-orange-50">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-5 h-5 text-orange-600" />
+                    <div>
+                      <div className="font-medium text-orange-800">
+                        {auditSummary.partitionIssues} partition issues detected
+                      </div>
+                      <div className="text-sm text-orange-700">
+                        {auditSummary.criticalIssues} critical batches • {auditSummary.chainBlastProblems} chain BLAST problems
+                      </div>
                     </div>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleViewModeChange('audit')}
+                    className="border-orange-300 text-orange-700 hover:bg-orange-100"
+                  >
+                    View Audit
+                  </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleViewModeChange('audit')}
-                  className="border-orange-300 text-orange-700 hover:bg-orange-100"
-                >
-                  View Audit
-                </Button>
-              </div>
-            </Card>
-          )}
+              </Card>
+            )}
 
           {/* Filters and Sorting (hide for audit view) */}
           {viewMode !== 'audit' && (

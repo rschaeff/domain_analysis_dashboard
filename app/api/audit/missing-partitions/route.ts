@@ -1,96 +1,175 @@
 // app/api/audit/missing-partitions/route.ts
+import { NextRequest, NextResponse } from 'next/server'
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const batchId = searchParams.get('batch_id')
-    
-    const missingPartitions = await prisma.$queryRawUnsafe(`
-      WITH batch_expectations AS (
-        -- Get what SHOULD be processed based on batch definitions
-        SELECT 
+
+    const partitionAudit = await prisma.$queryRawUnsafe(`
+      WITH batch_overview AS (
+        -- Get batch metadata and expectations
+        SELECT
           b.id as batch_id,
           b.batch_name,
-          b.total_items as expected_count,
+          b.type as batch_type,
+          b.total_items as reported_total,
           b.completed_items as reported_completed,
-          b.status as batch_status
+          b.status as batch_status,
+          b.ref_version
         FROM ecod_schema.batch b
         WHERE ($1 IS NULL OR b.id = $1)
-          AND b.type = 'pdb_hhsearch'
+          AND b.type IN ('pdb_hhsearch', 'domain_analysis')
       ),
-      actual_partitions AS (
-        -- Get what WAS actually processed  
-        SELECT 
-          pp.batch_id,
-          COUNT(*) as actual_processed,
-          COUNT(CASE WHEN pp.is_classified THEN 1 END) as actually_classified,
-          COUNT(CASE WHEN pd.id IS NOT NULL THEN 1 END) as with_domains,
-          COUNT(CASE WHEN de.id IS NOT NULL THEN 1 END) as with_evidence
-        FROM pdb_analysis.partition_proteins pp
+      batch_proteins AS (
+        -- Get proteins actually assigned to each batch via process_status
+        SELECT
+          ps.batch_id,
+          COUNT(*) as proteins_in_batch,
+          COUNT(CASE WHEN ps.current_stage IN ('completed', 'classified') THEN 1 END) as proteins_reported_done,
+          array_agg(DISTINCT ps.current_stage) as stages_present,
+          array_agg(ep.source_id ORDER BY ep.source_id) as sample_proteins
+        FROM ecod_schema.process_status ps
+        JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
+        WHERE ($1 IS NULL OR ps.batch_id = $1)
+        GROUP BY ps.batch_id
+      ),
+      partition_results AS (
+        -- Get actual partition results by matching protein source_ids
+        SELECT
+          ps.batch_id,
+          COUNT(pp.id) as partitions_attempted,
+          COUNT(CASE WHEN pp.is_classified THEN 1 END) as partitions_classified,
+          COUNT(CASE WHEN NOT pp.is_classified THEN 1 END) as partitions_unclassified,
+          COUNT(CASE WHEN pp.is_peptide THEN 1 END) as partitions_peptide,
+          COUNT(pd.id) as total_domains_found,
+          COUNT(de.id) as total_evidence_items,
+
+          -- Sample unclassified proteins
+          array_agg(
+            CASE WHEN NOT pp.is_classified AND NOT pp.is_peptide
+            THEN pp.pdb_id || '_' || pp.chain_id
+            END
+          ) FILTER (WHERE NOT pp.is_classified AND NOT pp.is_peptide) as sample_unclassified,
+
+          -- Sample classified proteins
+          array_agg(
+            CASE WHEN pp.is_classified
+            THEN pp.pdb_id || '_' || pp.chain_id
+            END
+          ) FILTER (WHERE pp.is_classified) as sample_classified
+
+        FROM ecod_schema.process_status ps
+        JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
+        LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = pp.pdb_id || '_' || pp.chain_id
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-        WHERE ($1 IS NULL OR pp.batch_id = $1)
-        GROUP BY pp.batch_id
+        WHERE ($1 IS NULL OR ps.batch_id = $1)
+        GROUP BY ps.batch_id
       ),
-      processing_gaps AS (
-        -- Identify specific types of gaps
-        SELECT 
-          pp.batch_id,
-          pp.pdb_id,
-          pp.chain_id,
-          pp.is_classified,
-          COUNT(pd.id) as domain_count,
-          COUNT(de.id) as evidence_count,
-          CASE 
-            WHEN COUNT(pd.id) = 0 THEN 'NO_DOMAINS'
-            WHEN COUNT(de.id) = 0 THEN 'NO_EVIDENCE' 
-            WHEN pp.is_classified = false AND COUNT(pd.id) > 0 THEN 'UNCLASSIFIED_WITH_DOMAINS'
-            WHEN pp.is_classified = true AND COUNT(CASE WHEN pd.t_group IS NOT NULL THEN 1 END) = 0 THEN 'CLASSIFIED_WITHOUT_GROUPS'
-            ELSE 'OK'
-          END as gap_type
-        FROM pdb_analysis.partition_proteins pp
-        LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
-        LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-        WHERE ($1 IS NULL OR pp.batch_id = $1)
-        GROUP BY pp.batch_id, pp.pdb_id, pp.chain_id, pp.is_classified, pp.id
+      missing_analysis AS (
+        -- Identify proteins that should have been processed but weren't
+        SELECT
+          ps.batch_id,
+          COUNT(*) as proteins_missing_partitions,
+          array_agg(ep.source_id ORDER BY ep.source_id LIMIT 10) as sample_missing_proteins
+        FROM ecod_schema.process_status ps
+        JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
+        LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = pp.pdb_id || '_' || pp.chain_id
+        WHERE ($1 IS NULL OR ps.batch_id = $1)
+          AND pp.id IS NULL  -- No partition result found
+        GROUP BY ps.batch_id
+      ),
+      file_analysis AS (
+        -- Check what files exist for missing partitions
+        SELECT
+          ps.batch_id,
+          COUNT(CASE WHEN pf.file_type = 'fasta' AND pf.file_exists THEN 1 END) as fasta_files_exist,
+          COUNT(CASE WHEN pf.file_type LIKE '%blast%' AND pf.file_exists THEN 1 END) as blast_files_exist,
+          COUNT(CASE WHEN pf.file_type LIKE '%hhsearch%' AND pf.file_exists THEN 1 END) as hhsearch_files_exist,
+          COUNT(CASE WHEN pf.file_type LIKE '%partition%' AND pf.file_exists THEN 1 END) as partition_files_exist
+        FROM ecod_schema.process_status ps
+        LEFT JOIN ecod_schema.process_file pf ON ps.id = pf.process_id
+        WHERE ($1 IS NULL OR ps.batch_id = $1)
+        GROUP BY ps.batch_id
       )
-      SELECT 
-        be.batch_id,
-        be.batch_name,
-        be.expected_count,
-        be.reported_completed,
-        COALESCE(ap.actual_processed, 0) as actual_processed,
-        COALESCE(ap.actually_classified, 0) as actually_classified,
-        COALESCE(ap.with_domains, 0) as with_domains,
-        COALESCE(ap.with_evidence, 0) as with_evidence,
-        
-        -- Calculate gaps
-        (be.expected_count - COALESCE(ap.actual_processed, 0)) as missing_proteins,
-        (be.reported_completed - COALESCE(ap.actual_processed, 0)) as reporting_gap,
-        
-        -- Gap breakdown
-        COUNT(CASE WHEN pg.gap_type = 'NO_DOMAINS' THEN 1 END) as proteins_without_domains,
-        COUNT(CASE WHEN pg.gap_type = 'NO_EVIDENCE' THEN 1 END) as domains_without_evidence,
-        COUNT(CASE WHEN pg.gap_type = 'UNCLASSIFIED_WITH_DOMAINS' THEN 1 END) as classification_failures,
-        COUNT(CASE WHEN pg.gap_type = 'CLASSIFIED_WITHOUT_GROUPS' THEN 1 END) as assignment_failures,
-        
-        -- Sample problematic cases
-        array_agg(
-          CASE WHEN pg.gap_type != 'OK' 
-          THEN pg.pdb_id || '_' || pg.chain_id || ' (' || pg.gap_type || ')'
-          END
-        ) FILTER (WHERE pg.gap_type != 'OK') as sample_issues
-        
-      FROM batch_expectations be
-      LEFT JOIN actual_partitions ap ON be.batch_id = ap.batch_id
-      LEFT JOIN processing_gaps pg ON be.batch_id = pg.batch_id
-      GROUP BY be.batch_id, be.batch_name, be.expected_count, be.reported_completed,
-               ap.actual_processed, ap.actually_classified, ap.with_domains, ap.with_evidence
-      ORDER BY missing_proteins DESC, reporting_gap DESC
+      SELECT
+        bo.batch_id,
+        bo.batch_name,
+        bo.batch_type,
+        bo.ref_version,
+        bo.batch_status,
+
+        -- Expectations vs Reality
+        bo.reported_total as batch_reported_total,
+        bo.reported_completed as batch_reported_completed,
+        COALESCE(bp.proteins_in_batch, 0) as actual_proteins_in_batch,
+        COALESCE(bp.proteins_reported_done, 0) as proteins_reported_done,
+
+        -- Partition Results
+        COALESCE(pr.partitions_attempted, 0) as partitions_attempted,
+        COALESCE(pr.partitions_classified, 0) as partitions_classified,
+        COALESCE(pr.partitions_unclassified, 0) as partitions_unclassified,
+        COALESCE(pr.partitions_peptide, 0) as partitions_peptide,
+        COALESCE(pr.total_domains_found, 0) as total_domains_found,
+        COALESCE(pr.total_evidence_items, 0) as total_evidence_items,
+
+        -- Gaps and Issues
+        COALESCE(ma.proteins_missing_partitions, 0) as proteins_missing_partitions,
+        (COALESCE(bp.proteins_in_batch, 0) - COALESCE(pr.partitions_attempted, 0)) as partition_gap,
+        (bo.reported_total - COALESCE(bp.proteins_in_batch, 0)) as batch_definition_gap,
+
+        -- File Status
+        COALESCE(fa.fasta_files_exist, 0) as fasta_files_exist,
+        COALESCE(fa.blast_files_exist, 0) as blast_files_exist,
+        COALESCE(fa.hhsearch_files_exist, 0) as hhsearch_files_exist,
+        COALESCE(fa.partition_files_exist, 0) as partition_files_exist,
+
+        -- Samples and Details
+        bp.stages_present,
+        pr.sample_unclassified[1:5] as sample_unclassified,
+        pr.sample_classified[1:3] as sample_classified,
+        ma.sample_missing_proteins[1:5] as sample_missing_proteins,
+
+        -- Calculated Quality Metrics
+        CASE
+          WHEN COALESCE(bp.proteins_in_batch, 0) > 0
+          THEN ROUND((COALESCE(pr.partitions_attempted, 0)::numeric / bp.proteins_in_batch::numeric) * 100, 1)
+          ELSE 0
+        END as partition_attempt_rate,
+
+        CASE
+          WHEN COALESCE(pr.partitions_attempted, 0) > 0
+          THEN ROUND((COALESCE(pr.partitions_classified, 0)::numeric / pr.partitions_attempted::numeric) * 100, 1)
+          ELSE 0
+        END as classification_success_rate,
+
+        CASE
+          WHEN COALESCE(bp.proteins_in_batch, 0) > 0
+          THEN ROUND((COALESCE(pr.partitions_classified, 0)::numeric / bp.proteins_in_batch::numeric) * 100, 1)
+          ELSE 0
+        END as overall_success_rate
+
+      FROM batch_overview bo
+      LEFT JOIN batch_proteins bp ON bo.batch_id = bp.batch_id
+      LEFT JOIN partition_results pr ON bo.batch_id = pr.batch_id
+      LEFT JOIN missing_analysis ma ON bo.batch_id = ma.batch_id
+      LEFT JOIN file_analysis fa ON bo.batch_id = fa.batch_id
+      ORDER BY
+        bo.batch_id DESC,
+        proteins_missing_partitions DESC,
+        partition_gap DESC
     `, [batchId ? parseInt(batchId) : null])
 
-    return NextResponse.json({ missing_partitions: missingPartitions })
+    return NextResponse.json({ partition_audit: partitionAudit })
   } catch (error) {
-    console.error('Missing partitions audit error:', error)
-    return NextResponse.json({ error: 'Failed to audit missing partitions' }, { status: 500 })
+    console.error('Partition audit error:', error)
+    return NextResponse.json({
+      error: 'Failed to audit partitions',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 })
   }
 }

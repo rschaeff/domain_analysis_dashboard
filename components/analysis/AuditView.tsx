@@ -1,0 +1,444 @@
+// Enhanced Audit View Component for the Dashboard
+import React, { useState, useEffect, useCallback } from 'react'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import {
+  AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
+  Database, Layers, Target, FileText, TrendingDown, TrendingUp,
+  Activity, Clock, Zap, Users, BarChart3
+} from 'lucide-react'
+
+interface PartitionAuditData {
+  batch_id: number
+  batch_name: string
+  batch_type: string
+  ref_version: string
+  batch_status: string
+  
+  // Expectations vs Reality
+  batch_reported_total: number
+  batch_reported_completed: number
+  actual_proteins_in_batch: number
+  proteins_reported_done: number
+  
+  // Partition Results
+  partitions_attempted: number
+  partitions_classified: number
+  partitions_unclassified: number
+  partitions_peptide: number
+  total_domains_found: number
+  total_evidence_items: number
+  
+  // Gaps and Issues
+  proteins_missing_partitions: number
+  partition_gap: number
+  batch_definition_gap: number
+  
+  // File Status
+  fasta_files_exist: number
+  blast_files_exist: number
+  hhsearch_files_exist: number
+  partition_files_exist: number
+  
+  // Samples
+  stages_present: string[]
+  sample_unclassified: string[]
+  sample_classified: string[]
+  sample_missing_proteins: string[]
+  
+  // Quality Metrics
+  partition_attempt_rate: number
+  classification_success_rate: number
+  overall_success_rate: number
+}
+
+interface BatchOption {
+  id: number
+  batch_name: string
+  batch_type: string
+  total_items: number
+  status: string
+}
+
+interface AuditViewProps {
+  loading: boolean
+  selectedBatch: number | null
+  onBatchChange: (batchId: number | null) => void
+  onRefresh: () => void
+}
+
+export function AuditView({ loading, selectedBatch, onBatchChange, onRefresh }: AuditViewProps) {
+  const [partitionAudit, setPartitionAudit] = useState<PartitionAuditData[]>([])
+  const [batchOptions, setBatchOptions] = useState<BatchOption[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [batchesLoading, setBatchesLoading] = useState(true)
+
+  // Load available batches
+  const loadBatches = useCallback(async () => {
+    setBatchesLoading(true)
+    try {
+      const response = await fetch('/api/batches')
+      if (response.ok) {
+        const data = await response.json()
+        setBatchOptions(data.batches || [])
+      }
+    } catch (error) {
+      console.error('Failed to load batches:', error)
+    } finally {
+      setBatchesLoading(false)
+    }
+  }, [])
+
+  // Load partition audit data
+  const loadPartitionAudit = useCallback(async () => {
+    setAuditLoading(true)
+    try {
+      const batchParam = selectedBatch ? `?batch_id=${selectedBatch}` : ''
+      const response = await fetch(`/api/audit/missing-partitions${batchParam}`)
+      
+      if (response.ok) {
+        const data = await response.json()
+        setPartitionAudit(data.partition_audit || [])
+      } else {
+        console.error('Failed to load partition audit')
+      }
+    } catch (error) {
+      console.error('Partition audit error:', error)
+    } finally {
+      setAuditLoading(false)
+    }
+  }, [selectedBatch])
+
+  // Load data on mount and when batch changes
+  useEffect(() => {
+    loadBatches()
+  }, [loadBatches])
+
+  useEffect(() => {
+    loadPartitionAudit()
+  }, [loadPartitionAudit])
+
+  // Calculate summary statistics
+  const auditSummary = React.useMemo(() => {
+    const totalProteins = partitionAudit.reduce((sum, batch) => sum + batch.actual_proteins_in_batch, 0)
+    const totalAttempted = partitionAudit.reduce((sum, batch) => sum + batch.partitions_attempted, 0)
+    const totalClassified = partitionAudit.reduce((sum, batch) => sum + batch.partitions_classified, 0)
+    const totalMissing = partitionAudit.reduce((sum, batch) => sum + batch.proteins_missing_partitions, 0)
+    const criticalBatches = partitionAudit.filter(batch => 
+      batch.proteins_missing_partitions > 50 || batch.overall_success_rate < 50
+    ).length
+
+    return {
+      totalProteins,
+      totalAttempted,
+      totalClassified,
+      totalMissing,
+      criticalBatches,
+      overallAttemptRate: totalProteins > 0 ? (totalAttempted / totalProteins) * 100 : 0,
+      overallSuccessRate: totalAttempted > 0 ? (totalClassified / totalAttempted) * 100 : 0
+    }
+  }, [partitionAudit])
+
+  if (loading || auditLoading) {
+    return (
+      <Card className="p-8 text-center">
+        <LoadingSpinner />
+        <p className="mt-4 text-gray-600">
+          {loading ? 'Loading audit data...' : 'Running partition audit...'}
+        </p>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Audit Controls */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h3 className="text-lg font-semibold">Partition Pipeline Audit</h3>
+            <select
+              value={selectedBatch || ''}
+              onChange={(e) => onBatchChange(e.target.value ? parseInt(e.target.value) : null)}
+              className="border rounded px-3 py-1 text-sm min-w-48"
+              disabled={batchesLoading}
+            >
+              <option value="">All Batches</option>
+              {batchOptions.map(batch => (
+                <option key={batch.id} value={batch.id}>
+                  {batch.batch_name} ({batch.batch_type}) - {batch.total_items} proteins
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button onClick={onRefresh} className="flex items-center gap-2" disabled={auditLoading}>
+            <RefreshCw className={`w-4 h-4 ${auditLoading ? 'animate-spin' : ''}`} />
+            Refresh Audit
+          </Button>
+        </div>
+      </Card>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-2xl font-bold text-blue-600">
+                {auditSummary.totalProteins.toLocaleString()}
+              </div>
+              <div className="text-sm text-gray-600">Total Proteins</div>
+              <div className="text-xs text-gray-500">
+                {auditSummary.overallAttemptRate.toFixed(1)}% attempted
+              </div>
+            </div>
+            <Database className="w-8 h-8 text-blue-600 opacity-20" />
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-2xl font-bold text-green-600">
+                {auditSummary.totalClassified.toLocaleString()}
+              </div>
+              <div className="text-sm text-gray-600">Classified</div>
+              <div className="text-xs text-gray-500">
+                {auditSummary.overallSuccessRate.toFixed(1)}% success rate
+              </div>
+            </div>
+            <CheckCircle className="w-8 h-8 text-green-600 opacity-20" />
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-2xl font-bold text-red-600">
+                {auditSummary.totalMissing.toLocaleString()}
+              </div>
+              <div className="text-sm text-gray-600">Missing Partitions</div>
+              <div className="text-xs text-gray-500">
+                Never attempted
+              </div>
+            </div>
+            <XCircle className="w-8 h-8 text-red-600 opacity-20" />
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-2xl font-bold text-orange-600">
+                {auditSummary.criticalBatches}
+              </div>
+              <div className="text-sm text-gray-600">Critical Batches</div>
+              <div className="text-xs text-gray-500">
+                Need attention
+              </div>
+            </div>
+            <AlertTriangle className="w-8 h-8 text-orange-600 opacity-20" />
+          </div>
+        </Card>
+      </div>
+
+      {/* Batch Details */}
+      <div className="space-y-4">
+        {partitionAudit.length === 0 ? (
+          <Card className="p-6 text-center text-gray-500">
+            No partition audit data available
+          </Card>
+        ) : (
+          partitionAudit.map((batch) => (
+            <Card key={batch.batch_id} className="p-6">
+              <div className="space-y-4">
+                {/* Batch Header */}
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="text-lg font-semibold">{batch.batch_name}</h4>
+                    <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
+                      <span>ID: {batch.batch_id}</span>
+                      <span>Type: {batch.batch_type}</span>
+                      <span>Version: {batch.ref_version}</span>
+                      <Badge variant={batch.batch_status === 'completed' ? 'default' : 'secondary'}>
+                        {batch.batch_status}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-semibold">
+                      {batch.overall_success_rate.toFixed(1)}%
+                    </div>
+                    <div className="text-sm text-gray-600">Overall Success</div>
+                  </div>
+                </div>
+
+                {/* Key Metrics Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-blue-600">
+                      {batch.actual_proteins_in_batch.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-600">In Batch</div>
+                  </div>
+                  
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-green-600">
+                      {batch.partitions_attempted.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-600">Attempted</div>
+                    <div className="text-xs text-gray-500">
+                      {batch.partition_attempt_rate.toFixed(1)}%
+                    </div>
+                  </div>
+                  
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-emerald-600">
+                      {batch.partitions_classified.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-600">Classified</div>
+                    <div className="text-xs text-gray-500">
+                      {batch.classification_success_rate.toFixed(1)}%
+                    </div>
+                  </div>
+                  
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-yellow-600">
+                      {batch.partitions_unclassified.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-600">Unclassified</div>
+                  </div>
+                  
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-red-600">
+                      {batch.proteins_missing_partitions.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-600">Missing</div>
+                  </div>
+                  
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-purple-600">
+                      {batch.total_domains_found.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-600">Domains</div>
+                  </div>
+                </div>
+
+                {/* Issues and Gaps */}
+                {(batch.proteins_missing_partitions > 0 || batch.partition_gap > 0 || batch.batch_definition_gap > 0) && (
+                  <div className="border-t pt-4">
+                    <h5 className="font-medium text-red-800 mb-2 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4" />
+                      Issues Detected
+                    </h5>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {batch.proteins_missing_partitions > 0 && (
+                        <div className="bg-red-50 p-3 rounded">
+                          <div className="font-semibold text-red-800">
+                            {batch.proteins_missing_partitions} Missing Partitions
+                          </div>
+                          <div className="text-sm text-red-700">
+                            Proteins in batch but no partition results
+                          </div>
+                        </div>
+                      )}
+                      
+                      {batch.partition_gap > 0 && (
+                        <div className="bg-orange-50 p-3 rounded">
+                          <div className="font-semibold text-orange-800">
+                            {batch.partition_gap} Partition Gap
+                          </div>
+                          <div className="text-sm text-orange-700">
+                            Difference between expected and attempted
+                          </div>
+                        </div>
+                      )}
+                      
+                      {batch.batch_definition_gap > 0 && (
+                        <div className="bg-yellow-50 p-3 rounded">
+                          <div className="font-semibold text-yellow-800">
+                            {batch.batch_definition_gap} Definition Gap
+                          </div>
+                          <div className="text-sm text-yellow-700">
+                            Reported total vs actual proteins
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* File Status */}
+                <div className="border-t pt-4">
+                  <h5 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    File Status
+                  </h5>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="text-center">
+                      <div className="font-semibold text-blue-600">{batch.fasta_files_exist}</div>
+                      <div className="text-xs text-gray-600">FASTA</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-green-600">{batch.blast_files_exist}</div>
+                      <div className="text-xs text-gray-600">BLAST</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-purple-600">{batch.hhsearch_files_exist}</div>
+                      <div className="text-xs text-gray-600">HHSearch</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-orange-600">{batch.partition_files_exist}</div>
+                      <div className="text-xs text-gray-600">Partitions</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sample Cases */}
+                {(batch.sample_missing_proteins?.length > 0 || batch.sample_unclassified?.length > 0) && (
+                  <div className="border-t pt-4">
+                    <h5 className="font-medium text-gray-700 mb-2">Sample Cases</h5>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {batch.sample_missing_proteins?.length > 0 && (
+                        <div>
+                          <div className="text-sm font-medium text-red-700">Missing Partitions:</div>
+                          <div className="text-xs text-gray-600 font-mono mt-1">
+                            {batch.sample_missing_proteins.join(', ')}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {batch.sample_unclassified?.length > 0 && (
+                        <div>
+                          <div className="text-sm font-medium text-yellow-700">Unclassified:</div>
+                          <div className="text-xs text-gray-600 font-mono mt-1">
+                            {batch.sample_unclassified.join(', ')}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Process Stages */}
+                {batch.stages_present?.length > 0 && (
+                  <div className="border-t pt-4">
+                    <h5 className="font-medium text-gray-700 mb-2">Process Stages Present</h5>
+                    <div className="flex gap-2 flex-wrap">
+                      {batch.stages_present.map(stage => (
+                        <Badge key={stage} variant="outline" className="text-xs">
+                          {stage}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}

@@ -340,7 +340,7 @@ const toggleProteinExpansion = async (protein: ProteinSummary) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {proteins.map((protein) => (
+              {proteins.map((protein, index) => (
                  <React.Fragment key={`${protein.source_id}-${protein.batch_id}-${index}`}>
                   {/* Main protein row */}
                   <tr key={`protein-${protein.id}`} className="hover:bg-gray-50 transition-colors">

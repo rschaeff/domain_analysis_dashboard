@@ -5,9 +5,8 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import {
-  AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
-  Database, Layers, Target, FileText, TrendingDown, TrendingUp,
-  Activity, Clock, Zap, Users, BarChart3
+  AlertTriangle, CheckCircle, XCircle, RefreshCw,
+  Database, FileText
 } from 'lucide-react'
 
 interface PartitionAuditData {
@@ -62,25 +61,8 @@ interface BatchOption {
   status: string
 }
 
-interface EvidenceConflict {
-  conflict_type: string
-  tuning_suggestion: string
-  case_count: number
-  avg_final_confidence: number
-  sample_cases: string[]
-}
-
-interface ChainBlastIssue {
-  chain_blast_issue: string
-  protein_count: number
-  avg_chain_blast_hits: number
-  sample_proteins: string[]
-}
-
 export function AuditView() {
   const [partitionAudit, setPartitionAudit] = useState<PartitionAuditData[]>([])
-  const [evidenceConflicts, setEvidenceConflicts] = useState<EvidenceConflict[]>([])
-  const [chainBlastIssues, setChainBlastIssues] = useState<ChainBlastIssue[]>([])
   const [batchOptions, setBatchOptions] = useState<BatchOption[]>([])
   const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
 
@@ -105,33 +87,21 @@ export function AuditView() {
     }
   }, [])
 
-  // Run comprehensive audit
+  // Run partition audit only
   const runAudit = useCallback(async (batchId?: number) => {
     setAuditLoading(true)
     setError(null)
 
     try {
       const batchParam = batchId ? `?batch_id=${batchId}` : ''
+      const response = await fetch(`/api/audit/missing-partitions${batchParam}`)
 
-      const [partitionResponse, evidenceResponse, chainBlastResponse] = await Promise.all([
-        fetch(`/api/audit/missing-partitions${batchParam}`),
-        fetch(`/api/audit/evidence-analysis${batchParam}`),
-        fetch('/api/audit/chain-blast-diagnostic')
-      ])
-
-      if (!partitionResponse.ok || !evidenceResponse.ok || !chainBlastResponse.ok) {
-        throw new Error('One or more audit requests failed')
+      if (!response.ok) {
+        throw new Error('Partition audit request failed')
       }
 
-      const [partitionData, evidenceData, chainBlastData] = await Promise.all([
-        partitionResponse.json(),
-        evidenceResponse.json(),
-        chainBlastResponse.json()
-      ])
-
-      setPartitionAudit(partitionData.partition_audit || [])
-      setEvidenceConflicts(evidenceData.evidence_analysis || [])
-      setChainBlastIssues(chainBlastData.chain_blast_diagnostic || [])
+      const data = await response.json()
+      setPartitionAudit(data.partition_audit || [])
 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Audit failed')
@@ -159,21 +129,16 @@ export function AuditView() {
       batch.proteins_missing_partitions > 50 || batch.overall_success_rate < 50
     ).length
 
-    const evidenceIssueCount = evidenceConflicts.reduce((sum, conflict) => sum + conflict.case_count, 0)
-    const chainBlastIssueCount = chainBlastIssues.reduce((sum, issue) => sum + issue.protein_count, 0)
-
     return {
       totalProteins,
       totalAttempted,
       totalClassified,
       totalMissing,
       criticalBatches,
-      evidenceIssueCount,
-      chainBlastIssueCount,
       overallAttemptRate: totalProteins > 0 ? (totalAttempted / totalProteins) * 100 : 0,
       overallSuccessRate: totalAttempted > 0 ? (totalClassified / totalAttempted) * 100 : 0
     }
-  }, [partitionAudit, evidenceConflicts, chainBlastIssues])
+  }, [partitionAudit])
 
   const handleRefresh = useCallback(() => {
     runAudit(selectedBatch || undefined)
@@ -187,7 +152,7 @@ export function AuditView() {
     return (
       <Card className="p-8 text-center">
         <LoadingSpinner />
-        <p className="mt-4 text-gray-600">Running pipeline audit...</p>
+        <p className="mt-4 text-gray-600">Running partition audit...</p>
       </Card>
     )
   }
@@ -313,7 +278,7 @@ export function AuditView() {
 
         {partitionAudit.length === 0 ? (
           <div className="text-gray-500 text-center py-8">
-            No partition audit data available
+            {auditLoading ? 'Loading audit data...' : 'No partition audit data available'}
           </div>
         ) : (
           <div className="space-y-4">
@@ -503,95 +468,6 @@ export function AuditView() {
                   )}
                 </div>
               </Card>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Evidence Conflicts */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-orange-800 mb-4 flex items-center gap-2">
-          <AlertCircle className="w-5 h-5" />
-          Evidence Conflicts & Tuning Suggestions
-        </h3>
-
-        {evidenceConflicts.length === 0 ? (
-          <div className="text-green-600 flex items-center gap-2">
-            <CheckCircle className="w-4 h-4" />
-            No evidence conflicts detected
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {evidenceConflicts.map((conflict, index) => (
-              <div key={index} className="border rounded p-4 bg-orange-50">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="font-medium">{conflict.conflict_type.replace(/_/g, ' ')}</h4>
-                    <div className="text-sm text-orange-700">{conflict.tuning_suggestion.replace(/_/g, ' ')}</div>
-                  </div>
-                  <Badge variant="outline">{conflict.case_count} cases</Badge>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
-                  <div className="text-center">
-                    <div className="font-semibold">{conflict.avg_final_confidence?.toFixed(3)}</div>
-                    <div className="text-xs text-gray-600">Avg Final Confidence</div>
-                  </div>
-                </div>
-
-                {conflict.sample_cases.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-sm font-medium text-gray-700">Sample Cases:</div>
-                    <div className="text-xs text-gray-600 mt-1 font-mono">
-                      {conflict.sample_cases.slice(0, 3).join(', ')}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Chain BLAST Issues */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold text-yellow-800 mb-4 flex items-center gap-2">
-          <Zap className="w-5 h-5" />
-          Chain BLAST Issues
-        </h3>
-
-        {chainBlastIssues.length === 0 ? (
-          <div className="text-green-600 flex items-center gap-2">
-            <CheckCircle className="w-4 h-4" />
-            No chain BLAST issues detected
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {chainBlastIssues.map((issue, index) => (
-              <div key={index} className="border rounded p-4 bg-yellow-50">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="font-medium">{issue.chain_blast_issue.replace(/_/g, ' ')}</h4>
-                  </div>
-                  <Badge variant="outline">{issue.protein_count} proteins</Badge>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                  <div className="text-center">
-                    <div className="font-semibold">{issue.avg_chain_blast_hits?.toFixed(1)}</div>
-                    <div className="text-xs text-gray-600">Avg Chain BLAST Hits</div>
-                  </div>
-                </div>
-
-                {issue.sample_proteins.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-sm font-medium text-gray-700">Sample Proteins:</div>
-                    <div className="text-xs text-gray-600 mt-1 font-mono">
-                      {issue.sample_proteins.slice(0, 3).join(', ')}
-                    </div>
-                  </div>
-                )}
-              </div>
             ))}
           </div>
         )}

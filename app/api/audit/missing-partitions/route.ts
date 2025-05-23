@@ -4,6 +4,31 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
+// Helper function to convert BigInt values to numbers recursively
+function convertBigIntToNumber(obj: any): any {
+  if (obj === null || obj === undefined) {
+    return obj
+  }
+
+  if (typeof obj === 'bigint') {
+    return Number(obj)
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(convertBigIntToNumber)
+  }
+
+  if (typeof obj === 'object') {
+    const converted: any = {}
+    for (const [key, value] of Object.entries(obj)) {
+      converted[key] = convertBigIntToNumber(value)
+    }
+    return converted
+  }
+
+  return obj
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -166,31 +191,8 @@ export async function GET(request: NextRequest) {
         partition_gap DESC
     `, [batchIdParam])
 
-    // Convert BigInt values to numbers
-    const partitionAudit = (rawPartitionAudit as any[]).map(batch => ({
-      ...batch,
-      batch_id: Number(batch.batch_id),
-      batch_reported_total: Number(batch.batch_reported_total),
-      batch_reported_completed: Number(batch.batch_reported_completed),
-      actual_proteins_in_batch: Number(batch.actual_proteins_in_batch),
-      proteins_reported_done: Number(batch.proteins_reported_done),
-      partitions_attempted: Number(batch.partitions_attempted),
-      partitions_classified: Number(batch.partitions_classified),
-      partitions_unclassified: Number(batch.partitions_unclassified),
-      partitions_peptide: Number(batch.partitions_peptide),
-      total_domains_found: Number(batch.total_domains_found),
-      total_evidence_items: Number(batch.total_evidence_items),
-      proteins_missing_partitions: Number(batch.proteins_missing_partitions),
-      partition_gap: Number(batch.partition_gap),
-      batch_definition_gap: Number(batch.batch_definition_gap),
-      fasta_files_exist: Number(batch.fasta_files_exist),
-      blast_files_exist: Number(batch.blast_files_exist),
-      hhsearch_files_exist: Number(batch.hhsearch_files_exist),
-      partition_files_exist: Number(batch.partition_files_exist),
-      partition_attempt_rate: Number(batch.partition_attempt_rate),
-      classification_success_rate: Number(batch.classification_success_rate),
-      overall_success_rate: Number(batch.overall_success_rate)
-    }))
+    // Convert BigInt values to numbers using helper function
+    const partitionAudit = convertBigIntToNumber(rawPartitionAudit)
 
     return NextResponse.json({ partition_audit: partitionAudit })
   } catch (error) {

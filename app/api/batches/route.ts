@@ -4,10 +4,35 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
+// Helper function to convert BigInt values to numbers recursively
+function convertBigIntToNumber(obj: any): any {
+  if (obj === null || obj === undefined) {
+    return obj
+  }
+
+  if (typeof obj === 'bigint') {
+    return Number(obj)
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(convertBigIntToNumber)
+  }
+
+  if (typeof obj === 'object') {
+    const converted: any = {}
+    for (const [key, value] of Object.entries(obj)) {
+      converted[key] = convertBigIntToNumber(value)
+    }
+    return converted
+  }
+
+  return obj
+}
+
 export async function GET() {
   try {
-    const batches = await prisma.$queryRawUnsafe(`
-      SELECT 
+    const rawBatches = await prisma.$queryRawUnsafe(`
+      SELECT
         b.id,
         b.batch_name,
         b.type as batch_type,
@@ -17,22 +42,25 @@ export async function GET() {
         b.ref_version,
         b.created_at,
         b.completed_at,
-        
+
         -- Get actual protein count from process_status
         COUNT(ps.id) as actual_protein_count,
-        
+
         -- Get partition results count
         COUNT(pp.id) as partition_count
-        
+
       FROM ecod_schema.batch b
       LEFT JOIN ecod_schema.process_status ps ON b.id = ps.batch_id
       LEFT JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
       LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = pp.pdb_id || '_' || pp.chain_id
       WHERE b.type IN ('pdb_hhsearch', 'domain_analysis')
-      GROUP BY b.id, b.batch_name, b.type, b.total_items, b.completed_items, 
+      GROUP BY b.id, b.batch_name, b.type, b.total_items, b.completed_items,
                b.status, b.ref_version, b.created_at, b.completed_at
       ORDER BY b.id DESC
     `)
+
+    // Convert BigInt values to numbers using helper function
+    const batches = convertBigIntToNumber(rawBatches)
 
     return NextResponse.json({ batches })
   } catch (error) {

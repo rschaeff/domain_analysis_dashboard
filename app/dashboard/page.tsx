@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { DomainFilters, PaginationParams } from '@/lib/types'
 import { FilterPanel } from '@/components/filters/FilterPanel'
 import { ProteinTable } from '@/components/tables/ProteinTable'
@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/Badge'
 import {
   Eye, Download, BarChart3, Users, Table, Grid, Layers, List,
   AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
-  TrendingUp, Database, Zap
+  TrendingUp, Database, Zap, Activity, Clock, Target, Star
 } from 'lucide-react'
 
 // Enhanced statistics interface with all expected fields
@@ -43,7 +43,7 @@ interface ProteinSummary {
 
   // Domain summary
   domain_count: number
-  classified_domains: number
+  domains_classified: number
   avg_confidence: number
   best_confidence: number
   coverage: number
@@ -57,6 +57,12 @@ interface ProteinSummary {
 
   // Processing info
   processing_date: string
+  days_old: number
+  is_recent: boolean
+  confidence_level: 'high' | 'medium' | 'low'
+  residues_assigned: number
+  classification_status: string
+  evidence_quality: string
 }
 
 interface AuditData {
@@ -100,8 +106,139 @@ const safePercentage = (numerator: number | undefined | null, denominator: numbe
   return Math.round((Number(numerator) / Number(denominator)) * 100)
 }
 
-export default function EnhancedDashboard() {
+// URL State Management Hook
+function useUrlState() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Parse current state from URL
+  const currentState = useMemo(() => {
+    const state = {
+      page: parseInt(searchParams.get('page') || '1'),
+      size: parseInt(searchParams.get('size') || '50'),
+      sort: searchParams.get('sort') || 'recent',
+      sortDirection: (searchParams.get('sort_dir') || 'desc') as 'asc' | 'desc',
+      viewMode: (searchParams.get('view') || 'proteins') as 'proteins' | 'architecture' | 'audit',
+      filters: {} as DomainFilters
+    }
+
+    // Parse filters from URL
+    const filterKeys = [
+      'pdb_id', 'chain_id', 'domain_number', 'batch_id',
+      'min_confidence', 'max_confidence',
+      'sequence_length_min', 'sequence_length_max',
+      'min_evidence_count', 'evidence_types'
+    ]
+
+    filterKeys.forEach(key => {
+      const value = searchParams.get(key)
+      if (value) {
+        if (key.includes('confidence') || key.includes('length') || key.includes('count')) {
+          state.filters[key as keyof DomainFilters] = parseFloat(value)
+        } else if (key === 'domain_number' || key === 'batch_id') {
+          state.filters[key as keyof DomainFilters] = parseInt(value)
+        } else {
+          state.filters[key as keyof DomainFilters] = value
+        }
+      }
+    })
+
+    // Parse array filters
+    const arrayFilters = ['t_groups', 'h_groups', 'x_groups', 'a_groups']
+    arrayFilters.forEach(key => {
+      const value = searchParams.get(key)
+      if (value) {
+        const filterKey = key.replace('s', '') as keyof DomainFilters
+        state.filters[filterKey] = value.split(',')
+      }
+    })
+
+    return state
+  }, [searchParams])
+
+  // Update URL with new state
+  const updateUrl = useCallback((updates: Partial<typeof currentState>) => {
+    const params = new URLSearchParams(searchParams.toString())
+
+    // Update basic state
+    if (updates.page !== undefined) {
+      if (updates.page === 1) {
+        params.delete('page')
+      } else {
+        params.set('page', updates.page.toString())
+      }
+    }
+
+    if (updates.size !== undefined && updates.size !== 50) {
+      params.set('size', updates.size.toString())
+    }
+
+    if (updates.sort !== undefined) {
+      if (updates.sort === 'recent') {
+        params.delete('sort')
+      } else {
+        params.set('sort', updates.sort)
+      }
+    }
+
+    if (updates.sortDirection !== undefined) {
+      if (updates.sortDirection === 'desc') {
+        params.delete('sort_dir')
+      } else {
+        params.set('sort_dir', updates.sortDirection)
+      }
+    }
+
+    if (updates.viewMode !== undefined) {
+      if (updates.viewMode === 'proteins') {
+        params.delete('view')
+      } else {
+        params.set('view', updates.viewMode)
+      }
+    }
+
+    // Update filters
+    if (updates.filters !== undefined) {
+      // Clear existing filter params
+      const filterKeys = [
+        'pdb_id', 'chain_id', 'domain_number', 'batch_id',
+        'min_confidence', 'max_confidence',
+        'sequence_length_min', 'sequence_length_max',
+        'min_evidence_count', 'evidence_types',
+        't_groups', 'h_groups', 'x_groups', 'a_groups'
+      ]
+
+      filterKeys.forEach(key => params.delete(key))
+
+      // Set new filter params
+      Object.entries(updates.filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          if (Array.isArray(value) && value.length > 0) {
+            const paramKey = key === 't_group' ? 't_groups' :
+                            key === 'h_group' ? 'h_groups' :
+                            key === 'x_group' ? 'x_groups' :
+                            key === 'a_group' ? 'a_groups' : key
+            params.set(paramKey, value.join(','))
+          } else if (!Array.isArray(value)) {
+            params.set(key, value.toString())
+          }
+        }
+      })
+    }
+
+    // Update URL
+    const newUrl = params.toString() ? `?${params.toString()}` : ''
+    router.push(`/dashboard${newUrl}`, { scroll: false })
+  }, [router, searchParams])
+
+  return {
+    state: currentState,
+    updateUrl
+  }
+}
+
+export default function EnhancedDashboard() {
+  const { state: urlState, updateUrl } = useUrlState()
 
   // Core data state
   const [proteins, setProteins] = useState<ProteinSummary[]>([])
@@ -110,16 +247,12 @@ export default function EnhancedDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [statisticsLoading, setStatisticsLoading] = useState(true)
 
-  // Filter and pagination state
-  const [filters, setFilters] = useState<DomainFilters>({})
+  // Pagination state (updated from API responses)
   const [pagination, setPagination] = useState<PaginationParams>({
-    page: 1,
-    size: 50,
+    page: urlState.page,
+    size: urlState.size,
     total: 0
   })
-
-  // Dashboard state
-  const [viewMode, setViewMode] = useState<'proteins' | 'architecture' | 'audit'>('proteins')
 
   // Initialize with safe defaults
   const [statistics, setStatistics] = useState<DashboardStatistics>({
@@ -144,8 +277,14 @@ export default function EnhancedDashboard() {
   const [auditLoading, setAuditLoading] = useState(false)
   const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
 
+  // URL state derived values
+  const filters = urlState.filters
+  const sortBy = urlState.sort
+  const sortDirection = urlState.sortDirection
+  const viewMode = urlState.viewMode
+
   // Fetch dashboard stats with proper error handling
-  const fetchDashboardStats = async () => {
+  const fetchDashboardStats = useCallback(async () => {
     setStatisticsLoading(true)
     try {
       const response = await fetch('/api/dashboard/stats')
@@ -182,43 +321,38 @@ export default function EnhancedDashboard() {
     } finally {
       setStatisticsLoading(false)
     }
-  }
-
-  // State for sorting
-  const [sortBy, setSortBy] = useState('recent')
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+  }, [])
 
   // Fetch protein-centric data
-  const fetchProteins = async (page = 1, newFilters?: DomainFilters, newSort?: string, newSortDir?: 'asc' | 'desc') => {
+  const fetchProteins = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const filtersToUse = newFilters !== undefined ? newFilters : filters
-      const sortToUse = newSort || sortBy
-      const sortDirToUse = newSortDir || sortDirection
-
       const params = new URLSearchParams({
-        page: page.toString(),
-        size: '50',
-        sort: sortToUse,
-        sort_dir: sortDirToUse
+        page: urlState.page.toString(),
+        size: urlState.size.toString(),
+        sort: urlState.sort,
+        sort_dir: urlState.sortDirection
       })
 
       // Add filters
-      Object.entries(filtersToUse).forEach(([key, value]) => {
+      Object.entries(urlState.filters).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') {
           if (Array.isArray(value) && value.length > 0) {
             let paramKey = key
             if (key === 't_group') paramKey = 't_groups'
             else if (key === 'h_group') paramKey = 'h_groups'
             else if (key === 'x_group') paramKey = 'x_groups'
+            else if (key === 'a_group') paramKey = 'a_groups'
             params.set(paramKey, value.join(','))
           } else if (!Array.isArray(value)) {
             params.set(key, value.toString())
           }
         }
       })
+
+      console.log('Fetching with URL:', `/api/proteins/summary?${params}`)
 
       const response = await fetch(`/api/proteins/summary?${params}`)
       if (!response.ok) {
@@ -227,33 +361,36 @@ export default function EnhancedDashboard() {
 
       const data = await response.json()
       setProteins(data.data || [])
-      setPagination(data.pagination || { page, size: 50, total: 0 })
 
-      // Don't overwrite main dashboard statistics with protein-specific ones
-      // The main statistics should come from fetchDashboardStats()
+      // Update pagination state
+      setPagination(prev => ({
+        ...prev,
+        total: data.pagination?.total || 0
+      }))
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
       setLoading(false)
     }
-  }
+  }, [urlState])
 
-  // Fetch architecture data (existing implementation with error handling)
-  const fetchArchitectureData = async (newFilters?: DomainFilters) => {
+  // Fetch architecture data
+  const fetchArchitectureData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const filtersToUse = newFilters !== undefined ? newFilters : filters
       const params = new URLSearchParams()
 
-      Object.entries(filtersToUse).forEach(([key, value]) => {
+      Object.entries(urlState.filters).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') {
           if (Array.isArray(value) && value.length > 0) {
             let paramKey = key
             if (key === 't_group') paramKey = 't_groups'
             else if (key === 'h_group') paramKey = 'h_groups'
             else if (key === 'x_group') paramKey = 'x_groups'
+            else if (key === 'a_group') paramKey = 'a_groups'
             params.set(paramKey, value.join(','))
           } else if (!Array.isArray(value)) {
             params.set(key, value.toString())
@@ -274,10 +411,10 @@ export default function EnhancedDashboard() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [urlState.filters])
 
   // Run comprehensive audit
-  const runAudit = async (batchId?: number) => {
+  const runAudit = useCallback(async (batchId?: number) => {
     setAuditLoading(true)
     setError(null)
 
@@ -310,60 +447,66 @@ export default function EnhancedDashboard() {
     } finally {
       setAuditLoading(false)
     }
-  }
+  }, [])
 
-  // Handle view mode changes
+  // URL state change handlers
+  const handleFiltersChange = useCallback((newFilters: DomainFilters) => {
+    updateUrl({
+      filters: newFilters,
+      page: 1 // Reset to first page when filters change
+    })
+  }, [updateUrl])
+
+  const handleResetFilters = useCallback(() => {
+    updateUrl({
+      filters: {},
+      page: 1
+    })
+  }, [updateUrl])
+
+  const handlePageChange = useCallback((page: number) => {
+    updateUrl({ page })
+  }, [updateUrl])
+
+  const handleSortChange = useCallback((newSort: string, newDirection?: 'asc' | 'desc') => {
+    const direction = newDirection || (newSort === sortBy && sortDirection === 'desc' ? 'asc' : 'desc')
+    updateUrl({
+      sort: newSort,
+      sortDirection: direction,
+      page: 1 // Reset to first page when sorting changes
+    })
+  }, [updateUrl, sortBy, sortDirection])
+
+  const handleViewModeChange = useCallback((mode: 'proteins' | 'architecture' | 'audit') => {
+    updateUrl({
+      viewMode: mode,
+      page: 1 // Reset page when changing views
+    })
+  }, [updateUrl])
+
+  const handleProteinClick = useCallback((protein: ProteinSummary) => {
+    // Open in new tab to preserve dashboard state
+    window.open(`/protein/${protein.source_id}`, '_blank')
+  }, [])
+
+  // Trigger fetches when URL state changes
   useEffect(() => {
-    if (viewMode === 'proteins') {
-      fetchProteins(1)
-    } else if (viewMode === 'architecture') {
+    if (urlState.viewMode === 'proteins') {
+      fetchProteins()
+    } else if (urlState.viewMode === 'architecture') {
       fetchArchitectureData()
-    } else if (viewMode === 'audit') {
+    } else if (urlState.viewMode === 'audit') {
       runAudit(selectedBatch || undefined)
     }
-  }, [viewMode, selectedBatch])
-
-  // Handle filter changes
-  useEffect(() => {
-    if (viewMode === 'proteins') {
-      fetchProteins(1)
-    } else if (viewMode === 'architecture') {
-      fetchArchitectureData()
-    }
-  }, [filters])
+  }, [urlState.viewMode, urlState.page, urlState.size, urlState.sort, urlState.sortDirection, urlState.filters, fetchProteins, fetchArchitectureData, runAudit, selectedBatch])
 
   // Initial load
   useEffect(() => {
     fetchDashboardStats()
-    fetchProteins(1)
-  }, [])
-
-  const handleFiltersChange = (newFilters: DomainFilters) => {
-    setFilters(newFilters)
-  }
-
-  const handleResetFilters = () => {
-    setFilters({})
-  }
-
-  const handlePageChange = (page: number) => {
-    setPagination(prev => ({ ...prev, page }))
-    fetchProteins(page)
-  }
-
-  const handleSortChange = (newSort: string, newDirection?: 'asc' | 'desc') => {
-    const direction = newDirection || (newSort === sortBy && sortDirection === 'desc' ? 'asc' : 'desc')
-    setSortBy(newSort)
-    setSortDirection(direction)
-    fetchProteins(1, filters, newSort, direction)
-  }
-
-  const handleProteinClick = (protein: ProteinSummary) => {
-    router.push(`/protein/${protein.source_id}`)
-  }
+  }, [fetchDashboardStats])
 
   // Calculate audit summary
-  const auditSummary = {
+  const auditSummary = useMemo(() => ({
     totalIssues: auditData.missingPartitions.reduce((sum, batch) => sum + batch.missing_proteins, 0) +
                  auditData.evidenceConflicts.reduce((sum, conflict) => sum + conflict.case_count, 0) +
                  auditData.chainBlastIssues.reduce((sum, issue) => sum + issue.protein_count, 0),
@@ -373,7 +516,7 @@ export default function EnhancedDashboard() {
       issue.chain_blast_issue === 'CHAIN_BLAST_NOT_USED' ||
       issue.chain_blast_issue === 'HIGH_CONF_CHAIN_BLAST_IGNORED'
     ).reduce((sum, issue) => sum + issue.protein_count, 0)
-  }
+  }), [auditData])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -391,15 +534,20 @@ export default function EnhancedDashboard() {
             <div className="flex flex-wrap gap-2">
               <Button
                 variant={viewMode === 'proteins' ? 'default' : 'outline'}
-                onClick={() => setViewMode('proteins')}
+                onClick={() => handleViewModeChange('proteins')}
                 className="flex items-center gap-2"
               >
                 <Database className="w-4 h-4" />
                 Proteins
+                {viewMode === 'proteins' && (
+                  <Badge variant="secondary" className="ml-1">
+                    {pagination.total.toLocaleString()}
+                  </Badge>
+                )}
               </Button>
               <Button
                 variant={viewMode === 'architecture' ? 'default' : 'outline'}
-                onClick={() => setViewMode('architecture')}
+                onClick={() => handleViewModeChange('architecture')}
                 className="flex items-center gap-2"
               >
                 <Layers className="w-4 h-4" />
@@ -407,7 +555,7 @@ export default function EnhancedDashboard() {
               </Button>
               <Button
                 variant={viewMode === 'audit' ? 'default' : 'outline'}
-                onClick={() => setViewMode('audit')}
+                onClick={() => handleViewModeChange('audit')}
                 className="flex items-center gap-2"
               >
                 <AlertTriangle className="w-4 h-4" />
@@ -443,6 +591,14 @@ export default function EnhancedDashboard() {
                   <div className="font-medium text-red-800">Error</div>
                   <div className="text-sm text-red-700">{error}</div>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setError(null)}
+                  className="ml-auto"
+                >
+                  Dismiss
+                </Button>
               </div>
             </Card>
           )}
@@ -450,97 +606,137 @@ export default function EnhancedDashboard() {
           {/* Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="p-6">
-              <div className="text-2xl font-bold text-blue-600">
-                {statisticsLoading ? (
-                  <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
-                ) : (
-                  safeToLocaleString(statistics.total_proteins)
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {statisticsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
+                    ) : (
+                      safeToLocaleString(statistics.total_proteins)
+                    )}
+                  </div>
+                  <div className="text-sm text-gray-600">Total Proteins</div>
+                  {statistics.error && (
+                    <div className="text-xs text-red-500 mt-1">Data may be incomplete</div>
+                  )}
+                </div>
+                <Database className="w-8 h-8 text-blue-600 opacity-20" />
               </div>
-              <div className="text-sm text-gray-600">Total Proteins</div>
-              {statistics.error && (
-                <div className="text-xs text-red-500 mt-1">Data may be incomplete</div>
-              )}
             </Card>
 
             <Card className="p-6">
-              <div className="text-2xl font-bold text-green-600">
-                {statisticsLoading ? (
-                  <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
-                ) : (
-                  safeToLocaleString(statistics.total_domains)
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-2xl font-bold text-green-600">
+                    {statisticsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
+                    ) : (
+                      safeToLocaleString(statistics.total_domains)
+                    )}
+                  </div>
+                  <div className="text-sm text-gray-600">Total Domains</div>
+                </div>
+                <Layers className="w-8 h-8 text-green-600 opacity-20" />
               </div>
-              <div className="text-sm text-gray-600">Total Domains</div>
             </Card>
 
             <Card className="p-6">
-              <div className="text-2xl font-bold text-purple-600">
-                {statisticsLoading ? (
-                  <div className="animate-pulse bg-gray-200 h-8 w-24 rounded"></div>
-                ) : (
-                  `${safeToLocaleString(statistics.classified_chains)} (${safePercentage(statistics.classified_chains, statistics.total_proteins)}%)`
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-2xl font-bold text-purple-600">
+                    {statisticsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-8 w-24 rounded"></div>
+                    ) : (
+                      `${safeToLocaleString(statistics.classified_chains)} (${safePercentage(statistics.classified_chains, statistics.total_proteins)}%)`
+                    )}
+                  </div>
+                  <div className="text-sm text-gray-600">Classified Proteins</div>
+                </div>
+                <CheckCircle className="w-8 h-8 text-purple-600 opacity-20" />
               </div>
-              <div className="text-sm text-gray-600">Classified Proteins</div>
             </Card>
 
             <Card className="p-6">
-              <div className="text-2xl font-bold text-orange-600">
-                {statisticsLoading ? (
-                  <div className="animate-pulse bg-gray-200 h-8 w-12 rounded"></div>
-                ) : (
-                  `${(statistics.avg_domain_coverage * 100).toFixed(1)}%`
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-2xl font-bold text-orange-600">
+                    {statisticsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-8 w-12 rounded"></div>
+                    ) : (
+                      `${(statistics.avg_domain_coverage * 100).toFixed(1)}%`
+                    )}
+                  </div>
+                  <div className="text-sm text-gray-600">Avg Coverage</div>
+                </div>
+                <Activity className="w-8 h-8 text-orange-600 opacity-20" />
               </div>
-              <div className="text-sm text-gray-600">Avg Coverage</div>
             </Card>
           </div>
 
           {/* Additional Statistics Row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="p-4">
-              <div className="text-lg font-bold text-indigo-600">
-                {statisticsLoading ? (
-                  <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
-                ) : (
-                  safeToLocaleString(statistics.classified_domains)
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-lg font-bold text-indigo-600">
+                    {statisticsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
+                    ) : (
+                      safeToLocaleString(statistics.classified_domains)
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-600">Classified Domains</div>
+                </div>
+                <Target className="w-6 h-6 text-indigo-600 opacity-20" />
               </div>
-              <div className="text-xs text-gray-600">Classified Domains</div>
             </Card>
 
             <Card className="p-4">
-              <div className="text-lg font-bold text-teal-600">
-                {statisticsLoading ? (
-                  <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
-                ) : (
-                  safeToLocaleString(statistics.domains_with_evidence)
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-lg font-bold text-teal-600">
+                    {statisticsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
+                    ) : (
+                      safeToLocaleString(statistics.domains_with_evidence)
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-600">Domains with Evidence</div>
+                </div>
+                <Hash className="w-6 h-6 text-teal-600 opacity-20" />
               </div>
-              <div className="text-xs text-gray-600">Domains with Evidence</div>
             </Card>
 
             <Card className="p-4">
-              <div className="text-lg font-bold text-cyan-600">
-                {statisticsLoading ? (
-                  <div className="animate-pulse bg-gray-200 h-6 w-12 rounded"></div>
-                ) : (
-                  `${(statistics.avg_confidence * 100).toFixed(1)}%`
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-lg font-bold text-cyan-600">
+                    {statisticsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-6 w-12 rounded"></div>
+                    ) : (
+                      `${(statistics.avg_confidence * 100).toFixed(1)}%`
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-600">Avg Confidence</div>
+                </div>
+                <Star className="w-6 h-6 text-cyan-600 opacity-20" />
               </div>
-              <div className="text-xs text-gray-600">Avg Confidence</div>
             </Card>
 
             <Card className="p-4">
-              <div className="text-lg font-bold text-emerald-600">
-                {statisticsLoading ? (
-                  <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
-                ) : (
-                  safeToLocaleString(statistics.total_evidence_items)
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-lg font-bold text-emerald-600">
+                    {statisticsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
+                    ) : (
+                      safeToLocaleString(statistics.total_evidence_items)
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-600">Evidence Items</div>
+                </div>
+                <BarChart3 className="w-6 h-6 text-emerald-600 opacity-20" />
               </div>
-              <div className="text-xs text-gray-600">Evidence Items</div>
             </Card>
           </div>
 
@@ -562,7 +758,7 @@ export default function EnhancedDashboard() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setViewMode('audit')}
+                  onClick={() => handleViewModeChange('audit')}
                   className="border-orange-300 text-orange-700 hover:bg-orange-100"
                 >
                   View Audit
@@ -580,6 +776,8 @@ export default function EnhancedDashboard() {
                   filters={filters}
                   onFiltersChange={handleFiltersChange}
                   onReset={handleResetFilters}
+                  loading={loading}
+                  showAppliedCount={true}
                 />
               </div>
 
@@ -591,20 +789,21 @@ export default function EnhancedDashboard() {
                       <span className="text-sm font-medium text-gray-700">Sort by:</span>
                       <div className="flex gap-2">
                         {[
-                          { key: 'recent', label: 'Most Recent', icon: '🕒' },
-                          { key: 'batch', label: 'Latest Batch', icon: '📦' },
-                          { key: 'confidence', label: 'Confidence', icon: '⭐' },
-                          { key: 'coverage', label: 'Coverage', icon: '📊' },
-                          { key: 'domains', label: 'Domains', icon: '🧬' }
-                        ].map(({ key, label, icon }) => (
+                          { key: 'recent', label: 'Most Recent', icon: Clock },
+                          { key: 'batch', label: 'Latest Batch', icon: Grid },
+                          { key: 'confidence', label: 'Confidence', icon: Star },
+                          { key: 'coverage', label: 'Coverage', icon: Activity },
+                          { key: 'domains', label: 'Domains', icon: Layers }
+                        ].map(({ key, label, icon: IconComponent }) => (
                           <Button
                             key={key}
                             size="sm"
                             variant={sortBy === key ? 'default' : 'outline'}
                             onClick={() => handleSortChange(key)}
                             className="flex items-center gap-1"
+                            disabled={loading}
                           >
-                            <span>{icon}</span>
+                            <IconComponent className="w-4 h-4" />
                             {label}
                             {sortBy === key && (
                               <span className="ml-1">
@@ -618,6 +817,12 @@ export default function EnhancedDashboard() {
 
                     <div className="text-sm text-gray-500">
                       Showing page {pagination.page} of {Math.ceil(pagination.total / pagination.size)}
+                      {loading && (
+                        <span className="ml-2 inline-flex items-center gap-1">
+                          <Loader className="w-3 h-3 animate-spin" />
+                          Loading...
+                        </span>
+                      )}
                     </div>
                   </div>
                 </Card>
@@ -626,7 +831,7 @@ export default function EnhancedDashboard() {
           )}
 
           {/* Main Content */}
-          {loading ? (
+          {loading && viewMode === 'proteins' ? (
             <Card className="p-8 text-center">
               <LoadingSpinner />
               <p className="mt-4 text-gray-600">Loading data...</p>
@@ -662,7 +867,7 @@ export default function EnhancedDashboard() {
   )
 }
 
-// Audit View Component (unchanged from your original)
+// Audit View Component
 interface AuditViewProps {
   auditData: AuditData
   loading: boolean
@@ -694,7 +899,7 @@ function AuditView({ auditData, loading, selectedBatch, onBatchChange, onRefresh
               className="border rounded px-3 py-1 text-sm"
             >
               <option value="">All Batches</option>
-              {/* TODO: Add batch options */}
+              {/* TODO: Add batch options from API */}
             </select>
           </div>
           <Button onClick={onRefresh} className="flex items-center gap-2">

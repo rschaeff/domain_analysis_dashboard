@@ -16,20 +16,25 @@ import {
   Target,
   Layers,
   Hash,
-  RotateCcw
+  RotateCcw,
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react'
 
 interface FilterPanelProps {
   filters: DomainFilters
   onFiltersChange: (filters: DomainFilters) => void
   onReset: () => void
+  loading?: boolean
   className?: string
+  showAppliedCount?: boolean
 }
 
 interface GroupOption {
   value: string
   label: string
   count: number
+  description?: string
 }
 
 interface AutocompleteProps {
@@ -38,6 +43,7 @@ interface AutocompleteProps {
   onChange: (value: string[]) => void
   placeholder: string
   label: string
+  disabled?: boolean
 }
 
 // Preset filter configurations
@@ -46,7 +52,7 @@ const FILTER_PRESETS = [
     id: 'high_quality',
     name: 'High Quality',
     icon: Star,
-    description: 'High confidence, well-classified domains',
+    description: 'High confidence, well-classified domains (≥80% confidence)',
     filters: {
       min_confidence: 0.8
     }
@@ -55,7 +61,7 @@ const FILTER_PRESETS = [
     id: 'needs_review',
     name: 'Needs Review',
     icon: Target,
-    description: 'Low confidence or unclear domains',
+    description: 'Low confidence domains that may need manual review (≤50% confidence)',
     filters: {
       max_confidence: 0.5
     }
@@ -66,33 +72,55 @@ const FILTER_PRESETS = [
     icon: Layers,
     description: 'Proteins with multiple domains',
     filters: {
-      // This would need backend support to filter by domain count per protein
+      // Note: This would need backend support for domain count filtering
+      min_evidence_count: 2
     }
   },
   {
     id: 'blast_supported',
     name: 'BLAST Evidence',
     icon: Hash,
-    description: 'Domains with BLAST support',
+    description: 'Domains with BLAST evidence support',
     filters: {
       evidence_types: 'blast'
+    }
+  },
+  {
+    id: 'hhsearch_only',
+    name: 'HHSearch Only',
+    icon: CheckCircle2,
+    description: 'Domains classified only by HHSearch',
+    filters: {
+      evidence_types: 'hhsearch'
     }
   }
 ]
 
-// Autocomplete component for classification groups (keeping existing functionality)
-function ClassificationAutocomplete({ type, value, onChange, placeholder, label }: AutocompleteProps) {
+// Autocomplete component for classification groups
+function ClassificationAutocomplete({
+  type,
+  value,
+  onChange,
+  placeholder,
+  label,
+  disabled = false
+}: AutocompleteProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [options, setOptions] = useState<GroupOption[]>([])
   const [loading, setLoading] = useState(false)
   const [hasMore, setHasMore] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const searchTimeoutRef = useRef<NodeJS.Timeout>()
 
   // Fetch options from API
   const fetchOptions = useCallback(async (searchTerm: string = '') => {
+    if (disabled) return
+
     setLoading(true)
+    setError(null)
+
     try {
       const params = new URLSearchParams({
         type,
@@ -103,18 +131,21 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
       }
 
       const response = await fetch(`/api/filter-options?${params}`)
-      if (!response.ok) throw new Error('Failed to fetch options')
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${type} options`)
+      }
 
       const data = await response.json()
       setOptions(data.options || [])
       setHasMore(data.hasMore || false)
     } catch (error) {
-      console.error('Error fetching filter options:', error)
+      console.error(`Error fetching ${type} options:`, error)
+      setError(error instanceof Error ? error.message : 'Failed to load options')
       setOptions([])
     } finally {
       setLoading(false)
     }
-  }, [type])
+  }, [type, disabled])
 
   // Debounced search
   const debouncedSearch = useCallback((searchTerm: string) => {
@@ -135,10 +166,10 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
 
   // Initial load
   useEffect(() => {
-    if (isOpen && options.length === 0) {
+    if (isOpen && options.length === 0 && !disabled) {
       fetchOptions()
     }
-  }, [isOpen, fetchOptions, options.length])
+  }, [isOpen, fetchOptions, options.length, disabled])
 
   // Handle clicks outside
   useEffect(() => {
@@ -154,6 +185,8 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
 
   // Toggle option selection
   const toggleOption = (optionValue: string) => {
+    if (disabled) return
+
     const newValue = value.includes(optionValue)
       ? value.filter(v => v !== optionValue)
       : [...value, optionValue]
@@ -162,6 +195,7 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
 
   // Remove selected option
   const removeOption = (optionValue: string) => {
+    if (disabled) return
     onChange(value.filter(v => v !== optionValue))
   }
 
@@ -182,16 +216,20 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
           {value.map(val => (
             <span
               key={val}
-              className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm"
+              className={`inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm ${
+                disabled ? 'opacity-50' : ''
+              }`}
             >
               {val}
-              <button
-                onClick={() => removeOption(val)}
-                className="hover:text-blue-900"
-                type="button"
-              >
-                <X className="w-3 h-3" />
-              </button>
+              {!disabled && (
+                <button
+                  onClick={() => removeOption(val)}
+                  className="hover:text-blue-900"
+                  type="button"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
             </span>
           ))}
         </div>
@@ -200,29 +238,38 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
       {/* Input field */}
       <div className="relative">
         <Input
-          placeholder={placeholder}
+          placeholder={disabled ? 'Disabled' : placeholder}
           value={search}
           onChange={handleSearchChange}
-          onFocus={() => setIsOpen(true)}
+          onFocus={() => !disabled && setIsOpen(true)}
+          disabled={disabled}
           className="pr-10"
         />
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => !disabled && setIsOpen(!isOpen)}
           className="absolute right-3 top-1/2 transform -translate-y-1/2"
           type="button"
+          disabled={disabled}
         >
           {loading ? (
             <Loader className="w-4 h-4 animate-spin text-gray-500" />
+          ) : error ? (
+            <AlertCircle className="w-4 h-4 text-red-500" />
           ) : (
-            <Search className="w-4 h-4 text-gray-500" />
+            <Search className={`w-4 h-4 ${disabled ? 'text-gray-300' : 'text-gray-500'}`} />
           )}
         </button>
       </div>
 
       {/* Dropdown */}
-      {isOpen && (
+      {isOpen && !disabled && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
-          {options.length === 0 && !loading ? (
+          {error ? (
+            <div className="px-3 py-2 text-red-600 text-sm flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              {error}
+            </div>
+          ) : options.length === 0 && !loading ? (
             <div className="px-3 py-2 text-gray-500 text-sm">
               {search ? 'No matching groups found' : 'Start typing to search...'}
             </div>
@@ -236,6 +283,7 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
                     value.includes(option.value) ? 'bg-blue-50 text-blue-700' : ''
                   }`}
                   type="button"
+                  title={option.description}
                 >
                   <span className="flex items-center gap-2">
                     <input
@@ -244,14 +292,20 @@ function ClassificationAutocomplete({ type, value, onChange, placeholder, label 
                       readOnly
                       className="w-4 h-4"
                     />
-                    {option.label}
+                    <span className="truncate">{option.label}</span>
                   </span>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-gray-500 ml-2">
                     {option.count.toLocaleString()}
                   </span>
                 </button>
               ))}
-              {hasMore && (
+              {loading && (
+                <div className="px-3 py-2 text-xs text-gray-500 border-t flex items-center gap-2">
+                  <Loader className="w-3 h-3 animate-spin" />
+                  Loading...
+                </div>
+              )}
+              {hasMore && !loading && (
                 <div className="px-3 py-2 text-xs text-gray-500 border-t">
                   Type to search for more groups...
                 </div>
@@ -268,7 +322,9 @@ export function FilterPanel({
   filters,
   onFiltersChange,
   onReset,
-  className = ''
+  loading = false,
+  className = '',
+  showAppliedCount = true
 }: FilterPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [activePreset, setActivePreset] = useState<string | null>(null)
@@ -277,23 +333,29 @@ export function FilterPanel({
     key: K,
     value: DomainFilters[K]
   ) => {
+    if (loading) return
+
     onFiltersChange({
       ...filters,
       [key]: value
     })
     // Clear active preset when manually changing filters
     setActivePreset(null)
-  }, [filters, onFiltersChange])
+  }, [filters, onFiltersChange, loading])
 
   const removeFilter = useCallback((key: keyof DomainFilters) => {
+    if (loading) return
+
     const newFilters = { ...filters }
     delete newFilters[key]
     onFiltersChange(newFilters)
     setActivePreset(null)
-  }, [filters, onFiltersChange])
+  }, [filters, onFiltersChange, loading])
 
   // Apply preset filter
   const applyPreset = (preset: typeof FILTER_PRESETS[0]) => {
+    if (loading) return
+
     onFiltersChange({
       ...filters,
       ...preset.filters
@@ -311,6 +373,8 @@ export function FilterPanel({
 
   // Quick clear functions
   const clearConfidenceFilters = () => {
+    if (loading) return
+
     const newFilters = { ...filters }
     delete newFilters.min_confidence
     delete newFilters.max_confidence
@@ -319,6 +383,8 @@ export function FilterPanel({
   }
 
   const clearClassificationFilters = () => {
+    if (loading) return
+
     const newFilters = { ...filters }
     delete newFilters.t_group
     delete newFilters.h_group
@@ -328,8 +394,18 @@ export function FilterPanel({
     setActivePreset(null)
   }
 
+  const clearLengthFilters = () => {
+    if (loading) return
+
+    const newFilters = { ...filters }
+    delete newFilters.sequence_length_min
+    delete newFilters.sequence_length_max
+    onFiltersChange(newFilters)
+    setActivePreset(null)
+  }
+
   return (
-    <Card className={`overflow-hidden ${className}`}>
+    <Card className={`overflow-hidden transition-opacity ${className} ${loading ? 'opacity-75' : ''}`}>
       {/* Header */}
       <div className="px-6 py-4 bg-white border-b border-gray-200">
         <div className="flex items-center justify-between">
@@ -337,10 +413,14 @@ export function FilterPanel({
             <div className="flex items-center gap-2">
               <Filter className="w-5 h-5 text-gray-600" />
               <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
+              {loading && (
+                <Loader className="w-4 h-4 animate-spin text-blue-600" />
+              )}
             </div>
-            {activeFilterCount > 0 && (
+            {showAppliedCount && activeFilterCount > 0 && (
               <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-medium">
                 {activeFilterCount} active
+                {loading && ' (applying...)'}
               </span>
             )}
           </div>
@@ -350,6 +430,7 @@ export function FilterPanel({
                 variant="outline"
                 size="sm"
                 onClick={onReset}
+                disabled={loading}
                 className="text-gray-600"
               >
                 <RotateCcw className="w-4 h-4 mr-1" />
@@ -360,6 +441,7 @@ export function FilterPanel({
               variant="ghost"
               size="sm"
               onClick={() => setIsExpanded(!isExpanded)}
+              disabled={loading}
             >
               {isExpanded ? (
                 <>
@@ -385,7 +467,11 @@ export function FilterPanel({
               value={filters.pdb_id || ''}
               onChange={(e) => updateFilter('pdb_id', e.target.value || undefined)}
               className="pl-10"
+              disabled={loading}
             />
+            {loading && filters.pdb_id && (
+              <Loader className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 animate-spin text-blue-600" />
+            )}
           </div>
           <div className="w-24">
             <Input
@@ -393,6 +479,7 @@ export function FilterPanel({
               value={filters.chain_id || ''}
               onChange={(e) => updateFilter('chain_id', e.target.value || undefined)}
               maxLength={1}
+              disabled={loading}
             />
           </div>
           <div className="w-32">
@@ -402,6 +489,7 @@ export function FilterPanel({
               placeholder="Domain #"
               value={filters.domain_number ?? ''}
               onChange={(e) => updateFilter('domain_number', e.target.value ? parseInt(e.target.value) : undefined)}
+              disabled={loading}
             />
           </div>
         </div>
@@ -412,6 +500,12 @@ export function FilterPanel({
         <div className="px-6 py-4 bg-gray-50">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-sm font-medium text-gray-700">Quick Filters:</span>
+            {loading && (
+              <span className="text-xs text-blue-600 flex items-center gap-1">
+                <Loader className="w-3 h-3 animate-spin" />
+                Applying filters...
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             {FILTER_PRESETS.map((preset) => {
@@ -422,7 +516,10 @@ export function FilterPanel({
                 <button
                   key={preset.id}
                   onClick={() => applyPreset(preset)}
+                  disabled={loading}
                   className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                    loading ? 'opacity-50 cursor-not-allowed' : ''
+                  } ${
                     isActive
                       ? 'bg-blue-600 text-white'
                       : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
@@ -448,7 +545,8 @@ export function FilterPanel({
               {(filters.min_confidence !== undefined || filters.max_confidence !== undefined) && (
                 <button
                   onClick={clearConfidenceFilters}
-                  className="text-xs text-gray-500 hover:text-gray-700"
+                  disabled={loading}
+                  className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
                   type="button"
                 >
                   Clear
@@ -466,6 +564,7 @@ export function FilterPanel({
                   placeholder="Min confidence"
                   value={filters.min_confidence ?? ''}
                   onChange={(e) => updateFilter('min_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
+                  disabled={loading}
                 />
               </div>
               <span className="text-gray-500 text-sm">to</span>
@@ -478,6 +577,7 @@ export function FilterPanel({
                   placeholder="Max confidence"
                   value={filters.max_confidence ?? ''}
                   onChange={(e) => updateFilter('max_confidence', e.target.value ? parseFloat(e.target.value) : undefined)}
+                  disabled={loading}
                 />
               </div>
 
@@ -490,6 +590,7 @@ export function FilterPanel({
                     updateFilter('min_confidence', 0.8)
                     updateFilter('max_confidence', undefined)
                   }}
+                  disabled={loading}
                   className="px-2 py-1 text-xs whitespace-nowrap"
                 >
                   High (≥0.8)
@@ -501,6 +602,7 @@ export function FilterPanel({
                     updateFilter('min_confidence', 0.5)
                     updateFilter('max_confidence', 0.8)
                   }}
+                  disabled={loading}
                   className="px-2 py-1 text-xs whitespace-nowrap"
                 >
                   Medium
@@ -512,6 +614,7 @@ export function FilterPanel({
                     updateFilter('min_confidence', undefined)
                     updateFilter('max_confidence', 0.5)
                   }}
+                  disabled={loading}
                   className="px-2 py-1 text-xs whitespace-nowrap"
                 >
                   Low (&lt;0.5)
@@ -527,7 +630,8 @@ export function FilterPanel({
               {(filters.t_group?.length || filters.h_group?.length || filters.x_group?.length || filters.a_group?.length) && (
                 <button
                   onClick={clearClassificationFilters}
-                  className="text-xs text-gray-500 hover:text-gray-700"
+                  disabled={loading}
+                  className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
                   type="button"
                 >
                   Clear All
@@ -542,6 +646,7 @@ export function FilterPanel({
                 onChange={(value) => updateFilter('h_group', value.length > 0 ? value : undefined)}
                 placeholder="Search H-Groups..."
                 label="H-Groups (Homology)"
+                disabled={loading}
               />
 
               <ClassificationAutocomplete
@@ -550,6 +655,7 @@ export function FilterPanel({
                 onChange={(value) => updateFilter('t_group', value.length > 0 ? value : undefined)}
                 placeholder="Search T-Groups..."
                 label="T-Groups (Topology)"
+                disabled={loading}
               />
 
               <ClassificationAutocomplete
@@ -558,6 +664,7 @@ export function FilterPanel({
                 onChange={(value) => updateFilter('x_group', value.length > 0 ? value : undefined)}
                 placeholder="Search X-Groups..."
                 label="X-Groups (Possible Homology)"
+                disabled={loading}
               />
 
               <ClassificationAutocomplete
@@ -566,6 +673,7 @@ export function FilterPanel({
                 onChange={(value) => updateFilter('a_group', value.length > 0 ? value : undefined)}
                 placeholder="Search A-Groups..."
                 label="A-Groups (Architecture)"
+                disabled={loading}
               />
             </div>
           </div>
@@ -573,50 +681,81 @@ export function FilterPanel({
           {/* Additional Filters Section */}
           <div>
             <h4 className="text-sm font-semibold text-gray-900 mb-3">Additional Filters</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-4">
+              {/* Sequence Length */}
               <div>
-                <label className="block text-sm font-medium mb-2 text-gray-700">Min Sequence Length</label>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="e.g., 50"
-                  value={filters.sequence_length_min ?? ''}
-                  onChange={(e) => updateFilter('sequence_length_min', e.target.value ? parseInt(e.target.value) : undefined)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-700">Max Sequence Length</label>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="e.g., 1000"
-                  value={filters.sequence_length_max ?? ''}
-                  onChange={(e) => updateFilter('sequence_length_max', e.target.value ? parseInt(e.target.value) : undefined)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-700">Min Evidence Count</label>
-                <Input
-                  type="number"
-                  min="0"
-                  placeholder="e.g., 1"
-                  value={filters.min_evidence_count ?? ''}
-                  onChange={(e) => updateFilter('min_evidence_count', e.target.value ? parseInt(e.target.value) : undefined)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-700">Evidence Types</label>
-                <Input
-                  placeholder="e.g., blast,hhsearch"
-                  value={filters.evidence_types || ''}
-                  onChange={(e) => updateFilter('evidence_types', e.target.value || undefined)}
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  Comma-separated: blast, hhsearch, domain_blast
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700">Sequence Length</label>
+                  {(filters.sequence_length_min !== undefined || filters.sequence_length_max !== undefined) && (
+                    <button
+                      onClick={clearLengthFilters}
+                      disabled={loading}
+                      className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                      type="button"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="Min length"
+                    value={filters.sequence_length_min ?? ''}
+                    onChange={(e) => updateFilter('sequence_length_min', e.target.value ? parseInt(e.target.value) : undefined)}
+                    disabled={loading}
+                  />
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="Max length"
+                    value={filters.sequence_length_max ?? ''}
+                    onChange={(e) => updateFilter('sequence_length_max', e.target.value ? parseInt(e.target.value) : undefined)}
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+
+              {/* Evidence Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-700">Min Evidence Count</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="e.g., 1"
+                    value={filters.min_evidence_count ?? ''}
+                    onChange={(e) => updateFilter('min_evidence_count', e.target.value ? parseInt(e.target.value) : undefined)}
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-700">Evidence Types</label>
+                  <Input
+                    placeholder="e.g., blast,hhsearch"
+                    value={filters.evidence_types || ''}
+                    onChange={(e) => updateFilter('evidence_types', e.target.value || undefined)}
+                    disabled={loading}
+                  />
+                  <div className="text-xs text-gray-500 mt-1">
+                    Comma-separated: blast, hhsearch, domain_blast
+                  </div>
+                </div>
+              </div>
+
+              {/* Batch Filter */}
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-700">Batch ID</label>
+                <Input
+                  type="number"
+                  min="1"
+                  placeholder="e.g., 123"
+                  value={filters.batch_id ?? ''}
+                  onChange={(e) => updateFilter('batch_id', e.target.value ? parseInt(e.target.value) : undefined)}
+                  disabled={loading}
+                />
               </div>
             </div>
           </div>
@@ -642,6 +781,7 @@ export function FilterPanel({
                 pdb_id: 'PDB',
                 chain_id: 'Chain',
                 domain_number: 'Domain #',
+                batch_id: 'Batch',
                 t_group: 'T-Groups',
                 h_group: 'H-Groups',
                 x_group: 'X-Groups',
@@ -660,10 +800,11 @@ export function FilterPanel({
                   className="inline-flex items-center gap-2 px-3 py-1 bg-white text-blue-800 rounded-full text-sm border border-blue-200 shadow-sm"
                 >
                   <span className="font-medium">{keyLabels[key] || key}:</span>
-                  <span>{displayValue}</span>
+                  <span className="truncate max-w-24">{displayValue}</span>
                   <button
                     onClick={() => removeFilter(key as keyof DomainFilters)}
-                    className="ml-1 hover:text-blue-900 hover:bg-blue-100 rounded-full p-0.5"
+                    disabled={loading}
+                    className="ml-1 hover:text-blue-900 hover:bg-blue-100 rounded-full p-0.5 disabled:opacity-50"
                     type="button"
                   >
                     <X className="w-3 h-3" />

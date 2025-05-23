@@ -470,7 +470,7 @@ export function FilterPanel({
               disabled={loading}
             />
             {loading && filters.pdb_id && (
-              <Loader className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 animate-spin text-blue-600" />
+              <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 animate-spin text-blue-600" />
             )}
           </div>
           <div className="w-24">

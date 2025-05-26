@@ -1,31 +1,34 @@
-// app/api/curation/stats/route.ts
+// app/api/curation/stats/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
 export async function GET(request: NextRequest) {
   try {
-    // Get curation statistics (cast BIGINT to INTEGER to avoid serialization issues)
+    // Get curation statistics with proper numeric handling
     const statsQuery = `
       SELECT
-        -- Session statistics
+        -- Session statistics (cast BIGINT to INTEGER to avoid serialization issues)
         COUNT(DISTINCT cs.id)::INTEGER as total_sessions,
         COUNT(DISTINCT CASE WHEN cs.status = 'committed' THEN cs.id END)::INTEGER as committed_sessions,
         COUNT(DISTINCT cs.curator_name)::INTEGER as active_curators,
 
-        -- Decision statistics
+        -- Decision statistics (cast BIGINT to INTEGER)
         COUNT(cd.id)::INTEGER as total_decisions,
         COUNT(CASE WHEN cd.has_domain = true THEN 1 END)::INTEGER as proteins_with_domains,
         COUNT(CASE WHEN cd.is_fragment = true THEN 1 END)::INTEGER as fragments_identified,
         COUNT(CASE WHEN cd.is_repeat_protein = true THEN 1 END)::INTEGER as repeat_proteins,
         COUNT(CASE WHEN cd.flagged_for_review = true THEN 1 END)::INTEGER as flagged_for_review,
 
-        -- Quality metrics
-        COALESCE(AVG(cd.confidence_level), 0)::NUMERIC(5,2) as avg_confidence_level,
-        COALESCE(AVG(cd.review_time_seconds), 0)::NUMERIC(8,1) as avg_review_time_seconds,
+        -- Quality metrics (ensure these are always numbers, not null)
+        COALESCE(ROUND(AVG(cd.confidence_level)::NUMERIC, 2), 0)::FLOAT as avg_confidence_level,
+        COALESCE(ROUND(AVG(cd.review_time_seconds)::NUMERIC, 1), 0)::FLOAT as avg_review_time_seconds,
 
         -- Curation status
         COUNT(DISTINCT cst.protein_id)::INTEGER as proteins_curated,
-        (SELECT COUNT(DISTINCT p.id)::INTEGER FROM pdb_analysis.protein p
+
+        -- Get total curable proteins (cast to INTEGER)
+        (SELECT COUNT(DISTINCT p.id)::INTEGER
+         FROM pdb_analysis.protein p
          JOIN pdb_analysis.partition_proteins pp ON p.pdb_id = pp.pdb_id AND p.chain_id = pp.chain_id
          JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
          JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
@@ -42,7 +45,28 @@ export async function GET(request: NextRequest) {
     `
 
     const statsResult = await prisma.$queryRawUnsafe(statsQuery)
-    const stats = (statsResult as any[])[0]
+    const rawStats = (statsResult as any[])[0]
+
+    // Ensure all values are properly typed and never null/undefined
+    const stats = {
+      total_sessions: Number(rawStats?.total_sessions || 0),
+      committed_sessions: Number(rawStats?.committed_sessions || 0),
+      active_curators: Number(rawStats?.active_curators || 0),
+      total_decisions: Number(rawStats?.total_decisions || 0),
+      proteins_with_domains: Number(rawStats?.proteins_with_domains || 0),
+      fragments_identified: Number(rawStats?.fragments_identified || 0),
+      repeat_proteins: Number(rawStats?.repeat_proteins || 0),
+      flagged_for_review: Number(rawStats?.flagged_for_review || 0),
+      avg_confidence_level: Number(rawStats?.avg_confidence_level || 0),
+      avg_review_time_seconds: Number(rawStats?.avg_review_time_seconds || 0),
+      proteins_curated: Number(rawStats?.proteins_curated || 0),
+      total_curable_proteins: Number(rawStats?.total_curable_proteins || 0)
+    }
+
+    // Calculate completion percentage safely
+    const totalCurable = stats.total_curable_proteins
+    const totalCurated = stats.proteins_curated
+    const completionPercentage = totalCurable > 0 ? (totalCurated / totalCurable) * 100 : 0
 
     // Get recent activity
     const recentActivity = await prisma.$queryRawUnsafe(`
@@ -59,18 +83,13 @@ export async function GET(request: NextRequest) {
       LIMIT 10
     `)
 
-    // Calculate completion percentage
-    const totalCurable = Number(stats.total_curable_proteins || 0)
-    const totalCurated = Number(stats.proteins_curated || 0)
-    const completionPercentage = totalCurable > 0 ? (totalCurated / totalCurable) * 100 : 0
-
     return NextResponse.json({
       statistics: {
         ...stats,
-        completion_percentage: completionPercentage,
+        completion_percentage: Number(completionPercentage.toFixed(1)),
         remaining_proteins: Math.max(0, totalCurable - totalCurated)
       },
-      recent_activity: recentActivity
+      recent_activity: recentActivity || []
     })
 
   } catch (error) {

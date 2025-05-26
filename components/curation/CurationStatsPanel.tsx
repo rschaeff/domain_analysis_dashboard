@@ -1,4 +1,4 @@
-// components/curation/CurationStatsPanel.tsx
+// components/curation/CurationStatsPanel.tsx - FIXED VERSION with defensive coding
 'use client'
 
 import React, { useState, useEffect } from 'react'
@@ -6,12 +6,12 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { 
-  Users, 
-  Clock, 
-  CheckCircle, 
-  AlertTriangle, 
-  BarChart3, 
+import {
+  Users,
+  Clock,
+  CheckCircle,
+  AlertTriangle,
+  BarChart3,
   TrendingUp,
   RefreshCw,
   Activity,
@@ -47,6 +47,20 @@ interface RecentActivity {
   session_end?: string
 }
 
+// Safe numeric formatter - ensures value is a number and handles edge cases
+const safeNumber = (value: any, defaultValue: number = 0): number => {
+  if (value === null || value === undefined || isNaN(Number(value))) {
+    return defaultValue
+  }
+  return Number(value)
+}
+
+// Safe formatter for decimal places
+const safeToFixed = (value: any, decimals: number = 1, defaultValue: number = 0): string => {
+  const num = safeNumber(value, defaultValue)
+  return num.toFixed(decimals)
+}
+
 export function CurationStatsPanel() {
   const [statistics, setStatistics] = useState<CurationStatistics | null>(null)
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
@@ -56,12 +70,32 @@ export function CurationStatsPanel() {
   const fetchCurationStats = async () => {
     setLoading(true)
     setError(null)
-    
+
     try {
       const response = await fetch('/api/curation/stats')
       if (response.ok) {
         const data = await response.json()
-        setStatistics(data.statistics)
+
+        // Ensure all statistics are properly typed numbers
+        const safeStats = {
+          total_sessions: safeNumber(data.statistics?.total_sessions),
+          committed_sessions: safeNumber(data.statistics?.committed_sessions),
+          active_sessions: safeNumber(data.statistics?.active_sessions),
+          total_curators: safeNumber(data.statistics?.total_curators),
+          total_decisions: safeNumber(data.statistics?.total_decisions),
+          proteins_with_domains: safeNumber(data.statistics?.proteins_with_domains),
+          fragments_identified: safeNumber(data.statistics?.fragments_identified),
+          repeat_proteins: safeNumber(data.statistics?.repeat_proteins),
+          flagged_for_review: safeNumber(data.statistics?.flagged_for_review),
+          avg_confidence_level: safeNumber(data.statistics?.avg_confidence_level),
+          avg_review_time_seconds: safeNumber(data.statistics?.avg_review_time_seconds),
+          proteins_curated: safeNumber(data.statistics?.proteins_curated),
+          total_curable_proteins: safeNumber(data.statistics?.total_curable_proteins),
+          completion_percentage: safeNumber(data.statistics?.completion_percentage),
+          remaining_proteins: safeNumber(data.statistics?.remaining_proteins)
+        }
+
+        setStatistics(safeStats)
         setRecentActivity(data.recent_activity || [])
       } else {
         throw new Error('Failed to fetch curation statistics')
@@ -89,7 +123,7 @@ export function CurationStatsPanel() {
 
   useEffect(() => {
     fetchCurationStats()
-    
+
     // Auto-refresh every 30 seconds
     const interval = setInterval(fetchCurationStats, 30000)
     return () => clearInterval(interval)
@@ -135,20 +169,20 @@ export function CurationStatsPanel() {
           <h2 className="text-2xl font-bold text-gray-900">Curation Overview</h2>
           <p className="text-gray-600">Manual review and validation of protein domain assignments</p>
         </div>
-        
+
         <div className="flex items-center gap-2">
-          <Button 
-            onClick={fetchCurationStats} 
-            variant="outline" 
+          <Button
+            onClick={fetchCurationStats}
+            variant="outline"
             size="sm"
             disabled={loading}
           >
             <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button 
-            onClick={cleanupExpiredLocks} 
-            variant="outline" 
+          <Button
+            onClick={cleanupExpiredLocks}
+            variant="outline"
             size="sm"
           >
             <AlertTriangle className="w-4 h-4 mr-1" />
@@ -167,21 +201,21 @@ export function CurationStatsPanel() {
             </div>
             <div className="text-sm text-gray-600">Proteins Curated</div>
           </div>
-          
+
           <div className="text-center">
             <div className="text-3xl font-bold text-blue-600">
               {statistics.remaining_proteins.toLocaleString()}
             </div>
             <div className="text-sm text-gray-600">Remaining</div>
           </div>
-          
+
           <div className="text-center">
             <div className="text-3xl font-bold text-purple-600">
-              {statistics.completion_percentage.toFixed(1)}%
+              {safeToFixed(statistics.completion_percentage, 1)}%
             </div>
             <div className="text-sm text-gray-600">Complete</div>
           </div>
-          
+
           <div className="text-center">
             <div className="text-3xl font-bold text-orange-600">
               {statistics.total_curable_proteins.toLocaleString()}
@@ -194,12 +228,12 @@ export function CurationStatsPanel() {
         <div className="mt-4">
           <div className="flex justify-between text-sm text-gray-600 mb-1">
             <span>Progress</span>
-            <span>{statistics.completion_percentage.toFixed(1)}%</span>
+            <span>{safeToFixed(statistics.completion_percentage, 1)}%</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2">
-            <div 
+            <div
               className="bg-green-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${Math.min(statistics.completion_percentage, 100)}%` }}
+              style={{ width: `${Math.min(safeNumber(statistics.completion_percentage), 100)}%` }}
             />
           </div>
         </div>
@@ -211,10 +245,10 @@ export function CurationStatsPanel() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold text-blue-600">
-                {statistics.active_sessions}
+                {safeNumber(statistics.active_sessions)}
               </div>
               <div className="text-sm text-gray-600">Active Sessions</div>
-              {statistics.active_sessions > 0 && (
+              {safeNumber(statistics.active_sessions) > 0 && (
                 <div className="flex items-center mt-1">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-1"></div>
                   <span className="text-xs text-green-600">Live</span>
@@ -253,7 +287,7 @@ export function CurationStatsPanel() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold text-orange-600">
-                {Math.round(statistics.avg_review_time_seconds)}s
+                {Math.round(safeNumber(statistics.avg_review_time_seconds))}s
               </div>
               <div className="text-sm text-gray-600">Avg Review Time</div>
             </div>
@@ -298,12 +332,12 @@ export function CurationStatsPanel() {
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-gray-600">Average Confidence Level</span>
-                <span className="font-medium">{statistics.avg_confidence_level.toFixed(1)}/5</span>
+                <span className="font-medium">{safeToFixed(statistics.avg_confidence_level, 1)}/5</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
+                <div
                   className="bg-blue-600 h-2 rounded-full"
-                  style={{ width: `${(statistics.avg_confidence_level / 5) * 100}%` }}
+                  style={{ width: `${(safeNumber(statistics.avg_confidence_level) / 5) * 100}%` }}
                 />
               </div>
             </div>
@@ -311,9 +345,9 @@ export function CurationStatsPanel() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-600">Domain Detection Rate</span>
               <span className="font-medium text-green-600">
-                {statistics.total_decisions > 0 
-                  ? ((statistics.proteins_with_domains / statistics.total_decisions) * 100).toFixed(1)
-                  : 0}%
+                {statistics.total_decisions > 0
+                  ? safeToFixed((statistics.proteins_with_domains / statistics.total_decisions) * 100, 1)
+                  : '0'}%
               </span>
             </div>
 
@@ -323,8 +357,8 @@ export function CurationStatsPanel() {
                 <Star className="w-4 h-4 text-yellow-500" />
                 <span className="font-medium">
                   {statistics.flagged_for_review > 0 && statistics.total_decisions > 0
-                    ? (100 - (statistics.flagged_for_review / statistics.total_decisions) * 100).toFixed(1)
-                    : 100}%
+                    ? safeToFixed(100 - (statistics.flagged_for_review / statistics.total_decisions) * 100, 1)
+                    : '100'}%
                 </span>
               </div>
             </div>
@@ -350,7 +384,7 @@ export function CurationStatsPanel() {
                   <div>
                     <div className="font-medium">{activity.curator_name}</div>
                     <div className="text-sm text-gray-600">
-                      {activity.proteins_reviewed}/{activity.target_batch_size} proteins reviewed
+                      {safeNumber(activity.proteins_reviewed)}/{safeNumber(activity.target_batch_size)} proteins reviewed
                     </div>
                   </div>
                 </div>

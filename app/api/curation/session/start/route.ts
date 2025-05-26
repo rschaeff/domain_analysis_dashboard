@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
           p.length as sequence_length,
           -- Get the best evidence confidence for prioritization
           MAX(de.confidence) as best_confidence,
-          COUNT(DISTINCT de.id) as evidence_count
+          COUNT(DISTINCT de.id)::INTEGER as evidence_count
         FROM pdb_analysis.protein p
         JOIN pdb_analysis.partition_proteins pp ON p.pdb_id = pp.pdb_id AND p.chain_id = pp.chain_id
         JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
@@ -66,7 +66,9 @@ export async function POST(request: NextRequest) {
       }, { status: 404 })
     }
 
-    // Create new session
+    const proteinSourceIds = proteins.map(p => p.source_id)
+
+    // Create new session (fix array casting issue)
     const sessionQuery = `
       INSERT INTO pdb_analysis.curation_session (
         curator_name, target_batch_size, locked_proteins, status
@@ -74,12 +76,11 @@ export async function POST(request: NextRequest) {
       RETURNING id, curator_name, target_batch_size, locked_proteins, created_at
     `
 
-    const proteinSourceIds = proteins.map(p => p.source_id)
     const sessionResult = await prisma.$queryRawUnsafe(
       sessionQuery,
       curator_name,
       batch_size,
-      JSON.stringify(proteinSourceIds)
+      proteinSourceIds  // Pass array directly - PostgreSQL will handle the conversion
     )
 
     const session = (sessionResult as any[])[0]

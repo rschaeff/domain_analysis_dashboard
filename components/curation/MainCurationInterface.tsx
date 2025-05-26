@@ -53,11 +53,48 @@ interface CurationDecision {
 interface CurationEvidence {
   evidence_id: number
   evidence_type: string
-  ecod_domain_id: string
+  ecod_domain_id: string | null
+  source_id: string | null
   hit_range: string
   query_range: string
   confidence: number
   evalue: number
+}
+
+// Utility function to safely parse ECOD domain ID
+const parseEcodDomainId = (ecodDomainId: string | null | undefined): { pdbId: string | null, chainId: string | null } => {
+  if (!ecodDomainId || typeof ecodDomainId !== 'string' || ecodDomainId.length < 6) {
+    console.warn('Invalid ECOD domain ID:', ecodDomainId)
+    return { pdbId: null, chainId: null }
+  }
+
+  try {
+    // ECOD domain IDs typically follow the pattern: e1a0oA1
+    // Where positions 1-4 are PDB ID and position 5 is chain ID
+    const pdbId = ecodDomainId.substring(1, 5).toLowerCase()
+    const chainId = ecodDomainId.charAt(5).toUpperCase()
+
+    // Basic validation
+    if (pdbId.length !== 4 || !chainId) {
+      console.warn('Failed to parse ECOD domain ID:', ecodDomainId)
+      return { pdbId: null, chainId: null }
+    }
+
+    return { pdbId, chainId }
+  } catch (error) {
+    console.error('Error parsing ECOD domain ID:', ecodDomainId, error)
+    return { pdbId: null, chainId: null }
+  }
+}
+
+// Utility function to get the best identifier from evidence
+const getBestEvidenceId = (evidence: any): string | null => {
+  // Try different possible field names for the reference ID
+  return evidence.ecod_domain_id ||
+         evidence.source_id ||
+         evidence.domain_ref_id ||
+         evidence.hit_id ||
+         null
 }
 
 export default function MainCurationInterface() {
@@ -65,13 +102,13 @@ export default function MainCurationInterface() {
   const [session, setSession] = useState<CurationSession | null>(null)
   const [isStartingSession, setIsStartingSession] = useState(false)
   const [curatorName, setCuratorName] = useState('')
-  
+
   // Current Protein & Curation State
   const [currentProtein, setCurrentProtein] = useState<CurationProtein | null>(null)
   const [proteins, setProteins] = useState<CurationProtein[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isLoadingProtein, setIsLoadingProtein] = useState(false)
-  
+
   // Curation Decision State
   const [decision, setDecision] = useState<CurationDecision>({
     has_domain: null,
@@ -83,12 +120,12 @@ export default function MainCurationInterface() {
     notes: '',
     flagged_for_review: false
   })
-  
+
   // Evidence and Structure State
   const [selectedEvidence, setSelectedEvidence] = useState<CurationEvidence | null>(null)
   const [structuresLoaded, setStructuresLoaded] = useState(false)
   const [structureError, setStructureError] = useState<string | null>(null)
-  
+
   // UI State
   const [reviewStartTime, setReviewStartTime] = useState<Date | null>(null)
   const [isAutoSaving, setIsAutoSaving] = useState(false)
@@ -119,7 +156,7 @@ export default function MainCurationInterface() {
         setProteins(data.proteins)
         setCurrentIndex(0)
         setAllDecisions(new Array(data.proteins.length).fill(null))
-        
+
         // Load first protein
         if (data.proteins.length > 0) {
           await loadProteinForCuration(data.proteins[0])
@@ -142,7 +179,7 @@ export default function MainCurationInterface() {
     setStructuresLoaded(false)
     setStructureError(null)
     setReviewStartTime(new Date())
-    
+
     try {
       // Get protein details with domains
       const domainsResponse = await fetch(`/api/proteins/${protein.source_id}/domains`)
@@ -156,8 +193,8 @@ export default function MainCurationInterface() {
         const evidenceResponse = await fetch(`/api/domains/${domain.id}/evidence`)
         if (evidenceResponse.ok) {
           const evidence = await evidenceResponse.json()
-          return evidence.filter((e: any) => 
-            e.source_id && e.hit_range && e.confidence > 0.8
+          return evidence.filter((e: any) =>
+            getBestEvidenceId(e) && e.hit_range && e.confidence > 0.8
           )
         }
         return []
@@ -166,6 +203,9 @@ export default function MainCurationInterface() {
       const evidenceArrays = await Promise.all(evidencePromises)
       const allEvidence = evidenceArrays.flat()
 
+      console.log('Evidence loaded:', allEvidence.length, 'items')
+      console.log('Sample evidence:', allEvidence[0])
+
       const proteinWithData = {
         ...protein,
         domains: domainsData.domains,
@@ -173,13 +213,27 @@ export default function MainCurationInterface() {
       }
 
       setCurrentProtein(proteinWithData)
-      
+
       // Auto-select best evidence for structure comparison
       if (allEvidence.length > 0) {
-        const bestEvidence = allEvidence.reduce((best: any, current: any) => 
+        const bestEvidence = allEvidence.reduce((best: any, current: any) =>
           current.confidence > best.confidence ? current : best
         )
-        setSelectedEvidence(bestEvidence)
+
+        // Validate the selected evidence
+        const bestId = getBestEvidenceId(bestEvidence)
+        if (bestId) {
+          const validatedEvidence = {
+            ...bestEvidence,
+            ecod_domain_id: bestId,
+            source_id: bestId
+          }
+          setSelectedEvidence(validatedEvidence)
+          console.log('Selected evidence:', validatedEvidence)
+        } else {
+          console.warn('No valid evidence ID found in best evidence:', bestEvidence)
+          setSelectedEvidence(allEvidence[0]) // Fallback to first evidence
+        }
       }
 
       // Reset decision for new protein
@@ -240,9 +294,12 @@ export default function MainCurationInterface() {
     }
 
     // Calculate review time
-    const reviewTime = reviewStartTime 
+    const reviewTime = reviewStartTime
       ? Math.round((Date.now() - reviewStartTime.getTime()) / 1000)
       : 0
+
+    // Get the best evidence ID for saving
+    const evidenceId = getBestEvidenceId(selectedEvidence)
 
     // Save decision to API
     try {
@@ -255,8 +312,8 @@ export default function MainCurationInterface() {
           decisions: decision,
           evidence_used: {
             primary_evidence_type: selectedEvidence.evidence_type,
-            primary_evidence_source_id: selectedEvidence.ecod_domain_id,
-            reference_domain_id: selectedEvidence.ecod_domain_id,
+            primary_evidence_source_id: evidenceId,
+            reference_domain_id: evidenceId,
             evidence_confidence: selectedEvidence.confidence,
             evidence_evalue: selectedEvidence.evalue
           },
@@ -370,7 +427,7 @@ export default function MainCurationInterface() {
             <p className="text-gray-600">
               Review protein domain predictions and evidence to improve classification algorithms
             </p>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-2">Your Name</label>
@@ -383,7 +440,7 @@ export default function MainCurationInterface() {
                   disabled={isStartingSession}
                 />
               </div>
-              
+
               <Button
                 onClick={startCurationSession}
                 disabled={!curatorName.trim() || isStartingSession}
@@ -412,7 +469,7 @@ export default function MainCurationInterface() {
   if (showBatchSummary) {
     const completedCount = allDecisions.filter(d => d !== null).length
     const flaggedCount = allDecisions.filter(d => d?.flagged_for_review).length
-    
+
     return (
       <div className="max-w-4xl mx-auto p-6">
         <Card className="p-6">
@@ -488,7 +545,7 @@ export default function MainCurationInterface() {
               {currentIndex + 1} of {proteins.length}
             </Badge>
           </div>
-          
+
           <div className="flex items-center gap-2">
             {isAutoSaving && (
               <div className="flex items-center gap-1 text-sm text-gray-600">
@@ -518,24 +575,24 @@ export default function MainCurationInterface() {
               <div>
                 <h3 className="text-lg font-bold">{currentProtein.source_id}</h3>
                 <p className="text-sm text-gray-600">
-                  Length: {currentProtein.sequence_length} residues | 
-                  Domains: {currentProtein.domains.length} | 
+                  Length: {currentProtein.sequence_length} residues |
+                  Domains: {currentProtein.domains.length} |
                   Evidence: {currentProtein.evidence.length} items
                 </p>
               </div>
               <div className="flex gap-2">
-                <Button 
-                  onClick={goToPrevious} 
+                <Button
+                  onClick={goToPrevious}
                   disabled={currentIndex === 0}
                   variant="outline"
                   size="sm"
                 >
                   <SkipBack className="w-4 h-4" />
                 </Button>
-                <Button 
-                  onClick={goToNext} 
+                <Button
+                  onClick={goToNext}
                   disabled={currentIndex === proteins.length - 1}
-                  variant="outline" 
+                  variant="outline"
                   size="sm"
                 >
                   <SkipForward className="w-4 h-4" />
@@ -545,56 +602,82 @@ export default function MainCurationInterface() {
           </Card>
 
           {/* Structure Comparison */}
-          {selectedEvidence && (
-            <DualStructureViewer
-              queryPdbId={currentProtein.pdb_id}
-              queryChainId={currentProtein.chain_id}
-              queryDomains={currentProtein.domains}
-              queryRange={selectedEvidence.query_range}
-              
-              referencePdbId={selectedEvidence.ecod_domain_id.substring(1, 5)}
-              referenceChainId={selectedEvidence.ecod_domain_id.charAt(5)}
-              referenceDomainId={selectedEvidence.ecod_domain_id}
-              referenceRange={selectedEvidence.hit_range}
-              hitRange={selectedEvidence.hit_range}
-              
-              onStructuresLoaded={() => setStructuresLoaded(true)}
-              onError={setStructureError}
-            />
-          )}
+          {selectedEvidence && (() => {
+            const evidenceId = getBestEvidenceId(selectedEvidence)
+            const { pdbId, chainId } = parseEcodDomainId(evidenceId)
+
+            if (!pdbId || !chainId) {
+              return (
+                <Card className="p-4 border-yellow-200 bg-yellow-50">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-yellow-600" />
+                    <span className="text-yellow-800">
+                      Cannot parse reference structure from evidence ID: {evidenceId || 'undefined'}
+                    </span>
+                  </div>
+                </Card>
+              )
+            }
+
+            return (
+              <DualStructureViewer
+                queryPdbId={currentProtein.pdb_id}
+                queryChainId={currentProtein.chain_id}
+                queryDomains={currentProtein.domains}
+                queryRange={selectedEvidence.query_range}
+
+                referencePdbId={pdbId}
+                referenceChainId={chainId}
+                referenceDomainId={evidenceId}
+                referenceRange={selectedEvidence.hit_range}
+                hitRange={selectedEvidence.hit_range}
+
+                onStructuresLoaded={() => setStructuresLoaded(true)}
+                onError={setStructureError}
+              />
+            )
+          })()}
 
           {/* Evidence Selection */}
           <Card className="p-4">
             <h4 className="font-medium mb-3">Evidence Selection</h4>
             <div className="space-y-2">
-              {currentProtein.evidence.slice(0, 5).map((evidence, index) => (
-                <button
-                  key={evidence.id || index}
-                  onClick={() => setSelectedEvidence(evidence)}
-                  className={`w-full p-3 text-left rounded border ${
-                    selectedEvidence?.id === evidence.id 
-                      ? 'border-blue-500 bg-blue-50' 
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="font-mono text-sm">{evidence.ecod_domain_id}</div>
-                      <div className="text-xs text-gray-600">
-                        Query: {evidence.query_range} | Hit: {evidence.hit_range}
+              {currentProtein.evidence.slice(0, 5).map((evidence, index) => {
+                const evidenceId = getBestEvidenceId(evidence)
+                const isSelected = selectedEvidence && getBestEvidenceId(selectedEvidence) === evidenceId
+
+                return (
+                  <button
+                    key={evidence.id || index}
+                    onClick={() => setSelectedEvidence(evidence)}
+                    className={`w-full p-3 text-left rounded border ${
+                      isSelected
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="font-mono text-sm">{evidenceId || 'Unknown ID'}</div>
+                        <div className="text-xs text-gray-600">
+                          Query: {evidence.query_range} | Hit: {evidence.hit_range}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Type: {evidence.evidence_type}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-medium">
+                          Conf: {(evidence.confidence * 100).toFixed(1)}%
+                        </div>
+                        <div className="text-xs text-gray-600">
+                          E-val: {evidence.evalue}
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-sm font-medium">
-                        Conf: {(evidence.confidence * 100).toFixed(1)}%
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        E-val: {evidence.evalue}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                )
+              })}
             </div>
           </Card>
 

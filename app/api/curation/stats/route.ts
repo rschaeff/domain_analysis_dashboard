@@ -25,14 +25,15 @@ export async function GET(request: NextRequest) {
 
         -- Curation status
         COUNT(DISTINCT cst.protein_id)::INTEGER as proteins_curated,
-        (SELECT COUNT(*)::INTEGER FROM pdb_analysis.protein p
+        (SELECT COUNT(DISTINCT p.id)::INTEGER FROM pdb_analysis.protein p
          JOIN pdb_analysis.partition_proteins pp ON p.pdb_id = pp.pdb_id AND p.chain_id = pp.chain_id
          JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
          JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
          WHERE de.source_id IS NOT NULL
            AND de.hit_range IS NOT NULL
            AND de.confidence > 0.8
-           AND p.length BETWEEN 30 AND 1000) as total_curable_proteins
+           AND p.length BETWEEN 30 AND 1000
+           AND (p.is_nonident_rep = true OR p.is_nonident_rep IS NULL)) as total_curable_proteins
 
       FROM pdb_analysis.curation_session cs
       LEFT JOIN pdb_analysis.curation_decision cd ON cs.id = cd.session_id

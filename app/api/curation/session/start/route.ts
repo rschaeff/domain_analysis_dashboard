@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       WHERE expires_at < CURRENT_TIMESTAMP
     `)
 
-    // Get next uncurated proteins with good evidence
+    // Get next uncurated proteins with good evidence (filter to representatives)
     const nextProteinsQuery = `
       WITH available_proteins AS (
         SELECT DISTINCT
@@ -45,6 +45,8 @@ export async function POST(request: NextRequest) {
           AND de.confidence > 0.8
           -- Reasonable protein size (not too small/large for curation)
           AND p.length BETWEEN 30 AND 1000
+          -- Filter to representatives only
+          AND (p.is_nonident_rep = true OR p.is_nonident_rep IS NULL)
         GROUP BY p.id, p.source_id, p.pdb_id, p.chain_id, p.length
         HAVING COUNT(DISTINCT de.id) > 0
         ORDER BY best_confidence DESC, evidence_count DESC

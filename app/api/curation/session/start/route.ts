@@ -10,58 +10,59 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Curator name required' }, { status: 400 })
     }
 
-    // Clean up any expired locks
+    // Clean up any expired locks first
     await prisma.$queryRawUnsafe(`
-      DELETE FROM pdb_analysis.protein_locks 
+      DELETE FROM pdb_analysis.protein_locks
       WHERE expires_at < CURRENT_TIMESTAMP
     `)
 
-    // Get next uncurated proteins (excluding locked ones)
+    // Get next uncurated proteins with good evidence
     const nextProteinsQuery = `
       WITH available_proteins AS (
-        SELECT 
+        SELECT DISTINCT
           p.id,
           p.source_id,
           p.pdb_id,
-          p.chain_id
+          p.chain_id,
+          p.length as sequence_length,
+          -- Get the best evidence confidence for prioritization
+          MAX(de.confidence) as best_confidence,
+          COUNT(DISTINCT de.id) as evidence_count
         FROM pdb_analysis.protein p
+        JOIN pdb_analysis.partition_proteins pp ON p.pdb_id = pp.pdb_id AND p.chain_id = pp.chain_id
+        JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
+        JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
         LEFT JOIN pdb_analysis.curation_status cs ON p.id = cs.protein_id
         LEFT JOIN pdb_analysis.protein_locks pl ON p.source_id = pl.source_id
-        WHERE (cs.is_curated IS NULL OR cs.is_curated = false)
-          AND pl.source_id IS NULL  -- Not currently locked
-          AND EXISTS (
-            -- Must have domains to curate
-            SELECT 1 FROM pdb_analysis.partition_domains pd 
-            WHERE pd.protein_id = (
-              SELECT pp.id FROM pdb_analysis.partition_proteins pp 
-              WHERE pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
-            )
-          )
-          AND EXISTS (
-            -- Must have evidence with reference structures
-            SELECT 1 FROM pdb_analysis.partition_domains pd
-            JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-            WHERE pd.protein_id = (
-              SELECT pp.id FROM pdb_analysis.partition_proteins pp 
-              WHERE pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
-            )
-            AND de.pdb_id IS NOT NULL 
-            AND de.chain_id IS NOT NULL
-            AND de.hit_range IS NOT NULL
-          )
-        ORDER BY RANDOM()  -- Random selection for variety
+        WHERE
+          -- Not already curated
+          (cs.is_curated IS NULL OR cs.is_curated = false)
+          -- Not currently locked
+          AND pl.source_id IS NULL
+          -- Has ECOD evidence with structure references
+          AND de.source_id IS NOT NULL
+          AND de.hit_range IS NOT NULL
+          AND de.confidence > 0.8
+          -- Reasonable protein size (not too small/large for curation)
+          AND p.length BETWEEN 30 AND 1000
+        GROUP BY p.id, p.source_id, p.pdb_id, p.chain_id, p.length
+        HAVING COUNT(DISTINCT de.id) > 0
+        ORDER BY best_confidence DESC, evidence_count DESC
         LIMIT $1
       )
-      SELECT * FROM available_proteins
+      SELECT
+        id, source_id, pdb_id, chain_id, sequence_length,
+        best_confidence, evidence_count
+      FROM available_proteins
     `
 
     const availableProteins = await prisma.$queryRawUnsafe(nextProteinsQuery, batch_size)
     const proteins = availableProteins as any[]
 
     if (proteins.length === 0) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         error: 'No proteins available for curation',
-        message: 'All proteins may be curated, locked, or lack reference structures'
+        message: 'All suitable proteins may be curated, locked, or lack good evidence'
       }, { status: 404 })
     }
 
@@ -75,16 +76,16 @@ export async function POST(request: NextRequest) {
 
     const proteinSourceIds = proteins.map(p => p.source_id)
     const sessionResult = await prisma.$queryRawUnsafe(
-      sessionQuery, 
-      curator_name, 
-      batch_size, 
+      sessionQuery,
+      curator_name,
+      batch_size,
       JSON.stringify(proteinSourceIds)
     )
 
     const session = (sessionResult as any[])[0]
 
-    // Lock the proteins
-    const lockQueries = proteinSourceIds.map(sourceId => 
+    // Lock the proteins to this session
+    const lockPromises = proteinSourceIds.map(sourceId =>
       prisma.$queryRawUnsafe(`
         INSERT INTO pdb_analysis.protein_locks (source_id, curator_name, session_id)
         VALUES ($1, $2, $3)
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
       `, sourceId, curator_name, session.id)
     )
 
-    await Promise.all(lockQueries)
+    await Promise.all(lockPromises)
 
     return NextResponse.json({
       session,
@@ -102,64 +103,8 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Error starting curation session:', error)
-    return NextResponse.json({ 
+    return NextResponse.json({
       error: 'Failed to start curation session',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 })
-  }
-}
-
-// app/api/curation/session/[sessionId]/auto-save/route.ts
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { sessionId: string } }
-) {
-  try {
-    const { sessionId } = await params
-    const { current_protein_index, decisions, notes } = await request.json()
-
-    // Update session with auto-save data
-    const updateQuery = `
-      UPDATE pdb_analysis.curation_session 
-      SET 
-        current_protein_index = $1,
-        proteins_reviewed = $2,
-        auto_save_data = $3,
-        notes = $4,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $5
-      RETURNING id, current_protein_index, proteins_reviewed
-    `
-
-    const autoSaveData = {
-      decisions,
-      saved_at: new Date().toISOString(),
-      notes
-    }
-
-    const result = await prisma.$queryRawUnsafe(
-      updateQuery,
-      current_protein_index,
-      decisions.length,
-      JSON.stringify(autoSaveData),
-      notes,
-      parseInt(sessionId)
-    )
-
-    if ((result as any[]).length === 0) {
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      session: (result as any[])[0],
-      auto_saved_at: new Date().toISOString()
-    })
-
-  } catch (error) {
-    console.error('Auto-save error:', error)
-    return NextResponse.json({ 
-      error: 'Failed to auto-save session',
       details: error instanceof Error ? error.message : String(error)
     }, { status: 500 })
   }

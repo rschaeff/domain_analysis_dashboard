@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { DualStructureViewer } from '@/components/curation/DualStructureViewer'
 import { SimpleDualStructureTest } from '@/components/curation/SimpleDualStructureTest'
-import { BatchSelector } '@/components/curation/BatchSelector'
+import { BatchSelector } from '@/components/curation/BatchSelector'
 import {
   Play,
   Pause,

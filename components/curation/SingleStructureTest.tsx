@@ -49,11 +49,48 @@ export function SingleStructureTest({
     setViewerEnabled(false)
   }
 
-  const processedDomains = domains.map((domain, index) => ({
-    ...domain,
-    color: domain.color || '#2563EB',
-    label: `Domain ${index + 1}`
-  }))
+  const processedDomains = domains.map((domain, index) => {
+    console.log(`🔍 SingleTest - Processing domain ${index + 1}:`, {
+      id: domain.id,
+      pdb_range: domain.pdb_range,
+      range: domain.range,
+      start_pos: domain.start_pos,
+      end_pos: domain.end_pos,
+    })
+
+    // Primary: Use pdb_range
+    let displayRange = 'undefined'
+    let ranges: string[] = []
+
+    if (domain.pdb_range) {
+      const cleanRange = domain.pdb_range.includes(':')
+        ? domain.pdb_range.split(':')[1]
+        : domain.pdb_range
+      ranges = cleanRange.split(',').map((r: string) => r.trim()).filter((r: string) => r.includes('-'))
+      displayRange = ranges.join(',')
+    } else if (domain.range) {
+      const cleanRange = domain.range.includes(':')
+        ? domain.range.split(':')[1]
+        : domain.range
+      ranges = cleanRange.split(',').map((r: string) => r.trim()).filter((r: string) => r.includes('-'))
+      displayRange = ranges.join(',')
+    } else {
+      // Fallback to positions
+      const start = domain.start_pos || domain.start || 1
+      const end = domain.end_pos || domain.end || 100
+      ranges = [`${start}-${end}`]
+      displayRange = `${start}-${end}`
+    }
+
+    return {
+      ...domain,
+      id: domain.id || `domain_${index + 1}`,
+      threeDMolRanges: ranges,
+      displayRange: displayRange,
+      color: domain.color || '#2563EB',
+      label: `Domain ${index + 1} (${displayRange})`
+    }
+  })
 
   return (
     <div className="space-y-4">
@@ -62,8 +99,8 @@ export function SingleStructureTest({
         <h3 className="text-lg font-semibold">Single Structure Test</h3>
         <div className="flex items-center gap-2">
           <Badge variant={
-            status === 'loaded' ? 'default' : 
-            status === 'error' ? 'destructive' : 
+            status === 'loaded' ? 'default' :
+            status === 'error' ? 'destructive' :
             status === 'loading' ? 'secondary' : 'outline'
           }>
             {status}
@@ -100,7 +137,7 @@ export function SingleStructureTest({
             <strong>Domain Details:</strong>
             {processedDomains.map((domain, index) => (
               <div key={index} className="text-xs mt-1">
-                {index + 1}: {domain.start}-{domain.end} ({domain.color})
+                {index + 1}: {domain.displayRange} ({domain.color}) {domain.id ? `[${domain.id}]` : ''} | pdb_range: {domain.pdb_range || 'none'}
               </div>
             ))}
           </div>

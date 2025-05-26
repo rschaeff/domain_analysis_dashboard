@@ -1,6 +1,7 @@
+// components/visualization/Debug3DMolViewer.tsx
 'use client'
 
-import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react'
+import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle, useMemo } from 'react'
 
 interface Domain {
   id: string
@@ -107,7 +108,7 @@ const Debug3DMolViewer = forwardRef<any, Debug3DMolViewerProps>(({
       setStatus(`Fetching structure ${pdbId}...`)
       const pdbUrl = `/api/pdb/${pdbId.toLowerCase()}`
       debugLog('Debug3DMolViewer', `Fetching from: ${pdbUrl}`)
-      
+
       const response = await fetch(pdbUrl)
       if (!response.ok) {
         throw new Error(`Failed to fetch PDB: ${response.status} ${response.statusText}`)
@@ -136,25 +137,51 @@ const Debug3DMolViewer = forwardRef<any, Debug3DMolViewerProps>(({
       })
       debugLog('Debug3DMolViewer', 'Basic styles applied')
 
-      // Apply domain styles
+      // Apply domain styles using pdb_range
       if (domains && domains.length > 0) {
         setStatus(`Styling ${domains.length} domains...`)
         domains.forEach((domain, index) => {
-          const domainSelection = {
-            ...selection,
-            resi: `${domain.start}-${domain.end}`
+          // Use threeDMolRanges if available (processed), otherwise try to parse pdb_range
+          let ranges = domain.threeDMolRanges || []
+
+          if (ranges.length === 0 && domain.pdb_range) {
+            // Parse pdb_range on the fly if not pre-processed
+            const cleanRange = domain.pdb_range.includes(':')
+              ? domain.pdb_range.split(':')[1]
+              : domain.pdb_range
+            ranges = cleanRange.split(',').map((r: string) => r.trim()).filter((r: string) => r.includes('-'))
           }
-          
+
+          // Fallback to start-end if no ranges available
+          if (ranges.length === 0 && domain.start && domain.end) {
+            ranges = [`${domain.start}-${domain.end}`]
+          }
+
+          if (ranges.length === 0) {
+            debugLog('Debug3DMolViewer', `⚠️ Domain ${index + 1} has no valid ranges:`, domain)
+            return
+          }
+
           const domainColor = domain.color || '#FF6B35'
-          viewer.setStyle(domainSelection, {
-            cartoon: { color: domainColor },
-            stick: { color: domainColor, radius: 0.3 }
-          })
-          
-          debugLog('Debug3DMolViewer', `Domain ${index + 1} styled`, {
-            id: domain.id,
-            range: `${domain.start}-${domain.end}`,
-            color: domainColor
+
+          // Apply style to each range (handles discontinuous domains)
+          ranges.forEach((range: string, rangeIndex: number) => {
+            const domainSelection = {
+              ...selection,
+              resi: range
+            }
+
+            viewer.setStyle(domainSelection, {
+              cartoon: { color: domainColor },
+              stick: { color: domainColor, radius: 0.3 }
+            })
+
+            debugLog('Debug3DMolViewer', `Domain ${index + 1}, range ${rangeIndex + 1} styled`, {
+              id: domain.id,
+              range: range,
+              color: domainColor,
+              pdb_range: domain.pdb_range
+            })
           })
         })
       }
@@ -194,7 +221,7 @@ const Debug3DMolViewer = forwardRef<any, Debug3DMolViewerProps>(({
       chainId,
       domainCount: domains.length
     })
-    
+
     const timer = setTimeout(() => {
       initializeViewer()
     }, 100) // Small delay to ensure DOM is ready
@@ -206,39 +233,78 @@ const Debug3DMolViewer = forwardRef<any, Debug3DMolViewerProps>(({
   }, [pdbId, chainId]) // Only re-initialize on PDB/chain change
 
   // Re-style when domains change (without full re-initialization)
+  // Use useMemo to prevent unnecessary re-styling
+  const domainSignature = useMemo(() => {
+    return domains.map(d => {
+      const ranges = d.threeDMolRanges || (d.pdb_range ? [d.pdb_range] : [`${d.start || 1}-${d.end || 100}`])
+      return `${d.id}-${ranges.join(',')}-${d.color}`
+    }).join('|')
+  }, [domains])
+
   useEffect(() => {
-    if (viewerRef.current && !loading && !error) {
-      debugLog('Debug3DMolViewer', 'Domains changed - re-styling', domains)
-      
+    if (viewerRef.current && !loading && !error && domainSignature) {
+      debugLog('Debug3DMolViewer', 'Domains changed - re-styling', domains.length)
+
       // Clear existing styles
       let selection: any = {}
       if (chainId) {
         selection.chain = chainId
       }
-      
+
       // Reset to basic style
       viewerRef.current.setStyle(selection, {
         cartoon: { color: 'lightgray' },
         stick: { radius: 0.2 }
       })
-      
-      // Apply domain styles
+
+      // Apply domain styles using pdb_range approach
       domains.forEach((domain, index) => {
-        const domainSelection = {
-          ...selection,
-          resi: `${domain.start}-${domain.end}`
+        // Use threeDMolRanges if available (processed), otherwise try to parse pdb_range
+        let ranges = domain.threeDMolRanges || []
+
+        if (ranges.length === 0 && domain.pdb_range) {
+          // Parse pdb_range on the fly if not pre-processed
+          const cleanRange = domain.pdb_range.includes(':')
+            ? domain.pdb_range.split(':')[1]
+            : domain.pdb_range
+          ranges = cleanRange.split(',').map((r: string) => r.trim()).filter((r: string) => r.includes('-'))
         }
-        
+
+        // Fallback to start-end if no ranges available
+        if (ranges.length === 0 && domain.start && domain.end) {
+          ranges = [`${domain.start}-${domain.end}`]
+        }
+
+        if (ranges.length === 0) {
+          debugLog('Debug3DMolViewer', `⚠️ Domain ${index + 1} has no valid ranges for re-styling:`, domain)
+          return
+        }
+
         const domainColor = domain.color || '#FF6B35'
-        viewerRef.current.setStyle(domainSelection, {
-          cartoon: { color: domainColor },
-          stick: { color: domainColor, radius: 0.3 }
+
+        // Apply style to each range (handles discontinuous domains)
+        ranges.forEach((range: string, rangeIndex: number) => {
+          const domainSelection = {
+            ...selection,
+            resi: range
+          }
+
+          viewerRef.current.setStyle(domainSelection, {
+            cartoon: { color: domainColor },
+            stick: { color: domainColor, radius: 0.3 }
+          })
+
+          debugLog('Debug3DMolViewer', `Re-styled domain ${index + 1}, range ${rangeIndex + 1}:`, {
+            range: range,
+            color: domainColor,
+            pdb_range: domain.pdb_range
+          })
         })
       })
-      
+
       viewerRef.current.render()
     }
-  }, [domains, chainId, loading, error])
+  }, [domainSignature, chainId, loading, error])
 
   return (
     <div className="relative w-full" style={{ height }}>
@@ -248,7 +314,7 @@ const Debug3DMolViewer = forwardRef<any, Debug3DMolViewerProps>(({
         className="w-full h-full border border-gray-200 rounded-lg"
         style={{ minHeight: '300px' }}
       />
-      
+
       {/* Loading overlay */}
       {loading && showLoading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 rounded-lg">
@@ -256,7 +322,7 @@ const Debug3DMolViewer = forwardRef<any, Debug3DMolViewerProps>(({
           <div className="text-sm text-gray-600">{status}</div>
         </div>
       )}
-      
+
       {/* Error overlay */}
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-50/90 rounded-lg">
@@ -272,7 +338,7 @@ const Debug3DMolViewer = forwardRef<any, Debug3DMolViewerProps>(({
           </div>
         </div>
       )}
-      
+
       {/* Debug info */}
       {!loading && !error && (
         <div className="absolute top-2 right-2">
@@ -283,7 +349,17 @@ const Debug3DMolViewer = forwardRef<any, Debug3DMolViewerProps>(({
               <div>Chain: {chainId || 'All'}</div>
               <div>Domains: {domains.length}</div>
               <div>Status: {status}</div>
-              <div>Debug: {JSON.stringify(debugInfo, null, 2)}</div>
+              {domains.length > 0 && (
+                <div className="mt-2">
+                  <strong>Domain Ranges:</strong>
+                  {domains.slice(0, 3).map((d, i) => (
+                    <div key={i} className="text-xs">
+                      {i + 1}: pdb_range={d.pdb_range || 'none'}, ranges={JSON.stringify(d.threeDMolRanges)}
+                    </div>
+                  ))}
+                  {domains.length > 3 && <div>...and {domains.length - 3} more</div>}
+                </div>
+              )}
             </div>
           </details>
         </div>

@@ -4,15 +4,15 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { DualStructureViewer } from '@/components/curation/DualStructureViewer'
-import { SingleStructureTest } from '@/components/curation/SingleStructureTest'
-import { 
-  Play, 
-  Pause, 
-  SkipForward, 
-  SkipBack, 
-  Check, 
-  X, 
-  AlertTriangle, 
+import { SimpleDualStructureTest } from '@/components/curation/SimpleDualStructureTest'
+import {
+  Play,
+  Pause,
+  SkipForward,
+  SkipBack,
+  Check,
+  X,
+  AlertTriangle,
   Clock,
   Save,
   Eye,
@@ -96,6 +96,131 @@ const getBestEvidenceId = (evidence: any): string | null => {
          evidence.domain_ref_id ||
          evidence.hit_id ||
          null
+}
+
+// Parse PDB range string to extract residue ranges for 3DMol styling
+const parsePdbRange = (pdbRange: string | null | undefined): {
+  ranges: string[],
+  displayRange: string,
+  start: number | null,
+  end: number | null
+} => {
+  if (!pdbRange || typeof pdbRange !== 'string') {
+    console.warn('Invalid or missing pdb_range:', pdbRange)
+    return { ranges: [], displayRange: 'undefined', start: null, end: null }
+  }
+
+  try {
+    // Remove chain prefix if present (e.g., "A:25-150" -> "25-150")
+    let cleanRange = pdbRange
+    if (pdbRange.includes(':')) {
+      cleanRange = pdbRange.split(':')[1] || pdbRange
+    }
+
+    // Handle discontinuous ranges (e.g., "1-100,150-200")
+    const segments = cleanRange.split(',').map(s => s.trim()).filter(s => s.length > 0)
+    const validRanges: string[] = []
+    let minStart = Infinity
+    let maxEnd = -Infinity
+
+    for (const segment of segments) {
+      if (segment.includes('-')) {
+        const [startStr, endStr] = segment.split('-')
+        const start = parseInt(startStr?.trim())
+        const end = parseInt(endStr?.trim())
+
+        if (!isNaN(start) && !isNaN(end) && start <= end) {
+          validRanges.push(`${start}-${end}`)
+          minStart = Math.min(minStart, start)
+          maxEnd = Math.max(maxEnd, end)
+        } else {
+          console.warn('Invalid range segment:', segment)
+        }
+      } else {
+        console.warn('Invalid range format (no dash):', segment)
+      }
+    }
+
+    if (validRanges.length === 0) {
+      console.warn('No valid ranges found in:', pdbRange)
+      return { ranges: [], displayRange: pdbRange, start: null, end: null }
+    }
+
+    return {
+      ranges: validRanges,
+      displayRange: validRanges.join(','),
+      start: minStart === Infinity ? null : minStart,
+      end: maxEnd === -Infinity ? null : maxEnd
+    }
+  } catch (error) {
+    console.error('Error parsing pdb_range:', pdbRange, error)
+    return { ranges: [], displayRange: pdbRange, start: null, end: null }
+  }
+}
+
+// Process domain data using pdb_range as the primary source (CORRECT approach)
+const processDomainDataCorrectly = (domains: any[]): any[] => {
+  return domains.map((domain, index) => {
+    console.log(`🔍 Processing domain ${index + 1} - Raw data:`, {
+      id: domain.id,
+      pdb_range: domain.pdb_range,
+      range: domain.range,
+      start_pos: domain.start_pos,
+      end_pos: domain.end_pos,
+      available_fields: Object.keys(domain)
+    })
+
+    // Primary: Use pdb_range
+    let parsedRange = parsePdbRange(domain.pdb_range)
+
+    // Fallback 1: Use range field if pdb_range is not available
+    if (parsedRange.ranges.length === 0 && domain.range) {
+      console.log(`⚠️ Domain ${index + 1}: pdb_range not available, trying range field`)
+      parsedRange = parsePdbRange(domain.range)
+    }
+
+    // Fallback 2: Use start_pos/end_pos if ranges are still not available
+    if (parsedRange.ranges.length === 0) {
+      const start = domain.start_pos || domain.start || 1
+      const end = domain.end_pos || domain.end || 100
+
+      console.log(`⚠️ Domain ${index + 1}: No range fields, using positions:`, { start, end })
+
+      if (start && end && start <= end) {
+        parsedRange = {
+          ranges: [`${start}-${end}`],
+          displayRange: `${start}-${end}`,
+          start: start,
+          end: end
+        }
+      }
+    }
+
+    console.log(`✅ Domain ${index + 1} processed:`, {
+      original_pdb_range: domain.pdb_range,
+      parsed_ranges: parsedRange.ranges,
+      display_range: parsedRange.displayRange,
+      start: parsedRange.start,
+      end: parsedRange.end
+    })
+
+    return {
+      ...domain,
+      id: domain.id || `domain_${index + 1}`,
+      // Keep original fields
+      pdb_range: domain.pdb_range,
+      range: domain.range,
+      start_pos: domain.start_pos,
+      end_pos: domain.end_pos,
+      // Add processed fields for 3DMol
+      threeDMolRanges: parsedRange.ranges,
+      displayRange: parsedRange.displayRange,
+      start: parsedRange.start,
+      end: parsedRange.end,
+      color: domain.color || '#2563EB',
+      label: `Domain ${index + 1} (${parsedRange.displayRange})`
+    }
+  })
 }
 
 export default function MainCurationInterface() {
@@ -189,8 +314,14 @@ export default function MainCurationInterface() {
       }
       const domainsData = await domainsResponse.json()
 
+      // FIXED: Process domains using pdb_range as primary source
+      const processedDomains = processDomainDataCorrectly(domainsData.domains || [])
+
+      console.log('🔍 Original domains from API:', domainsData.domains)
+      console.log('🔍 Processed domains for viewer:', processedDomains)
+
       // Get evidence for the protein
-      const evidencePromises = domainsData.domains.map(async (domain: any) => {
+      const evidencePromises = processedDomains.map(async (domain: any) => {
         const evidenceResponse = await fetch(`/api/domains/${domain.id}/evidence`)
         if (evidenceResponse.ok) {
           const evidence = await evidenceResponse.json()
@@ -209,7 +340,7 @@ export default function MainCurationInterface() {
 
       const proteinWithData = {
         ...protein,
-        domains: domainsData.domains,
+        domains: processedDomains, // Use processed domains
         evidence: allEvidence
       }
 
@@ -603,11 +734,41 @@ export default function MainCurationInterface() {
           </Card>
 
           {/* Structure Comparison */}
-            <SingleStructureTest
-              pdbId={currentProtein.pdb_id}
-              chainId={currentProtein.chain_id}
-              domains={currentProtein.domains}
-            />
+          {selectedEvidence && (() => {
+            const evidenceId = getBestEvidenceId(selectedEvidence)
+            const { pdbId, chainId } = parseEcodDomainId(evidenceId)
+
+            if (!pdbId || !chainId) {
+              return (
+                <Card className="p-4 border-yellow-200 bg-yellow-50">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-yellow-600" />
+                    <span className="text-yellow-800">
+                      Cannot parse reference structure from evidence ID: {evidenceId || 'undefined'}
+                    </span>
+                  </div>
+                </Card>
+              )
+            }
+
+            return (
+              <SimpleDualStructureTest
+                queryPdbId={currentProtein.pdb_id}
+                queryChainId={currentProtein.chain_id}
+                queryDomains={currentProtein.domains}
+                queryRange={selectedEvidence.query_range}
+
+                referencePdbId={pdbId}
+                referenceChainId={chainId}
+                referenceDomainId={evidenceId}
+                referenceRange={selectedEvidence.hit_range}
+                hitRange={selectedEvidence.hit_range}
+
+                onStructuresLoaded={() => setStructuresLoaded(true)}
+                onError={setStructureError}
+              />
+            )
+          })()}
 
           {/* Evidence Selection */}
           <Card className="p-4">

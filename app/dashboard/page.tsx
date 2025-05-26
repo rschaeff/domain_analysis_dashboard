@@ -8,6 +8,8 @@ import { ProteinTable } from '@/components/tables/ProteinTable'
 import { ArchitectureGroupedTable } from '@/components/tables/ArchitectureGroupedTable'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { AuditView } from '@/components/analysis/AuditView'
+import MainCurationInterface from '@/components/curation/MainCurationInterface'
+import { CurationStatsPanel } from '@/components/curation/CurationStatsPanel'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -15,7 +17,8 @@ import {
   Eye, Download, BarChart3, Users, Table, Grid, Layers, List,
   AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
   TrendingUp, Database, Zap, Activity, Clock, Target, Star,
-  FileText, Loader2
+  FileText, Loader2, UserCheck, Edit3, Play, Settings,
+  ArrowRight, TrendingDown, Award, Beaker
 } from 'lucide-react'
 
 // Enhanced statistics interface with all expected fields
@@ -31,6 +34,24 @@ interface DashboardStatistics {
   domains_with_evidence: number
   total_evidence_items: number
   error?: string
+}
+
+interface CurationStatistics {
+  total_sessions: number
+  committed_sessions: number
+  active_sessions: number
+  total_curators: number
+  total_decisions: number
+  proteins_with_domains: number
+  fragments_identified: number
+  repeat_proteins: number
+  flagged_for_review: number
+  avg_confidence_level: number
+  avg_review_time_seconds: number
+  proteins_curated: number
+  total_curable_proteins: number
+  completion_percentage: number
+  remaining_proteins: number
 }
 
 interface ProteinSummary {
@@ -67,6 +88,9 @@ interface ProteinSummary {
   evidence_quality: string
 }
 
+// Enhanced view mode type
+type ViewMode = 'proteins' | 'architecture' | 'audit' | 'curation'
+
 // Safe number formatting helper
 const safeToLocaleString = (value: number | undefined | null): string => {
   if (value === undefined || value === null || isNaN(value)) {
@@ -95,7 +119,7 @@ function useUrlState() {
       size: parseInt(searchParams.get('size') || '50'),
       sort: searchParams.get('sort') || 'recent',
       sortDirection: (searchParams.get('sort_dir') || 'desc') as 'asc' | 'desc',
-      viewMode: (searchParams.get('view') || 'proteins') as 'proteins' | 'architecture' | 'audit',
+      viewMode: (searchParams.get('view') || 'proteins') as ViewMode,
       filters: {} as DomainFilters
     }
 
@@ -245,6 +269,26 @@ export default function EnhancedDashboard() {
     total_evidence_items: 0
   })
 
+  // Curation-specific state
+  const [curationStats, setCurationStats] = useState<CurationStatistics>({
+    total_sessions: 0,
+    committed_sessions: 0,
+    active_sessions: 0,
+    total_curators: 0,
+    total_decisions: 0,
+    proteins_with_domains: 0,
+    fragments_identified: 0,
+    repeat_proteins: 0,
+    flagged_for_review: 0,
+    avg_confidence_level: 0,
+    avg_review_time_seconds: 0,
+    proteins_curated: 0,
+    total_curable_proteins: 0,
+    completion_percentage: 0,
+    remaining_proteins: 0
+  })
+  const [curationStatsLoading, setCurationStatsLoading] = useState(false)
+
   // Simplified audit state - just for the alert
   const [auditIssues, setAuditIssues] = useState(0)
 
@@ -291,6 +335,41 @@ export default function EnhancedDashboard() {
       setError('Failed to load dashboard statistics')
     } finally {
       setStatisticsLoading(false)
+    }
+  }, [])
+
+  // Fetch curation statistics
+  const fetchCurationStats = useCallback(async () => {
+    setCurationStatsLoading(true)
+    try {
+      const response = await fetch('/api/curation/stats')
+      if (response.ok) {
+        const data = await response.json()
+
+        const safeCurationStats: CurationStatistics = {
+          total_sessions: Number(data.statistics?.total_sessions || 0),
+          committed_sessions: Number(data.statistics?.committed_sessions || 0),
+          active_sessions: Number(data.statistics?.active_sessions || 0),
+          total_curators: Number(data.statistics?.total_curators || 0),
+          total_decisions: Number(data.statistics?.total_decisions || 0),
+          proteins_with_domains: Number(data.statistics?.proteins_with_domains || 0),
+          fragments_identified: Number(data.statistics?.fragments_identified || 0),
+          repeat_proteins: Number(data.statistics?.repeat_proteins || 0),
+          flagged_for_review: Number(data.statistics?.flagged_for_review || 0),
+          avg_confidence_level: Number(data.statistics?.avg_confidence_level || 0),
+          avg_review_time_seconds: Number(data.statistics?.avg_review_time_seconds || 0),
+          proteins_curated: Number(data.statistics?.proteins_curated || 0),
+          total_curable_proteins: Number(data.statistics?.total_curable_proteins || 0),
+          completion_percentage: Number(data.statistics?.completion_percentage || 0),
+          remaining_proteins: Number(data.statistics?.remaining_proteins || 0)
+        }
+
+        setCurationStats(safeCurationStats)
+      }
+    } catch (err) {
+      console.error('Error fetching curation stats:', err)
+    } finally {
+      setCurationStatsLoading(false)
     }
   }, [])
 
@@ -428,7 +507,7 @@ export default function EnhancedDashboard() {
     })
   }, [updateUrl, sortBy, sortDirection])
 
-  const handleViewModeChange = useCallback((mode: 'proteins' | 'architecture' | 'audit') => {
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
     updateUrl({
       viewMode: mode,
       page: 1 // Reset page when changing views
@@ -439,6 +518,30 @@ export default function EnhancedDashboard() {
     // Open in new tab to preserve dashboard state
     window.open(`/protein/${protein.source_id}`, '_blank')
   }, [])
+
+  // Quick start curation handler
+  const handleQuickStartCuration = useCallback(async () => {
+    try {
+      const response = await fetch('/api/curation/session/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          curator_name: 'Dashboard User', // Could get from user context
+          batch_size: 10
+        })
+      })
+
+      if (response.ok) {
+        handleViewModeChange('curation')
+      } else {
+        const error = await response.json()
+        alert(`Failed to start curation session: ${error.error}`)
+      }
+    } catch (err) {
+      console.error('Error starting curation:', err)
+      alert('Failed to start curation session')
+    }
+  }, [handleViewModeChange])
 
   // Trigger fetches when URL state changes
   useEffect(() => {
@@ -453,18 +556,25 @@ export default function EnhancedDashboard() {
   useEffect(() => {
     fetchDashboardStats()
     checkAuditIssues()
-  }, [fetchDashboardStats, checkAuditIssues])
+    fetchCurationStats()
+  }, [fetchDashboardStats, checkAuditIssues, fetchCurationStats])
+
+  // Auto-refresh curation stats
+  useEffect(() => {
+    const interval = setInterval(fetchCurationStats, 30000) // Every 30 seconds
+    return () => clearInterval(interval)
+  }, [fetchCurationStats])
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="space-y-6">
-          {/* Header */}
+          {/* Enhanced Header with Curation */}
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Domain Analysis Dashboard</h1>
               <p className="text-gray-600 mt-1">
-                Analyze protein domain architectures, classifications, and pipeline health
+                Analyze protein domain architectures, classifications, and perform manual curation
               </p>
             </div>
 
@@ -482,6 +592,7 @@ export default function EnhancedDashboard() {
                   </Badge>
                 )}
               </Button>
+
               <Button
                 variant={viewMode === 'architecture' ? 'default' : 'outline'}
                 onClick={() => handleViewModeChange('architecture')}
@@ -490,6 +601,26 @@ export default function EnhancedDashboard() {
                 <Layers className="w-4 h-4" />
                 Architecture
               </Button>
+
+              <Button
+                variant={viewMode === 'curation' ? 'default' : 'outline'}
+                onClick={() => handleViewModeChange('curation')}
+                className="flex items-center gap-2"
+              >
+                <UserCheck className="w-4 h-4" />
+                Curation
+                {curationStats.active_sessions > 0 && (
+                  <Badge variant="default" className="ml-1 bg-green-600">
+                    {curationStats.active_sessions}
+                  </Badge>
+                )}
+                {curationStats.remaining_proteins > 0 && viewMode !== 'curation' && (
+                  <Badge variant="outline" className="ml-1">
+                    {curationStats.remaining_proteins.toLocaleString()} pending
+                  </Badge>
+                )}
+              </Button>
+
               <Button
                 variant={viewMode === 'audit' ? 'default' : 'outline'}
                 onClick={() => handleViewModeChange('audit')}
@@ -503,18 +634,21 @@ export default function EnhancedDashboard() {
                   </Badge>
                 )}
               </Button>
+
               <Button
                 variant="outline"
                 className="flex items-center gap-2"
                 onClick={() => {
                   fetchDashboardStats()
                   checkAuditIssues()
+                  fetchCurationStats()
                 }}
                 disabled={statisticsLoading}
               >
                 <RefreshCw className={`w-4 h-4 ${statisticsLoading ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
+
               <Button variant="outline" className="flex items-center gap-2">
                 <Download className="w-4 h-4" />
                 Export
@@ -543,8 +677,9 @@ export default function EnhancedDashboard() {
             </Card>
           )}
 
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Enhanced Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+            {/* Core Statistics Cards */}
             <Card className="p-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -583,14 +718,17 @@ export default function EnhancedDashboard() {
             <Card className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-2xl font-bold text-purple-600">
+                  <div className="text-xl font-bold text-purple-600">
                     {statisticsLoading ? (
-                      <div className="animate-pulse bg-gray-200 h-8 w-24 rounded"></div>
+                      <div className="animate-pulse bg-gray-200 h-6 w-20 rounded"></div>
                     ) : (
-                      `${safeToLocaleString(statistics.classified_chains)} (${safePercentage(statistics.classified_chains, statistics.total_proteins)}%)`
+                      `${safePercentage(statistics.classified_chains, statistics.total_proteins)}%`
                     )}
                   </div>
-                  <div className="text-sm text-gray-600">Classified Proteins</div>
+                  <div className="text-sm text-gray-600">Classified</div>
+                  <div className="text-xs text-gray-500">
+                    {safeToLocaleString(statistics.classified_chains)} of {safeToLocaleString(statistics.total_proteins)}
+                  </div>
                 </div>
                 <CheckCircle className="w-8 h-8 text-purple-600 opacity-20" />
               </div>
@@ -611,74 +749,118 @@ export default function EnhancedDashboard() {
                 <Activity className="w-8 h-8 text-orange-600 opacity-20" />
               </div>
             </Card>
-          </div>
 
-          {/* Additional Statistics Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="p-4">
+            {/* Curation Statistics Cards */}
+            <Card className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-lg font-bold text-indigo-600">
-                    {statisticsLoading ? (
-                      <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
+                  <div className="text-2xl font-bold text-emerald-600">
+                    {curationStatsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
                     ) : (
-                      safeToLocaleString(statistics.classified_domains)
+                      safeToLocaleString(curationStats.proteins_curated)
                     )}
                   </div>
-                  <div className="text-xs text-gray-600">Classified Domains</div>
+                  <div className="text-sm text-gray-600">Curated</div>
+                  {curationStats.completion_percentage > 0 && (
+                    <div className="text-xs text-gray-500">
+                      {curationStats.completion_percentage.toFixed(1)}% complete
+                    </div>
+                  )}
                 </div>
-                <Target className="w-6 h-6 text-indigo-600 opacity-20" />
+                <UserCheck className="w-8 h-8 text-emerald-600 opacity-20" />
               </div>
             </Card>
 
-            <Card className="p-4">
+            <Card className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-lg font-bold text-teal-600">
-                    {statisticsLoading ? (
-                      <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
+                  <div className="text-2xl font-bold text-cyan-600">
+                    {curationStatsLoading ? (
+                      <div className="animate-pulse bg-gray-200 h-8 w-12 rounded"></div>
                     ) : (
-                      safeToLocaleString(statistics.domains_with_evidence)
+                      curationStats.active_sessions
                     )}
                   </div>
-                  <div className="text-xs text-gray-600">Domains with Evidence</div>
+                  <div className="text-sm text-gray-600">Active Sessions</div>
+                  {curationStats.active_sessions > 0 && (
+                    <div className="flex items-center mt-1">
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-1"></div>
+                      <span className="text-xs text-green-600">
+                        {curationStats.total_curators} curator{curationStats.total_curators > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <FileText className="w-6 h-6 text-teal-600 opacity-20" />
-              </div>
-            </Card>
-
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-lg font-bold text-cyan-600">
-                    {statisticsLoading ? (
-                      <div className="animate-pulse bg-gray-200 h-6 w-12 rounded"></div>
-                    ) : (
-                      `${(statistics.avg_confidence * 100).toFixed(1)}%`
-                    )}
-                  </div>
-                  <div className="text-xs text-gray-600">Avg Confidence</div>
-                </div>
-                <Star className="w-6 h-6 text-cyan-600 opacity-20" />
-              </div>
-            </Card>
-
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-lg font-bold text-emerald-600">
-                    {statisticsLoading ? (
-                      <div className="animate-pulse bg-gray-200 h-6 w-16 rounded"></div>
-                    ) : (
-                      safeToLocaleString(statistics.total_evidence_items)
-                    )}
-                  </div>
-                  <div className="text-xs text-gray-600">Evidence Items</div>
-                </div>
-                <BarChart3 className="w-6 h-6 text-emerald-600 opacity-20" />
+                <Edit3 className="w-8 h-8 text-cyan-600 opacity-20" />
               </div>
             </Card>
           </div>
+
+          {/* Curation Quick Actions */}
+          {viewMode !== 'curation' && (
+            <>
+              {curationStats.active_sessions === 0 && curationStats.remaining_proteins > 0 && (
+                <Card className="p-4 border-green-200 bg-green-50">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <UserCheck className="w-5 h-5 text-green-600" />
+                      <div>
+                        <div className="font-medium text-green-800">
+                          Ready for Curation
+                        </div>
+                        <div className="text-sm text-green-700">
+                          {curationStats.remaining_proteins.toLocaleString()} proteins available for manual review
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => handleViewModeChange('curation')}
+                        className="border-green-300 text-green-700 hover:bg-green-100"
+                      >
+                        View Curation
+                      </Button>
+                      <Button
+                        onClick={handleQuickStartCuration}
+                        className="bg-green-600 hover:bg-green-700 flex items-center gap-2"
+                      >
+                        <Play className="w-4 h-4" />
+                        Start Session
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {curationStats.active_sessions > 0 && (
+                <Card className="p-4 border-blue-200 bg-blue-50">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Edit3 className="w-5 h-5 text-blue-600" />
+                      <div>
+                        <div className="font-medium text-blue-800">
+                          {curationStats.active_sessions} Active Curation Session{curationStats.active_sessions > 1 ? 's' : ''}
+                        </div>
+                        <div className="text-sm text-blue-700">
+                          {curationStats.total_curators} curator{curationStats.total_curators > 1 ? 's' : ''} currently reviewing proteins
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => handleViewModeChange('curation')}
+                      className="border-blue-300 text-blue-700 hover:bg-blue-100 flex items-center gap-2"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      Join Curation
+                    </Button>
+                  </div>
+                </Card>
+              )}
+            </>
+          )}
 
           {/* Audit Alert (only show if there are issues and not in audit view) */}
           {viewMode !== 'audit' && auditIssues > 0 && (
@@ -707,93 +889,113 @@ export default function EnhancedDashboard() {
             </Card>
           )}
 
-          {/* Filters and Sorting (hide for audit view) */}
-          {viewMode !== 'audit' && (
-            <div className="space-y-4">
-              {/* Filters */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg">
-                <FilterPanel
-                  filters={filters}
-                  onFiltersChange={handleFiltersChange}
-                  onReset={handleResetFilters}
-                  loading={loading}
-                  showAppliedCount={true}
-                />
-              </div>
-
-              {/* Sorting Controls for Protein View */}
-              {viewMode === 'proteins' && (
-                <Card className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm font-medium text-gray-700">Sort by:</span>
-                      <div className="flex gap-2">
-                        {[
-                          { key: 'recent', label: 'Most Recent', icon: Clock },
-                          { key: 'batch', label: 'Latest Batch', icon: Grid },
-                          { key: 'confidence', label: 'Confidence', icon: Star },
-                          { key: 'coverage', label: 'Coverage', icon: Activity },
-                          { key: 'domains', label: 'Domains', icon: Layers }
-                        ].map(({ key, label, icon: IconComponent }) => (
-                          <Button
-                            key={key}
-                            size="sm"
-                            variant={sortBy === key ? 'default' : 'outline'}
-                            onClick={() => handleSortChange(key)}
-                            className="flex items-center gap-1"
-                            disabled={loading}
-                          >
-                            <IconComponent className="w-4 h-4" />
-                            {label}
-                            {sortBy === key && (
-                              <span className="ml-1">
-                                {sortDirection === 'desc' ? '↓' : '↑'}
-                              </span>
-                            )}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="text-sm text-gray-500">
-                      Showing page {pagination.page} of {Math.ceil(pagination.total / pagination.size)}
-                      {loading && (
-                        <span className="ml-2 inline-flex items-center gap-1">
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          Loading...
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              )}
-            </div>
-          )}
-
           {/* Main Content */}
-          {loading && viewMode === 'proteins' ? (
-            <Card className="p-8 text-center">
-              <LoadingSpinner />
-              <p className="mt-4 text-gray-600">Loading data...</p>
-            </Card>
-          ) : viewMode === 'proteins' ? (
-            <ProteinTable
-              proteins={proteins}
-              pagination={pagination}
-              onPageChange={handlePageChange}
-              onProteinClick={handleProteinClick}
-              loading={loading}
-            />
-          ) : viewMode === 'architecture' ? (
-            <ArchitectureGroupedTable
-              architectureGroups={architectureGroups}
-              onProteinClick={handleProteinClick}
-              onDomainClick={() => {}} // TODO: implement
-              renderClassificationBadge={() => <></> } // TODO: implement
-              loading={loading}
-            />
+          {viewMode === 'curation' ? (
+            <div className="space-y-4">
+              {/* Curation Stats Panel */}
+              <CurationStatsPanel />
+
+              {/* Main Curation Interface */}
+              <MainCurationInterface />
+            </div>
           ) : (
-            <AuditView />
+            <>
+              {/* Filters and Sorting (hide for audit view) */}
+              {viewMode !== 'audit' && (
+                <div className="space-y-4">
+                  {/* Filters */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg">
+                    <FilterPanel
+                      filters={filters}
+                      onFiltersChange={handleFiltersChange}
+                      onReset={handleResetFilters}
+                      loading={loading}
+                      showAppliedCount={true}
+                    />
+                  </div>
+
+                  {/* Sorting Controls for Protein View */}
+                  {viewMode === 'proteins' && (
+                    <Card className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <span className="text-sm font-medium text-gray-700">Sort by:</span>
+                          <div className="flex gap-2">
+                            {[
+                              { key: 'recent', label: 'Most Recent', icon: Clock },
+                              { key: 'batch', label: 'Latest Batch', icon: Grid },
+                              { key: 'confidence', label: 'Confidence', icon: Star },
+                              { key: 'coverage', label: 'Coverage', icon: Activity },
+                              { key: 'domains', label: 'Domains', icon: Layers }
+                            ].map(({ key, label, icon: IconComponent }) => (
+                              <Button
+                                key={key}
+                                size="sm"
+                                variant={sortBy === key ? 'default' : 'outline'}
+                                onClick={() => handleSortChange(key)}
+                                className="flex items-center gap-1"
+                                disabled={loading}
+                              >
+                                <IconComponent className="w-4 h-4" />
+                                {label}
+                                {sortBy === key && (
+                                  <span className="ml-1">
+                                    {sortDirection === 'desc' ? '↓' : '↑'}
+                                  </span>
+                                )}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="text-sm text-gray-500">
+                          Showing page {pagination.page} of {Math.ceil(pagination.total / pagination.size)}
+                          {loading && (
+                            <span className="ml-2 inline-flex items-center gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Loading...
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              )}
+
+              {/* Content based on view mode */}
+              {loading && viewMode === 'proteins' ? (
+                <Card className="p-8 text-center">
+                  <LoadingSpinner />
+                  <p className="mt-4 text-gray-600">Loading protein data...</p>
+                </Card>
+              ) : viewMode === 'proteins' ? (
+                <ProteinTable
+                  proteins={proteins}
+                  pagination={pagination}
+                  onPageChange={handlePageChange}
+                  onProteinClick={handleProteinClick}
+                  loading={loading}
+                />
+              ) : viewMode === 'architecture' ? (
+                loading ? (
+                  <Card className="p-8 text-center">
+                    <LoadingSpinner />
+                    <p className="mt-4 text-gray-600">Loading architecture data...</p>
+                  </Card>
+                ) : (
+                  <ArchitectureGroupedTable
+                    architectureGroups={architectureGroups}
+                    onProteinClick={handleProteinClick}
+                    onDomainClick={() => {}} // TODO: implement
+                    renderClassificationBadge={() => <></>} // TODO: implement
+                    loading={loading}
+                  />
+                )
+              ) : (
+                <AuditView />
+              )}
+            </>
           )}
         </div>
       </div>

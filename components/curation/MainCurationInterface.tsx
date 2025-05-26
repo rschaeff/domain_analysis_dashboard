@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { DualStructureViewer } from '@/components/curation/DualStructureViewer'
 import { SimpleDualStructureTest } from '@/components/curation/SimpleDualStructureTest'
+import { BatchSelector } '@/components/curation/BatchSelector'
 import {
   Play,
   Pause,
@@ -308,7 +309,10 @@ export default function MainCurationInterface() {
 
     try {
       // Get protein details with domains
-      const domainsResponse = await fetch(`/api/proteins/${protein.source_id}/domains`)
+      const url = protein.batch_id
+      ? `/api/proteins/${protein.source_id}/domains?batch_id=${protein.batch_id}`
+      : `/api/proteins/${protein.source_id}/domains`
+      const domainsResponse = await fetch(url)
       if (!domainsResponse.ok) {
         throw new Error('Failed to load protein domains')
       }
@@ -572,6 +576,12 @@ export default function MainCurationInterface() {
                   disabled={isStartingSession}
                 />
               </div>
+
+              <BatchSelector
+                onBatchSelect={setSelectedBatchId}
+                currentBatchId={selectedBatchId}
+                showStats={true}
+              />
 
               <Button
                 onClick={startCurationSession}

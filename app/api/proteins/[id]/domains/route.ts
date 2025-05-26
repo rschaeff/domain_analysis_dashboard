@@ -2,29 +2,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
-// Robust BigInt serializer (keeping your existing one)
-function serializeBigInt(obj: any): any {
+// Use your existing BigInt converter
+function convertBigIntToNumber(obj: any): any {
   if (obj === null || obj === undefined) {
-    return obj;
+    return obj
   }
 
   if (typeof obj === 'bigint') {
-    return Number(obj);
+    return Number(obj)
   }
 
   if (Array.isArray(obj)) {
-    return obj.map(serializeBigInt);
+    return obj.map(convertBigIntToNumber)
   }
 
   if (typeof obj === 'object') {
-    const result: any = {};
+    const converted: any = {}
     for (const [key, value] of Object.entries(obj)) {
-      result[key] = serializeBigInt(value);
+      converted[key] = convertBigIntToNumber(value)
     }
-    return result;
+    return converted
   }
 
-  return obj;
+  return obj
 }
 
 export async function GET(
@@ -35,11 +35,9 @@ export async function GET(
     const { id } = await params
     const { searchParams } = new URL(request.url)
 
-    // Extract query parameters
+    // Get batch_id parameter if provided
     const batchId = searchParams.get('batch_id')
-    const groupByBatch = searchParams.get('group_by_batch') === 'true'
-    const includeAllBatches = searchParams.get('include_all_batches') === 'true'
-    const latestOnly = searchParams.get('latest_only') !== 'false' // Default to true
+    const includeBatchInfo = searchParams.get('include_batch_info') !== 'false'
 
     let pdbId: string
     let chainId: string
@@ -62,173 +60,24 @@ export async function GET(
       )
     }
 
-    // First, check if protein exists in multiple batches
-    const batchCheckQuery = `
-      SELECT DISTINCT
-        CAST(pp.batch_id AS INTEGER) as batch_id,
-        pb.batch_name,
-        pb.reference_version,
-        pb.created_date as batch_created_date,
-        pp.timestamp as processing_date,
-        CAST(pp.id AS INTEGER) as processing_id
-      FROM pdb_analysis.partition_proteins pp
-      LEFT JOIN pdb_analysis.processing_batches pb ON pp.batch_id = pb.id
-      WHERE pp.pdb_id = $1 AND pp.chain_id = $2
-      ORDER BY pp.timestamp DESC
-    `
-
-    const batchCheckResult = await prisma.$queryRawUnsafe(batchCheckQuery, pdbId, chainId)
-    const availableBatches = serializeBigInt(batchCheckResult)
-
-    if (!availableBatches || availableBatches.length === 0) {
-      return NextResponse.json(
-        { error: `Protein not found in pipeline: ${id}` },
-        { status: 404 }
-      )
-    }
-
-    // If groupByBatch is true, return domains grouped by batch
-    if (groupByBatch && !batchId) {
-      const groupedDomainsQuery = `
-        WITH batch_proteins AS (
-          SELECT
-            CAST(pp.id AS INTEGER) as processing_id,
-            pp.pdb_id,
-            pp.chain_id,
-            CAST(pp.batch_id AS INTEGER) as batch_id,
-            pp.reference_version,
-            pp.timestamp as processing_date,
-            CAST(pp.sequence_length AS INTEGER) as sequence_length,
-            pp.is_classified,
-            pp.coverage,
-            pb.batch_name,
-            pb.created_date as batch_created_date
-          FROM pdb_analysis.partition_proteins pp
-          LEFT JOIN pdb_analysis.processing_batches pb ON pp.batch_id = pb.id
-          WHERE pp.pdb_id = $1 AND pp.chain_id = $2
-        )
+    // Check for multiple batches if needed
+    let batchInfo: any = null
+    if (includeBatchInfo) {
+      const batchCheckQuery = `
         SELECT
-          bp.*,
-          CAST(pd.id AS INTEGER) as domain_id,
-          CAST(pd.domain_number AS INTEGER) as domain_number,
-          pd.domain_id as domain_identifier,
-          CAST(pd.start_pos AS INTEGER) as start_pos,
-          CAST(pd.end_pos AS INTEGER) as end_pos,
-          pd.range,
-          pd.pdb_range,
-          pd.pdb_start,
-          pd.pdb_end,
-          pd.source,
-          pd.source_id,
-          pd.confidence,
-          pd.t_group,
-          tc.name as t_group_name,
-          pd.h_group,
-          hc.name as h_group_name,
-          pd.x_group,
-          xc.name as x_group_name,
-          pd.a_group,
-          CAST(pd.length AS INTEGER) as length
-        FROM batch_proteins bp
-        JOIN pdb_analysis.partition_domains pd ON pd.protein_id = bp.processing_id
-        LEFT JOIN pdb_analysis.t_classification tc ON pd.t_group = tc.t_id
-        LEFT JOIN pdb_analysis.h_classification hc ON pd.h_group = hc.h_id
-        LEFT JOIN pdb_analysis.x_classification xc ON pd.x_group = xc.x_id
-        ORDER BY bp.batch_id DESC, pd.domain_number
+          COUNT(DISTINCT pp.batch_id) as batch_count,
+          array_agg(DISTINCT pp.batch_id ORDER BY pp.batch_id DESC) as batch_ids,
+          array_agg(DISTINCT b.batch_name ORDER BY pp.batch_id DESC) as batch_names,
+          array_agg(DISTINCT b.type ORDER BY pp.batch_id DESC) as batch_types
+        FROM pdb_analysis.partition_proteins pp
+        LEFT JOIN ecod_schema.batch b ON pp.batch_id = b.id
+        WHERE pp.pdb_id = $1 AND pp.chain_id = $2
       `
-
-      const groupedResult = await prisma.$queryRawUnsafe(groupedDomainsQuery, pdbId, chainId)
-      const groupedDomains = serializeBigInt(groupedResult)
-
-      // Group by batch
-      const domainsByBatch = groupedDomains.reduce((acc: any, row: any) => {
-        const batchKey = `batch_${row.batch_id}`
-
-        if (!acc[batchKey]) {
-          acc[batchKey] = {
-            batch_id: row.batch_id,
-            batch_name: row.batch_name,
-            reference_version: row.reference_version,
-            processing_date: row.processing_date,
-            batch_created_date: row.batch_created_date,
-            protein: {
-              processing_id: row.processing_id,
-              pdb_id: row.pdb_id,
-              chain_id: row.chain_id,
-              source_id: `${row.pdb_id}_${row.chain_id}`,
-              sequence_length: row.sequence_length,
-              is_classified: row.is_classified,
-              coverage: row.coverage
-            },
-            domains: []
-          }
-        }
-
-        acc[batchKey].domains.push({
-          id: row.domain_id,
-          protein_id: row.processing_id,
-          domain_number: row.domain_number,
-          domain_id: row.domain_identifier,
-          start_pos: row.start_pos,
-          end_pos: row.end_pos,
-          range: row.range,
-          pdb_range: row.pdb_range,
-          pdb_start: row.pdb_start,
-          pdb_end: row.pdb_end,
-          source: row.source,
-          source_id: row.source_id,
-          confidence: row.confidence,
-          t_group: row.t_group,
-          t_group_name: row.t_group_name,
-          h_group: row.h_group,
-          h_group_name: row.h_group_name,
-          x_group: row.x_group,
-          x_group_name: row.x_group_name,
-          a_group: row.a_group,
-          length: row.length
-        })
-
-        return acc
-      }, {})
-
-      return NextResponse.json({
-        protein: {
-          source_id: `${pdbId}_${chainId}`,
-          pdb_id: pdbId,
-          chain_id: chainId,
-          available_batches: availableBatches
-        },
-        batches: Object.values(domainsByBatch),
-        metadata: {
-          grouped_by_batch: true,
-          total_batches: Object.keys(domainsByBatch).length,
-          total_domains: groupedDomains.length,
-          bigint_serialized: true,
-          includes_classification_names: true
-        }
-      })
+      const batchCheckResult = await prisma.$queryRawUnsafe(batchCheckQuery, pdbId, chainId)
+      batchInfo = convertBigIntToNumber(batchCheckResult)[0]
     }
 
-    // Standard mode: get domains for a specific batch or latest
-    let targetBatchId = batchId ? parseInt(batchId) : null
-    let targetProtein = null
-
-    if (targetBatchId) {
-      // Find the protein in the specified batch
-      targetProtein = availableBatches.find((b: any) => b.batch_id === targetBatchId)
-      if (!targetProtein) {
-        return NextResponse.json(
-          { error: `Protein ${id} not found in batch ${targetBatchId}` },
-          { status: 404 }
-        )
-      }
-    } else if (latestOnly || availableBatches.length === 1) {
-      // Use the latest (first) batch
-      targetProtein = availableBatches[0]
-      targetBatchId = targetProtein.batch_id
-    }
-
-    // Get protein details for the selected batch
+    // Get protein with batch filtering
     const proteinQuery = `
       SELECT
         CAST(pp.id AS INTEGER) as processing_id,
@@ -241,18 +90,35 @@ export async function GET(
         CAST(pp.sequence_length AS INTEGER) as sequence_length,
         pp.is_classified,
         pp.coverage,
-        pb.batch_name,
-        pb.created_date as batch_created_date
+        b.batch_name,
+        b.type as batch_type,
+        b.status as batch_status
       FROM pdb_analysis.partition_proteins pp
-      LEFT JOIN pdb_analysis.processing_batches pb ON pp.batch_id = pb.id
-      WHERE pp.pdb_id = $1 AND pp.chain_id = $2 AND pp.batch_id = $3
+      LEFT JOIN ecod_schema.batch b ON pp.batch_id = b.id
+      WHERE pp.pdb_id = $1 AND pp.chain_id = $2
+      ${batchId ? 'AND pp.batch_id = $3' : ''}
+      ORDER BY pp.timestamp DESC
+      LIMIT 1
     `
 
-    const proteinResult = await prisma.$queryRawUnsafe(proteinQuery, pdbId, chainId, targetBatchId)
-    const serializedProteinResult = serializeBigInt(proteinResult)
+    const queryParams = batchId ? [pdbId, chainId, parseInt(batchId)] : [pdbId, chainId]
+    const proteinResult = await prisma.$queryRawUnsafe(proteinQuery, ...queryParams)
+    const serializedProteinResult = convertBigIntToNumber(proteinResult)
+
+    if (!serializedProteinResult || serializedProteinResult.length === 0) {
+      return NextResponse.json(
+        {
+          error: batchId
+            ? `Protein not found in batch ${batchId}: ${id}`
+            : `Protein not found in pipeline: ${id}`
+        },
+        { status: 404 }
+      )
+    }
+
     const protein = serializedProteinResult[0]
 
-    // Get domains with classification names
+    // Get domains using the specific protein.id (ensures batch consistency)
     const domainsQuery = `
       SELECT
         CAST(pd.id AS INTEGER) as id,
@@ -290,9 +156,9 @@ export async function GET(
     `
 
     const domainsResult = await prisma.$queryRawUnsafe(domainsQuery, protein.processing_id)
-    const domains = serializeBigInt(domainsResult)
+    const domains = convertBigIntToNumber(domainsResult)
 
-    // Get evidence with classification names
+    // Get evidence with all available scoring data and classification names
     const evidenceQuery = `
       SELECT
         CAST(de.domain_id AS INTEGER) as domain_id,
@@ -328,7 +194,7 @@ export async function GET(
     `
 
     const evidenceResult = await prisma.$queryRawUnsafe(evidenceQuery, protein.processing_id)
-    const evidence = serializeBigInt(evidenceResult)
+    const evidence = convertBigIntToNumber(evidenceResult)
 
     // Group evidence by domain
     const evidenceByDomain = evidence.reduce((acc: any, ev: any) => {
@@ -352,35 +218,35 @@ export async function GET(
       protein: {
         ...protein,
         domain_count: actualDomainCount,
-        total_evidence_items: totalEvidenceItems,
-        // Include information about other batches if requested
-        ...(includeAllBatches && availableBatches.length > 1 ? {
-          available_batches: availableBatches,
-          is_multi_batch: true
-        } : {})
+        total_evidence_items: totalEvidenceItems
       },
       domains: processedDomains,
       metadata: {
         source: 'partition_domains_direct',
         data_architecture: 'pipeline_native',
-        batch_id: protein.batch_id,
-        batch_name: protein.batch_name,
-        reference_version: protein.reference_version,
-        processing_date: protein.processing_date,
         total_domains: actualDomainCount,
         total_evidence_items: totalEvidenceItems,
         bigint_serialized: true,
         includes_classification_names: true,
-        // Alert if multiple batches exist
-        ...(availableBatches.length > 1 && !batchId ? {
-          warning: `Protein exists in ${availableBatches.length} batches. Showing latest batch (${protein.batch_id}). Use batch_id parameter to specify.`,
-          available_batch_ids: availableBatches.map((b: any) => b.batch_id)
+        batch_id: protein.batch_id,
+        batch_name: protein.batch_name,
+        batch_type: protein.batch_type,
+        reference_version: protein.reference_version,
+        processing_date: protein.processing_date,
+        // Add warning if protein exists in multiple batches and no batch specified
+        ...(batchInfo && batchInfo.batch_count > 1 && !batchId ? {
+          warning: `Protein exists in ${batchInfo.batch_count} batches. Showing latest batch (${protein.batch_id}). Use batch_id parameter to specify.`,
+          available_batches: batchInfo.batch_ids.map((id: number, idx: number) => ({
+            batch_id: id,
+            batch_name: batchInfo.batch_names[idx],
+            batch_type: batchInfo.batch_types[idx]
+          }))
         } : {})
       }
     }
 
     // Final serialization check
-    const finalResponse = serializeBigInt(response)
+    const finalResponse = convertBigIntToNumber(response)
 
     return NextResponse.json(finalResponse)
 
@@ -396,84 +262,7 @@ export async function GET(
   }
 }
 
-// Add corresponding TypeScript types for better type safety
-export interface DomainQueryParams {
-  batch_id?: string
-  group_by_batch?: string
-  include_all_batches?: string
-  latest_only?: string
-}
-
-export interface BatchInfo {
-  batch_id: number
-  batch_name: string
-  reference_version: string
-  processing_date: string
-  batch_created_date: string
-}
-
-export interface DomainResponse {
-  protein: {
-    processing_id: number
-    pdb_id: string
-    chain_id: string
-    source_id: string
-    batch_id: number
-    reference_version: string
-    processing_date: string
-    sequence_length: number
-    is_classified: boolean
-    coverage: number
-    domain_count: number
-    total_evidence_items: number
-    batch_name?: string
-    batch_created_date?: string
-    available_batches?: BatchInfo[]
-    is_multi_batch?: boolean
-  }
-  domains: Array<{
-    id: number
-    protein_id: number
-    domain_number: number
-    domain_id: string
-    start_pos: number
-    end_pos: number
-    range: string
-    pdb_range: string | null
-    pdb_start: string | null
-    pdb_end: string | null
-    source: string
-    source_id: string
-    confidence: number
-    t_group: string
-    t_group_name: string | null
-    h_group: string | null
-    h_group_name: string | null
-    x_group: string | null
-    x_group_name: string | null
-    a_group: string | null
-    evidence: any[]
-    evidence_count: number
-  }>
-  metadata: {
-    source: string
-    data_architecture: string
-    batch_id: number
-    batch_name: string
-    reference_version: string
-    processing_date: string
-    total_domains: number
-    total_evidence_items: number
-    bigint_serialized: boolean
-    includes_classification_names: boolean
-    warning?: string
-    available_batch_ids?: number[]
-  }
-}
-
-// Also update MainCurationInterface.tsx to use the batch parameter:
-
-// In loadProteinForCuration:
+// Update MainCurationInterface.tsx to use batch_id:
 const loadProteinForCuration = async (protein: any) => {
   setIsLoadingProtein(true)
   setStructuresLoaded(false)
@@ -481,22 +270,12 @@ const loadProteinForCuration = async (protein: any) => {
   setReviewStartTime(new Date())
 
   try {
-    // Build query parameters
-    const queryParams = new URLSearchParams()
+    // Include batch_id if available to ensure we get the right domains
+    const url = protein.batch_id
+      ? `/api/proteins/${protein.source_id}/domains?batch_id=${protein.batch_id}`
+      : `/api/proteins/${protein.source_id}/domains`
 
-    // If protein has batch_id, use it to ensure we get domains from the correct batch
-    if (protein.batch_id) {
-      queryParams.append('batch_id', protein.batch_id.toString())
-    }
-
-    // Optional: include information about all batches
-    if (process.env.NODE_ENV === 'development') {
-      queryParams.append('include_all_batches', 'true')
-    }
-
-    const domainsResponse = await fetch(
-      `/api/proteins/${protein.source_id}/domains?${queryParams}`
-    )
+    const domainsResponse = await fetch(url)
 
     if (!domainsResponse.ok) {
       throw new Error('Failed to load protein domains')
@@ -504,56 +283,31 @@ const loadProteinForCuration = async (protein: any) => {
 
     const domainsData = await domainsResponse.json()
 
-    // Check for warnings about multiple batches
+    // Check for batch warning
     if (domainsData.metadata?.warning) {
       console.warn('⚠️ Batch warning:', domainsData.metadata.warning)
+
+      // Optionally show a user-facing warning
+      if (domainsData.metadata.available_batches) {
+        console.log('Available batches:', domainsData.metadata.available_batches)
+      }
     }
 
-    console.log('📊 Batch-aware domain data:', {
-      protein: {
-        source_id: domainsData.protein.source_id,
-        batch_id: domainsData.protein.batch_id,
-        batch_name: domainsData.protein.batch_name,
-        reference_version: domainsData.protein.reference_version
-      },
-      metadata: domainsData.metadata,
+    console.log('📊 Domain data loaded:', {
+      source_id: domainsData.protein.source_id,
+      batch_id: domainsData.protein.batch_id,
+      batch_name: domainsData.protein.batch_name,
+      batch_type: domainsData.protein.batch_type,
+      reference_version: domainsData.protein.reference_version,
       domainCount: domainsData.domains?.length,
-      availableBatches: domainsData.protein.available_batches?.length || 1
+      warning: domainsData.metadata?.warning
     })
 
-    // Continue with domain processing...
+    // Process domains - they should now be from the correct batch
     const processedDomains = processDomainDataCorrectly(domainsData.domains || [])
 
-    // If evidence is not embedded, fetch it
-    const domainsWithEvidence = await Promise.all(
-      processedDomains.map(async (domain) => {
-        if (domain.evidence && domain.evidence.length > 0) {
-          // Evidence already included
-          return domain
-        }
-
-        // Fetch evidence separately if needed
-        try {
-          const evidenceResponse = await fetch(`/api/domains/${domain.id}/evidence`)
-          if (evidenceResponse.ok) {
-            const evidence = await evidenceResponse.json()
-            return {
-              ...domain,
-              evidence: evidence.filter((e: any) =>
-                e.source_id && e.hit_range && e.confidence > 0.8
-              )
-            }
-          }
-        } catch (error) {
-          console.error(`Failed to fetch evidence for domain ${domain.id}:`, error)
-        }
-
-        return domain
-      })
-    )
-
-    // Flatten all evidence
-    const allEvidence = domainsWithEvidence.flatMap(d => d.evidence || [])
+    // Evidence is already included in the response
+    const allEvidence = processedDomains.flatMap(d => d.evidence || [])
 
     console.log('📋 Evidence summary:', {
       totalEvidence: allEvidence.length,
@@ -561,20 +315,53 @@ const loadProteinForCuration = async (protein: any) => {
       batchInfo: {
         batch_id: domainsData.metadata.batch_id,
         batch_name: domainsData.metadata.batch_name,
-        reference_version: domainsData.metadata.reference_version
+        batch_type: domainsData.metadata.batch_type
       }
     })
 
     const proteinWithData = {
       ...protein,
       ...domainsData.protein, // Merge with API response protein data
-      domains: domainsWithEvidence,
+      domains: processedDomains,
       evidence: allEvidence
     }
 
     setCurrentProtein(proteinWithData)
 
-    // Continue with evidence selection...
+    // Auto-select best evidence
+    if (allEvidence.length > 0) {
+      const sortedEvidence = [...allEvidence].sort((a, b) => {
+        if (a.confidence !== b.confidence) {
+          return b.confidence - a.confidence
+        }
+        return a.evalue - b.evalue
+      })
+
+      const bestEvidence = sortedEvidence[0]
+
+      if (bestEvidence && bestEvidence.source_id) {
+        setSelectedEvidence(bestEvidence)
+        console.log('🎯 Selected best evidence:', {
+          source_id: bestEvidence.source_id,
+          confidence: bestEvidence.confidence,
+          evalue: bestEvidence.evalue,
+          type: bestEvidence.evidence_type
+        })
+      }
+    }
+
+    // Reset decision for new protein
+    setDecision({
+      has_domain: null,
+      domain_assigned_correctly: null,
+      boundaries_correct: null,
+      is_fragment: null,
+      is_repeat_protein: null,
+      confidence_level: 3,
+      notes: '',
+      flagged_for_review: false
+    })
+
   } catch (error) {
     console.error('❌ Error loading protein:', error)
     setStructureError(`Failed to load protein data: ${error.message}`)

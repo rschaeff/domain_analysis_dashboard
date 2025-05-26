@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { DualStructureViewer } from '@/components/curation/DualStructureViewer'
+import { SingleStructureTest } from '@/components/curation/SingleStructureTest'
 import { 
   Play, 
   Pause, 
@@ -602,41 +603,11 @@ export default function MainCurationInterface() {
           </Card>
 
           {/* Structure Comparison */}
-          {selectedEvidence && (() => {
-            const evidenceId = getBestEvidenceId(selectedEvidence)
-            const { pdbId, chainId } = parseEcodDomainId(evidenceId)
-
-            if (!pdbId || !chainId) {
-              return (
-                <Card className="p-4 border-yellow-200 bg-yellow-50">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-5 h-5 text-yellow-600" />
-                    <span className="text-yellow-800">
-                      Cannot parse reference structure from evidence ID: {evidenceId || 'undefined'}
-                    </span>
-                  </div>
-                </Card>
-              )
-            }
-
-            return (
-              <DualStructureViewer
-                queryPdbId={currentProtein.pdb_id}
-                queryChainId={currentProtein.chain_id}
-                queryDomains={currentProtein.domains}
-                queryRange={selectedEvidence.query_range}
-
-                referencePdbId={pdbId}
-                referenceChainId={chainId}
-                referenceDomainId={evidenceId}
-                referenceRange={selectedEvidence.hit_range}
-                hitRange={selectedEvidence.hit_range}
-
-                onStructuresLoaded={() => setStructuresLoaded(true)}
-                onError={setStructureError}
-              />
-            )
-          })()}
+            <SingleStructureTest
+              pdbId={currentProtein.pdb_id}
+              chainId={currentProtein.chain_id}
+              domains={currentProtein.domains}
+            />
 
           {/* Evidence Selection */}
           <Card className="p-4">

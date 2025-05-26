@@ -416,6 +416,13 @@ export default function MainCurationInterface() {
 
       if (response.ok) {
         const data = await response.json()
+        console.log('📊 Session started successfully:', {
+          session: data.session,
+          proteinCount: data.proteins?.length,
+          firstProtein: data.proteins?.[0],
+          batchSummary: data.batch_summary
+        })
+
         setSession(data.session)
         setProteins(data.proteins)
         setCurrentIndex(0)
@@ -427,7 +434,9 @@ export default function MainCurationInterface() {
         }
       } else {
         const error = await response.json()
-        alert(`Failed to start session: ${error.error}`)
+        console.error('Session start failed:', error)
+        alert(`Failed to start session: ${error.error || error.message || 'Unknown error'}`)
+      }
       }
     } catch (error) {
       console.error('Error starting session:', error)
@@ -445,15 +454,38 @@ export default function MainCurationInterface() {
     setReviewStartTime(new Date())
 
     try {
+      // Validate source_id format
+      if (!protein.source_id || !protein.source_id.includes('_')) {
+        throw new Error(`Invalid protein source_id format: ${protein.source_id}. Expected format: PDB_CHAIN (e.g., 3hls_A)`)
+      }
+
       // Include batch_id if available to ensure we get the right domains
       const url = protein.batch_id
         ? `/api/proteins/${protein.source_id}/domains?batch_id=${protein.batch_id}`
         : `/api/proteins/${protein.source_id}/domains`
 
+      console.log('🔍 Loading protein domains:', {
+        protein,
+        url,
+        source_id: protein.source_id,
+        batch_id: protein.batch_id
+      })
+
       const domainsResponse = await fetch(url)
 
       if (!domainsResponse.ok) {
-        throw new Error('Failed to load protein domains')
+        const errorText = await domainsResponse.text()
+        let errorMessage = `Failed to load protein domains: ${domainsResponse.status} ${domainsResponse.statusText}`
+
+        try {
+          const errorJson = JSON.parse(errorText)
+          errorMessage = errorJson.error || errorJson.message || errorMessage
+          console.error('API Error:', errorJson)
+        } catch (e) {
+          console.error('API Error (text):', errorText)
+        }
+
+        throw new Error(errorMessage)
       }
 
       const domainsData = await domainsResponse.json()
@@ -541,8 +573,12 @@ export default function MainCurationInterface() {
       })
 
     } catch (error) {
-      console.error('Error loading protein:', error)
-      setStructureError(`Failed to load protein data: ${error.message}`)
+      console.error('❌ Error loading protein:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      setStructureError(errorMessage)
+
+      // Show user-friendly error in UI
+      alert(`Failed to load protein data:\n\n${errorMessage}\n\nPlease check the console for more details.`)
     } finally {
       setIsLoadingProtein(false)
     }
@@ -910,7 +946,27 @@ export default function MainCurationInterface() {
           </Card>
 
           {/* Structure Comparison */}
-          {selectedEvidence && (() => {
+          {structureError && (
+            <Card className="p-4 border-red-200 bg-red-50">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="font-medium text-red-800">Error Loading Structure</h4>
+                  <p className="text-red-700 text-sm mt-1">{structureError}</p>
+                  <Button
+                    onClick={() => loadProteinForCuration(currentProtein)}
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                  >
+                    Retry Loading
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {selectedEvidence && !structureError && (() => {
             const evidenceId = getBestEvidenceId(selectedEvidence)
             const { pdbId, chainId } = parseEcodDomainId(evidenceId)
 

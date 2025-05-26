@@ -1,4 +1,3 @@
-// components/visualization/Debug3DMolViewer.tsx
 'use client'
 
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react'

@@ -3,9 +3,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { DualStructureViewer } from '@/components/curation/DualStructureViewer'
 import { SimpleDualStructureTest } from '@/components/curation/SimpleDualStructureTest'
-import { BatchSelector } from '@/components/curation/BatchSelector'
 import {
   Play,
   Pause,
@@ -20,6 +18,12 @@ import {
   FileText
 } from 'lucide-react'
 
+// Domain colors
+const DOMAIN_COLORS = [
+  '#2563EB', '#DC2626', '#16A34A', '#9333EA', '#EA580C', '#0891B2',
+  '#DB2777', '#7C3AED', '#059669', '#DC2626', '#F59E0B', '#10B981'
+]
+
 interface CurationSession {
   id: number
   curator_name: string
@@ -29,6 +33,11 @@ interface CurationSession {
   status: string
   locked_proteins: string[]
   created_at: string
+  session_metadata?: {
+    batch_id?: number
+    batch_name?: string
+    reference_version?: string
+  }
 }
 
 interface CurationProtein {
@@ -37,6 +46,12 @@ interface CurationProtein {
   pdb_id: string
   chain_id: string
   sequence_length: number
+  batch_id?: number
+  batch_info?: {
+    batch_id: number
+    batch_name: string
+    reference_version: string
+  }
   domains: any[]
   evidence: any[]
 }
@@ -63,7 +78,132 @@ interface CurationEvidence {
   evalue: number
 }
 
-// Utility function to safely parse ECOD domain ID
+interface Batch {
+  id: number
+  batch_name: string
+  batch_type: string
+  total_items: number
+  completed_items: number
+  status: string
+  ref_version: string
+  actual_protein_count: number
+  partition_count: number
+}
+
+// Batch Selector Component
+function BatchSelector({
+  onBatchSelect,
+  currentBatchId,
+  showStats = true
+}: {
+  onBatchSelect: (batchId: number | null) => void
+  currentBatchId?: number | null
+  showStats?: boolean
+}) {
+  const [batches, setBatches] = useState<Batch[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchBatches()
+  }, [])
+
+  const fetchBatches = async () => {
+    try {
+      setError(null)
+      const response = await fetch('/api/batches')
+
+      if (response.ok) {
+        const data = await response.json()
+        // Filter for domain analysis batches that have actual data
+        const relevantBatches = (data.batches || [])
+          .filter((b: Batch) =>
+            b.batch_type === 'domain_analysis' &&
+            b.partition_count > 0
+          )
+          .sort((a: Batch, b: Batch) => b.id - a.id) // Latest first
+
+        setBatches(relevantBatches)
+      } else {
+        throw new Error('Failed to fetch batches')
+      }
+    } catch (error) {
+      console.error('Error fetching batches:', error)
+      setError('Failed to load batches')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2">
+        <label className="text-sm font-medium text-gray-600">Batch Filter:</label>
+        <div className="animate-pulse bg-gray-200 h-8 w-48 rounded-md"></div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2">
+        <label className="text-sm font-medium text-red-600">Batch Filter:</label>
+        <span className="text-sm text-red-500">{error}</span>
+      </div>
+    )
+  }
+
+  const selectedBatch = batches.find(b => b.id === currentBatchId)
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <label className="text-sm font-medium text-gray-700">Batch Filter:</label>
+        <select
+          value={currentBatchId || ''}
+          onChange={(e) => onBatchSelect(e.target.value ? parseInt(e.target.value) : null)}
+          className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        >
+          <option value="">All Batches (Latest)</option>
+          {batches.map(batch => (
+            <option key={batch.id} value={batch.id}>
+              {batch.batch_name}
+              {showStats && batch.partition_count > 0 &&
+                ` (${batch.partition_count.toLocaleString()} proteins)`
+              }
+              {batch.status !== 'completed' &&
+                ` - ${batch.status}`
+              }
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Show selected batch details */}
+      {selectedBatch && showStats && (
+        <div className="flex flex-wrap gap-4 text-xs text-gray-600 ml-20">
+          <span>
+            Version: <span className="font-medium">{selectedBatch.ref_version}</span>
+          </span>
+          <span>
+            Status: <span className={`font-medium ${
+              selectedBatch.status === 'completed' ? 'text-green-600' : 'text-yellow-600'
+            }`}>
+              {selectedBatch.status}
+            </span>
+          </span>
+          <span>
+            Progress: <span className="font-medium">
+              {((selectedBatch.completed_items / selectedBatch.total_items) * 100).toFixed(1)}%
+            </span>
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Utility functions
 const parseEcodDomainId = (ecodDomainId: string | null | undefined): { pdbId: string | null, chainId: string | null } => {
   if (!ecodDomainId || typeof ecodDomainId !== 'string' || ecodDomainId.length < 6) {
     console.warn('Invalid ECOD domain ID:', ecodDomainId)
@@ -72,26 +212,35 @@ const parseEcodDomainId = (ecodDomainId: string | null | undefined): { pdbId: st
 
   try {
     // ECOD domain IDs typically follow the pattern: e1a0oA1
-    // Where positions 1-4 are PDB ID and position 5 is chain ID
-    const pdbId = ecodDomainId.substring(1, 5).toLowerCase()
-    const chainId = ecodDomainId.charAt(5).toUpperCase()
+    const cleanId = ecodDomainId.startsWith('e') ? ecodDomainId.substring(1) : ecodDomainId
 
-    // Basic validation
-    if (pdbId.length !== 4 || !chainId) {
-      console.warn('Failed to parse ECOD domain ID:', ecodDomainId)
-      return { pdbId: null, chainId: null }
+    if (cleanId.length >= 5) {
+      const pdbId = cleanId.substring(0, 4).toLowerCase()
+      let chainId = cleanId.charAt(4).toUpperCase()
+
+      // Handle special case where chain might be after a dot
+      if (cleanId.includes('.')) {
+        const parts = cleanId.split('.')
+        if (parts.length >= 2) {
+          chainId = parts[1].charAt(0).toUpperCase()
+        }
+      }
+
+      // Validate
+      if (/^[a-z0-9]{4}$/.test(pdbId) && /^[A-Z]$/.test(chainId)) {
+        return { pdbId, chainId }
+      }
     }
 
-    return { pdbId, chainId }
+    console.warn('Failed to parse ECOD domain ID format:', ecodDomainId)
+    return { pdbId: null, chainId: null }
   } catch (error) {
     console.error('Error parsing ECOD domain ID:', ecodDomainId, error)
     return { pdbId: null, chainId: null }
   }
 }
 
-// Utility function to get the best identifier from evidence
 const getBestEvidenceId = (evidence: any): string | null => {
-  // Try different possible field names for the reference ID
   return evidence.ecod_domain_id ||
          evidence.source_id ||
          evidence.domain_ref_id ||
@@ -99,7 +248,6 @@ const getBestEvidenceId = (evidence: any): string | null => {
          null
 }
 
-// Parse PDB range string to extract residue ranges for 3DMol styling
 const parsePdbRange = (pdbRange: string | null | undefined): {
   ranges: string[],
   displayRange: string,
@@ -112,13 +260,13 @@ const parsePdbRange = (pdbRange: string | null | undefined): {
   }
 
   try {
-    // Remove chain prefix if present (e.g., "A:25-150" -> "25-150")
+    // Remove chain prefix if present
     let cleanRange = pdbRange
     if (pdbRange.includes(':')) {
       cleanRange = pdbRange.split(':')[1] || pdbRange
     }
 
-    // Handle discontinuous ranges (e.g., "1-100,150-200")
+    // Handle discontinuous ranges
     const segments = cleanRange.split(',').map(s => s.trim()).filter(s => s.length > 0)
     const validRanges: string[] = []
     let minStart = Infinity
@@ -134,16 +282,11 @@ const parsePdbRange = (pdbRange: string | null | undefined): {
           validRanges.push(`${start}-${end}`)
           minStart = Math.min(minStart, start)
           maxEnd = Math.max(maxEnd, end)
-        } else {
-          console.warn('Invalid range segment:', segment)
         }
-      } else {
-        console.warn('Invalid range format (no dash):', segment)
       }
     }
 
     if (validRanges.length === 0) {
-      console.warn('No valid ranges found in:', pdbRange)
       return { ranges: [], displayRange: pdbRange, start: null, end: null }
     }
 
@@ -159,33 +302,26 @@ const parsePdbRange = (pdbRange: string | null | undefined): {
   }
 }
 
-// Process domain data using pdb_range as the primary source (CORRECT approach)
 const processDomainDataCorrectly = (domains: any[]): any[] => {
   return domains.map((domain, index) => {
-    console.log(`🔍 Processing domain ${index + 1} - Raw data:`, {
+    console.log(`🔍 Processing domain ${index + 1}:`, {
       id: domain.id,
       pdb_range: domain.pdb_range,
       range: domain.range,
       start_pos: domain.start_pos,
-      end_pos: domain.end_pos,
-      available_fields: Object.keys(domain)
+      end_pos: domain.end_pos
     })
 
-    // Primary: Use pdb_range
     let parsedRange = parsePdbRange(domain.pdb_range)
 
-    // Fallback 1: Use range field if pdb_range is not available
     if (parsedRange.ranges.length === 0 && domain.range) {
       console.log(`⚠️ Domain ${index + 1}: pdb_range not available, trying range field`)
       parsedRange = parsePdbRange(domain.range)
     }
 
-    // Fallback 2: Use start_pos/end_pos if ranges are still not available
     if (parsedRange.ranges.length === 0) {
       const start = domain.start_pos || domain.start || 1
       const end = domain.end_pos || domain.end || 100
-
-      console.log(`⚠️ Domain ${index + 1}: No range fields, using positions:`, { start, end })
 
       if (start && end && start <= end) {
         parsedRange = {
@@ -208,27 +344,27 @@ const processDomainDataCorrectly = (domains: any[]): any[] => {
     return {
       ...domain,
       id: domain.id || `domain_${index + 1}`,
-      // Keep original fields
       pdb_range: domain.pdb_range,
       range: domain.range,
       start_pos: domain.start_pos,
       end_pos: domain.end_pos,
-      // Add processed fields for 3DMol
       threeDMolRanges: parsedRange.ranges,
       displayRange: parsedRange.displayRange,
       start: parsedRange.start,
       end: parsedRange.end,
-      color: domain.color || '#2563EB',
+      color: domain.color || DOMAIN_COLORS[index % DOMAIN_COLORS.length],
       label: `Domain ${index + 1} (${parsedRange.displayRange})`
     }
   })
 }
 
+// Main Component
 export default function MainCurationInterface() {
   // Session Management
   const [session, setSession] = useState<CurationSession | null>(null)
   const [isStartingSession, setIsStartingSession] = useState(false)
   const [curatorName, setCuratorName] = useState('')
+  const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
 
   // Current Protein & Curation State
   const [currentProtein, setCurrentProtein] = useState<CurationProtein | null>(null)
@@ -273,7 +409,8 @@ export default function MainCurationInterface() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           curator_name: curatorName.trim(),
-          batch_size: 10
+          batch_size: 10,
+          batch_id: selectedBatchId
         })
       })
 
@@ -300,7 +437,7 @@ export default function MainCurationInterface() {
     }
   }
 
-  // Load protein data for curation
+  // Load protein data for curation with batch awareness
   const loadProteinForCuration = async (protein: any) => {
     setIsLoadingProtein(true)
     setStructuresLoaded(false)
@@ -308,67 +445,86 @@ export default function MainCurationInterface() {
     setReviewStartTime(new Date())
 
     try {
-      // Get protein details with domains
+      // Include batch_id if available to ensure we get the right domains
       const url = protein.batch_id
-      ? `/api/proteins/${protein.source_id}/domains?batch_id=${protein.batch_id}`
-      : `/api/proteins/${protein.source_id}/domains`
+        ? `/api/proteins/${protein.source_id}/domains?batch_id=${protein.batch_id}`
+        : `/api/proteins/${protein.source_id}/domains`
+
       const domainsResponse = await fetch(url)
+
       if (!domainsResponse.ok) {
         throw new Error('Failed to load protein domains')
       }
+
       const domainsData = await domainsResponse.json()
 
-      // FIXED: Process domains using pdb_range as primary source
+      // Check for batch warning
+      if (domainsData.metadata?.warning) {
+        console.warn('⚠️ Batch warning:', domainsData.metadata.warning)
+
+        if (domainsData.metadata.available_batches) {
+          console.log('Available batches:', domainsData.metadata.available_batches)
+        }
+      }
+
+      console.log('📊 Domain data loaded:', {
+        source_id: domainsData.protein.source_id,
+        batch_id: domainsData.protein.batch_id,
+        batch_name: domainsData.protein.batch_name,
+        batch_type: domainsData.protein.batch_type,
+        reference_version: domainsData.protein.reference_version,
+        domainCount: domainsData.domains?.length,
+        warning: domainsData.metadata?.warning
+      })
+
+      // Process domains
       const processedDomains = processDomainDataCorrectly(domainsData.domains || [])
 
       console.log('🔍 Original domains from API:', domainsData.domains)
       console.log('🔍 Processed domains for viewer:', processedDomains)
 
-      // Get evidence for the protein
-      const evidencePromises = processedDomains.map(async (domain: any) => {
-        const evidenceResponse = await fetch(`/api/domains/${domain.id}/evidence`)
-        if (evidenceResponse.ok) {
-          const evidence = await evidenceResponse.json()
-          return evidence.filter((e: any) =>
-            getBestEvidenceId(e) && e.hit_range && e.confidence > 0.8
-          )
-        }
-        return []
-      })
-
-      const evidenceArrays = await Promise.all(evidencePromises)
-      const allEvidence = evidenceArrays.flat()
+      // Evidence is already included in the response
+      const allEvidence = processedDomains.flatMap(d => d.evidence || [])
 
       console.log('Evidence loaded:', allEvidence.length, 'items')
-      console.log('Sample evidence:', allEvidence[0])
+      if (allEvidence.length > 0) {
+        console.log('Sample evidence:', allEvidence[0])
+      }
 
       const proteinWithData = {
         ...protein,
-        domains: processedDomains, // Use processed domains
+        ...domainsData.protein,
+        domains: processedDomains,
         evidence: allEvidence
       }
 
       setCurrentProtein(proteinWithData)
 
-      // Auto-select best evidence for structure comparison
+      // Auto-select best evidence
       if (allEvidence.length > 0) {
-        const bestEvidence = allEvidence.reduce((best: any, current: any) =>
-          current.confidence > best.confidence ? current : best
-        )
-
-        // Validate the selected evidence
-        const bestId = getBestEvidenceId(bestEvidence)
-        if (bestId) {
-          const validatedEvidence = {
-            ...bestEvidence,
-            ecod_domain_id: bestId,
-            source_id: bestId
+        const sortedEvidence = [...allEvidence].sort((a, b) => {
+          if (a.confidence !== b.confidence) {
+            return b.confidence - a.confidence
           }
-          setSelectedEvidence(validatedEvidence)
-          console.log('Selected evidence:', validatedEvidence)
-        } else {
-          console.warn('No valid evidence ID found in best evidence:', bestEvidence)
-          setSelectedEvidence(allEvidence[0]) // Fallback to first evidence
+          return a.evalue - b.evalue
+        })
+
+        const bestEvidence = sortedEvidence[0]
+
+        if (bestEvidence) {
+          const bestId = getBestEvidenceId(bestEvidence)
+          if (bestId) {
+            const validatedEvidence = {
+              ...bestEvidence,
+              ecod_domain_id: bestId,
+              source_id: bestId
+            }
+            setSelectedEvidence(validatedEvidence)
+            console.log('Selected evidence:', validatedEvidence)
+          } else {
+            console.warn('No valid evidence ID found in best evidence:', bestEvidence)
+            setSelectedEvidence(allEvidence[0])
+          }
         }
       }
 
@@ -546,6 +702,8 @@ export default function MainCurationInterface() {
         setCurrentIndex(0)
         setAllDecisions([])
         setShowBatchSummary(false)
+        setCuratorName('')
+        setSelectedBatchId(null)
       }
     } catch (error) {
       console.error('Error completing batch:', error)
@@ -596,7 +754,7 @@ export default function MainCurationInterface() {
                 ) : (
                   <>
                     <Play className="w-4 h-4 mr-2" />
-                    Start Curation (10 proteins)
+                    Start Curation {selectedBatchId ? `(Batch ${selectedBatchId})` : '(Latest Batch)'}
                   </>
                 )}
               </Button>
@@ -681,7 +839,12 @@ export default function MainCurationInterface() {
           <div className="flex items-center gap-4">
             <div>
               <h2 className="text-xl font-bold">Curation Session</h2>
-              <p className="text-sm text-gray-600">Curator: {session.curator_name}</p>
+              <p className="text-sm text-gray-600">
+                Curator: {session.curator_name}
+                {session.session_metadata?.batch_name && (
+                  <span className="ml-2">| Batch: {session.session_metadata.batch_name}</span>
+                )}
+              </p>
             </div>
             <Badge variant="outline" className="bg-blue-50">
               {currentIndex + 1} of {proteins.length}
@@ -720,6 +883,9 @@ export default function MainCurationInterface() {
                   Length: {currentProtein.sequence_length} residues |
                   Domains: {currentProtein.domains.length} |
                   Evidence: {currentProtein.evidence.length} items
+                  {currentProtein.batch_name && (
+                    <span className="ml-2">| Batch: {currentProtein.batch_name}</span>
+                  )}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -783,8 +949,8 @@ export default function MainCurationInterface() {
           {/* Evidence Selection */}
           <Card className="p-4">
             <h4 className="font-medium mb-3">Evidence Selection</h4>
-            <div className="space-y-2">
-              {currentProtein.evidence.slice(0, 5).map((evidence, index) => {
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {currentProtein.evidence.slice(0, 10).map((evidence, index) => {
                 const evidenceId = getBestEvidenceId(evidence)
                 const isSelected = selectedEvidence && getBestEvidenceId(selectedEvidence) === evidenceId
 
@@ -792,10 +958,10 @@ export default function MainCurationInterface() {
                   <button
                     key={evidence.id || index}
                     onClick={() => setSelectedEvidence(evidence)}
-                    className={`w-full p-3 text-left rounded border ${
+                    className={`w-full p-3 text-left rounded border transition-colors ${
                       isSelected
                         ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                     }`}
                   >
                     <div className="flex justify-between items-start">
@@ -813,7 +979,7 @@ export default function MainCurationInterface() {
                           Conf: {(evidence.confidence * 100).toFixed(1)}%
                         </div>
                         <div className="text-xs text-gray-600">
-                          E-val: {evidence.evalue}
+                          E-val: {evidence.evalue < 1e-10 ? evidence.evalue.toExponential(1) : evidence.evalue.toFixed(2)}
                         </div>
                       </div>
                     </div>
@@ -931,6 +1097,7 @@ export default function MainCurationInterface() {
                       key={level}
                       variant={decision.confidence_level === level ? 'default' : 'outline'}
                       onClick={() => handleConfidenceChange(level)}
+                      className="w-12"
                     >
                       {level}
                     </Button>
@@ -956,10 +1123,11 @@ export default function MainCurationInterface() {
                   type="checkbox"
                   id="flag-review"
                   checked={decision.flagged_for_review}
-                  onChange={(e) => setDecision(prev => ({ 
-                    ...prev, 
-                    flagged_for_review: e.target.checked 
+                  onChange={(e) => setDecision(prev => ({
+                    ...prev,
+                    flagged_for_review: e.target.checked
                   }))}
+                  className="w-4 h-4"
                 />
                 <label htmlFor="flag-review" className="text-sm">
                   Flag this protein for detailed review

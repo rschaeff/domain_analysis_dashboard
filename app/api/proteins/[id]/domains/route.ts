@@ -93,7 +93,8 @@ export async function GET(
         CAST(pp.batch_id AS INTEGER) as batch_id,
         pp.reference_version,
         pp.timestamp as processing_date,
-        CAST(pp.sequence_length AS INTEGER) as sequence_length,
+        -- Use main protein table length if partition length is 0
+        CAST(COALESCE(NULLIF(pp.sequence_length, 0), p.length) AS INTEGER) as sequence_length,
         pp.is_classified,
         pp.coverage,
         b.batch_name,
@@ -101,6 +102,7 @@ export async function GET(
         b.status as batch_status
       FROM pdb_analysis.partition_proteins pp
       LEFT JOIN ecod_schema.batch b ON pp.batch_id = b.id
+      LEFT JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
       WHERE pp.pdb_id = $1 AND pp.chain_id = $2
       ${batchId ? 'AND pp.batch_id = $3' : ''}
       ORDER BY pp.timestamp DESC

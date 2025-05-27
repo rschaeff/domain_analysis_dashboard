@@ -29,13 +29,13 @@ export async function PUT(
       completed_count: completedCount
     }
 
-    // Update session with auto-save data - FIX: Pass parameters individually
+    // Update session with auto-save data - FIX: Use CAST function instead of :: syntax
     const updateQuery = `
       UPDATE pdb_analysis.curation_session
       SET
         current_protein_index = $1,
         proteins_reviewed = $2,
-        auto_save_data = $3,
+        auto_save_data = CAST($3 AS jsonb),
         notes = $4,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $5

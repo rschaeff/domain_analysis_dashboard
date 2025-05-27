@@ -398,14 +398,207 @@ export function EnhancedStructureViewer({
     }
   ]
 
-  // Keep existing evidence columns and filesystem columns...
-  const evidenceColumns = [
-    // ... (keep existing evidence column definitions)
-  ]
+const evidenceColumns = [
+  {
+    key: 'evidence_type',
+    label: 'Type',
+    render: (value: string) => (
+      <Badge variant={value === 'hhsearch' ? 'default' : 'secondary'}>
+        {value.toUpperCase()}
+      </Badge>
+    )
+  },
+  {
+    key: 'source_id',
+    label: 'Source',
+    render: (value: string) => {
+      // Detect ECOD domain IDs (typically start with 'e' followed by alphanumeric)
+      const isEcodDomain = value && /^e[a-zA-Z0-9]+$/i.test(value)
 
-  const filesystemColumns = [
-    // ... (keep existing filesystem column definitions)
-  ]
+      if (isEcodDomain) {
+        const ecodUrl = `http://prodata.swmed.edu/ecod/af2_pdb/domain/${value}`
+        return (
+          <a
+            href={ecodUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline"
+            title={`View ${value} on ECOD`}
+          >
+            {value}
+          </a>
+        )
+      }
+
+      return <span className="font-mono text-sm">{value}</span>
+    }
+  },
+  {
+    key: 'scores',
+    label: 'Scores',
+    render: (_: any, evidence: any) => {
+      const isHHSearch = evidence.evidence_type === 'hhsearch'
+      const isBLAST = evidence.evidence_type === 'blast' || evidence.evidence_type === 'chain_blast' || evidence.evidence_type === 'domain_blast'
+
+      return (
+        <div className="text-sm space-y-1">
+          {/* Method-specific primary score */}
+          {isHHSearch && evidence.probability !== null && (
+            <div className="font-medium">
+              Prob: <span className="text-green-600">{evidence.probability?.toFixed(1)}%</span>
+            </div>
+          )}
+          {isBLAST && evidence.score !== null && (
+            <div className="font-medium">
+              Bit: <span className="text-blue-600">{evidence.score?.toFixed(1)}</span>
+            </div>
+          )}
+
+          {/* E-value (common to both) */}
+          {evidence.evalue !== null && (
+            <div className="text-xs text-gray-600">
+              E-val: {evidence.evalue < 1e-10 ? evidence.evalue.toExponential(1) : evidence.evalue.toFixed(2)}
+            </div>
+          )}
+
+          {/* Additional BLAST info */}
+          {isBLAST && evidence.hsp_count && (
+            <div className="text-xs text-gray-500">
+              HSPs: {evidence.hsp_count}
+            </div>
+          )}
+
+          {/* HHSearch raw score if available */}
+          {isHHSearch && evidence.score !== null && evidence.score !== evidence.probability && (
+            <div className="text-xs text-gray-500">
+              Score: {evidence.score?.toFixed(1)}
+            </div>
+          )}
+        </div>
+      )
+    }
+  },
+  {
+    key: 'ranges',
+    label: 'Alignment',
+    render: (_: any, evidence: any) => (
+      <div className="font-mono text-xs space-y-1">
+        <div>Query: {evidence.query_range || 'N/A'}</div>
+        <div className="text-gray-500">Hit: {evidence.hit_range || 'N/A'}</div>
+        {evidence.is_discontinuous && (
+          <div className="text-orange-600 text-xs">Discontinuous</div>
+        )}
+      </div>
+    )
+  },
+  {
+    key: 'ref_classification',
+    label: 'Reference',
+    render: (_: any, evidence: any) => (
+      <div className="text-xs space-y-1">
+        {evidence.ref_t_group_name && (
+          <div className="font-medium text-blue-600">{evidence.ref_t_group_name}</div>
+        )}
+        {evidence.ref_t_group && evidence.ref_t_group_name && (
+          <div className="text-gray-500 font-mono text-xs">{evidence.ref_t_group}</div>
+        )}
+        {evidence.pdb_id && evidence.chain_id && (
+          <div className="text-gray-500 font-mono text-xs">
+            {evidence.pdb_id}_{evidence.chain_id}
+          </div>
+        )}
+      </div>
+    )
+  }
+];
+
+const filesystemColumns = [
+  {
+    key: 'file_type',
+    label: 'File Type',
+    render: (value: string) => (
+      <Badge variant={
+        value === 'domain_summary' ? 'default' :
+        value.includes('blast') ? 'secondary' :
+        value === 'hhsearch_result' ? 'outline' : 'secondary'
+      }>
+        {value.replace('_', ' ').toUpperCase()}
+      </Badge>
+    )
+  },
+  {
+    key: 'file_exists',
+    label: 'Status',
+    render: (value: boolean, file: any) => (
+      <div className="flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full ${value ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span className={value ? 'text-green-700' : 'text-red-700'}>
+          {value ? 'Exists' : 'Missing'}
+        </span>
+        {file.file_size && (
+          <span className="text-xs text-gray-500">
+            ({(file.file_size / 1024).toFixed(1)}KB)
+          </span>
+        )}
+      </div>
+    )
+  },
+  {
+    key: 'file_path',
+    label: 'Path',
+    render: (value: string) => {
+      // Show just the filename and immediate directory for readability
+      const parts = value.split('/')
+      const filename = parts[parts.length - 1]
+      const dir = parts[parts.length - 2]
+      return (
+        <div className="font-mono text-xs">
+          <div className="font-medium">{filename}</div>
+          <div className="text-gray-500">.../{dir}/</div>
+        </div>
+      )
+    }
+  },
+  {
+    key: 'last_checked',
+    label: 'Last Checked',
+    render: (value: string) => {
+      if (!value) return <span className="text-gray-400">Never</span>
+      const date = new Date(value)
+      const now = new Date()
+      const diffHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
+
+      if (diffHours < 24) {
+        return <span className="text-green-600">{diffHours.toFixed(0)}h ago</span>
+      } else if (diffHours < 24 * 7) {
+        return <span className="text-yellow-600">{(diffHours / 24).toFixed(0)}d ago</span>
+      } else {
+        return <span className="text-red-600">{date.toLocaleDateString()}</span>
+      }
+    }
+  },
+  {
+    key: 'actions',
+    label: 'Actions',
+    render: (_: any, file: any) => (
+      <div className="flex gap-1">
+        <Tooltip content="View file contents">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!file.file_exists}
+            onClick={() => {
+              // TODO: Implement file viewing
+              console.log('View file:', file.file_path)
+            }}
+          >
+            <Eye className="w-3 h-3" />
+          </Button>
+        </Tooltip>
+      </div>
+    )
+  }
+];
 
   return (
     <div className="space-y-6">
@@ -571,8 +764,51 @@ export function EnhancedStructureViewer({
               {/* Loading/Error overlays remain the same... */}
             </div>
 
-            {/* Quick Domain Selector - Keep existing implementation */}
-            {/* ... */}
+{/* Quick Domain Selector */}
+{mappedDomains.length > 0 && (
+  <div className="border-t pt-4">
+    <h4 className="text-sm font-medium mb-3">Quick Domain Selection ({mappedDomains.length} domains)</h4>
+    <div className="flex flex-wrap gap-2">
+      {mappedDomains.map((domain, index) => {
+        const originalDomain = putativeDomains[index]
+        return (
+          <Tooltip key={domain.id} content={
+            <div className="text-xs">
+              <div>{domain.label}</div>
+              <div>PDB Range: {domain.pdb_range || `${domain.start}-${domain.end}`}</div>
+              {domain.pdb_range && <div>Seq Range: {domain.start}-{domain.end}</div>}
+              {originalDomain.confidence && <div>Confidence: {originalDomain.confidence.toFixed(2)}</div>}
+              {originalDomain.t_group_name && <div>Type: {originalDomain.t_group_name}</div>}
+            </div>
+          }>
+            <button
+              onClick={() => handleDomainHighlight(originalDomain, index)}
+              className={`px-3 py-1 text-sm border rounded-full transition-colors ${
+                selectedDomain === index
+                  ? 'bg-gray-100 border-gray-400'
+                  : 'hover:bg-gray-50 border-gray-200'
+              }`}
+              style={{ borderColor: domain.color }}
+            >
+              <span className="flex items-center gap-1">
+                <div
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: domain.color }}
+                />
+                Domain {originalDomain.domain_number}
+                {originalDomain.t_group_name && (
+                  <Badge variant="outline" className="text-xs ml-1">
+                    {originalDomain.t_group_name}
+                  </Badge>
+                )}
+              </span>
+            </button>
+          </Tooltip>
+        )
+      })}
+    </div>
+  </div>
+)}
           </div>
         </Card>
       ) : (
@@ -602,12 +838,96 @@ export function EnhancedStructureViewer({
         </Card>
       )}
 
-      {/* Domain Details Table - Keep existing implementation */}
-      {mappedDomains.length > 0 && (
-        <Card className="p-6">
-          {/* ... keep existing domain table implementation ... */}
-        </Card>
-      )}
+    {showDomainDetails && (
+      <div className="space-y-4">
+        <DataTable
+          data={putativeDomains}
+          columns={domainColumns}
+          onRowClick={(domain, index) => handleDomainHighlight(domain, index)}
+        />
+
+        {/* Selected Domain Evidence */}
+        {selectedDomain !== null && (
+          <div className="border-t pt-4">
+            <h4 className="text-md font-medium mb-3">
+              Evidence for {putativeDomains[selectedDomain]?.domain_id || `Domain ${putativeDomains[selectedDomain]?.domain_number}`}
+            </h4>
+
+            {loadingEvidence ? (
+              <div className="flex items-center gap-2 text-gray-600">
+                <LoadingSpinner size="sm" />
+                Loading evidence...
+              </div>
+            ) : domainEvidence.length > 0 ? (
+              <DataTable
+                data={domainEvidence}
+                columns={evidenceColumns}
+                showPagination={false}
+              />
+            ) : (
+              <p className="text-gray-500 text-sm">No evidence data available for this domain.</p>
+            )}
+          </div>
+        )}
+
+        {/* Filesystem Evidence */}
+        <div className="border-t pt-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-md font-medium">Pipeline Files</h4>
+            {filesystemEvidence?.process_info && (
+              <div className="text-sm text-gray-600">
+                Batch: {filesystemEvidence.process_info.batch_name} |
+                Stage: {filesystemEvidence.process_info.current_stage} |
+                Status: <span className={
+                  filesystemEvidence.process_info.process_status === 'success' ? 'text-green-600' :
+                  filesystemEvidence.process_info.process_status === 'error' ? 'text-red-600' :
+                  'text-yellow-600'
+                }>{filesystemEvidence.process_info.process_status}</span>
+              </div>
+            )}
+          </div>
+
+          {loadingFilesystem ? (
+            <div className="flex items-center gap-2 text-gray-600">
+              <LoadingSpinner size="sm" />
+              Loading filesystem evidence...
+            </div>
+          ) : filesystemEvidence?.files && filesystemEvidence.files.length > 0 ? (
+            <div className="space-y-4">
+              {/* File counts summary */}
+              <div className="flex gap-4 text-sm">
+                <span className="text-gray-600">
+                  Total: {filesystemEvidence.file_counts.total}
+                </span>
+                <span className="text-green-600">
+                  Existing: {filesystemEvidence.file_counts.existing}
+                </span>
+                <span className="text-red-600">
+                  Missing: {filesystemEvidence.file_counts.missing}
+                </span>
+              </div>
+
+              {/* Files table */}
+              <DataTable
+                data={filesystemEvidence.files}
+                columns={filesystemColumns}
+                showPagination={false}
+              />
+
+              {/* Error message if any */}
+              {filesystemEvidence.process_info?.error_message && (
+                <div className="bg-red-50 border border-red-200 rounded p-3 text-sm">
+                  <strong className="text-red-800">Processing Error:</strong>
+                  <div className="text-red-700 mt-1">{filesystemEvidence.process_info.error_message}</div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-gray-500 text-sm">No pipeline files found for this protein.</p>
+          )}
+        </div>
+      </div>
+    )}
 
       {/* No domains message - Keep existing */}
       {mappedDomains.length === 0 && (

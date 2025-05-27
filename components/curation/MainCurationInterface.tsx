@@ -62,10 +62,10 @@ interface CurationProtein {
 }
 
 interface CurationDecision {
-  has_domains: boolean | null  // Changed from has_domain
-  domains_assigned_correctly: boolean | null  // Changed from domain_assigned_correctly
+  has_domain: boolean | null  // API expects has_domain (singular)
+  domain_assigned_correctly: boolean | null  // API expects this field name
   boundaries_correct: boolean | null
-  has_fragments: boolean | null  // Changed from is_fragment
+  is_fragment: boolean | null  // API expects is_fragment (singular)
   is_repeat_protein: boolean | null
   confidence_level: number
   notes: string
@@ -255,6 +255,7 @@ export default function ImprovedCurationInterface() {
   const [isStartingSession, setIsStartingSession] = useState(false)
   const [curatorName, setCuratorName] = useState('')
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
+  const [batchSize, setBatchSize] = useState(10)
 
   // Current Protein & Curation State
   const [currentProtein, setCurrentProtein] = useState<CurationProtein | null>(null)
@@ -262,13 +263,13 @@ export default function ImprovedCurationInterface() {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isLoadingProtein, setIsLoadingProtein] = useState(false)
 
-  // Curation Decision State - Updated with protein-centric questions
+  // Curation Decision State - Updated to match API expectations
   const [decision, setDecision] = useState<CurationDecision>({
-    has_domains: null,  // "Is there at least one domain in this protein?"
-    domains_assigned_correctly: null,  // "Are the domains assigned correctly?"
-    boundaries_correct: null,  // "Do the domains have correct boundaries?"
-    has_fragments: null,  // "Is there a fragment defined in this protein?"
-    is_repeat_protein: null,  // "Is this protein an internal repeat protein?"
+    has_domain: null,  // API expects has_domain (singular)
+    domain_assigned_correctly: null,  // API expects this field name
+    boundaries_correct: null,  // API expects this field name
+    is_fragment: null,  // API expects is_fragment (singular)
+    is_repeat_protein: null,  // API expects this field name
     confidence_level: 3,
     notes: '',
     flagged_for_review: false
@@ -313,7 +314,7 @@ export default function ImprovedCurationInterface() {
       const mockSession: CurationSession = {
         id: 1,
         curator_name: curatorName.trim(),
-        target_batch_size: 10,
+        target_batch_size: batchSize,
         proteins_reviewed: 0,
         current_protein_index: 0,
         status: 'in_progress',
@@ -326,50 +327,64 @@ export default function ImprovedCurationInterface() {
         }
       }
 
-      // Mock proteins data
+      // Mock proteins data - Create 10 proteins for full batch
       const mockProteins: CurationProtein[] = [
         {
-          id: 1,
-          source_id: '3hls_A',
-          pdb_id: '3hls',
-          chain_id: 'A',
-          sequence_length: 284,
-          batch_id: 1,
-          domains: [
-            {
-              id: 'domain_1',
-              pdb_range: 'A:1-150',
-              start_pos: 1,
-              end_pos: 150,
-              color: '#2563EB'
-            },
-            {
-              id: 'domain_2',
-              pdb_range: 'A:151-284',
-              start_pos: 151,
-              end_pos: 284,
-              color: '#DC2626'
-            }
-          ],
-          evidence: [
-            {
-              evidence_id: 1,
-              evidence_type: 'hhsearch',
-              ecod_domain_id: 'e3hlsA1',
-              source_id: 'e3hlsA1',
-              hit_range: '1-150',
-              query_range: '1-150',
-              confidence: 0.95,
-              evalue: 1e-20
-            }
-          ]
+          id: 1, source_id: '3hls_A', pdb_id: '3hls', chain_id: 'A', sequence_length: 284, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'A:1-150', start_pos: 1, end_pos: 150, color: '#2563EB' }],
+          evidence: [{ evidence_id: 1, evidence_type: 'hhsearch', ecod_domain_id: 'e3hlsA1', source_id: 'e3hlsA1', hit_range: '1-150', query_range: '1-150', confidence: 0.95, evalue: 1e-20 }]
+        },
+        {
+          id: 2, source_id: '1abc_B', pdb_id: '1abc', chain_id: 'B', sequence_length: 195, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'B:1-195', start_pos: 1, end_pos: 195, color: '#DC2626' }],
+          evidence: [{ evidence_id: 2, evidence_type: 'blast', ecod_domain_id: 'e1abcB1', source_id: 'e1abcB1', hit_range: '1-195', query_range: '1-195', confidence: 0.88, evalue: 1e-15 }]
+        },
+        {
+          id: 3, source_id: '2def_C', pdb_id: '2def', chain_id: 'C', sequence_length: 342, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'C:1-180', start_pos: 1, end_pos: 180, color: '#16A34A' }, { id: 'domain_2', pdb_range: 'C:181-342', start_pos: 181, end_pos: 342, color: '#9333EA' }],
+          evidence: [{ evidence_id: 3, evidence_type: 'hhsearch', ecod_domain_id: 'e2defC1', source_id: 'e2defC1', hit_range: '1-180', query_range: '1-180', confidence: 0.92, evalue: 1e-18 }]
+        },
+        {
+          id: 4, source_id: '4ghi_D', pdb_id: '4ghi', chain_id: 'D', sequence_length: 156, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'D:1-156', start_pos: 1, end_pos: 156, color: '#EA580C' }],
+          evidence: [{ evidence_id: 4, evidence_type: 'blast', ecod_domain_id: 'e4ghiD1', source_id: 'e4ghiD1', hit_range: '1-156', query_range: '1-156', confidence: 0.76, evalue: 1e-8 }]
+        },
+        {
+          id: 5, source_id: '5jkl_E', pdb_id: '5jkl', chain_id: 'E', sequence_length: 428, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'E:1-220', start_pos: 1, end_pos: 220, color: '#0891B2' }, { id: 'domain_2', pdb_range: 'E:221-428', start_pos: 221, end_pos: 428, color: '#DB2777' }],
+          evidence: [{ evidence_id: 5, evidence_type: 'hhsearch', ecod_domain_id: 'e5jklE1', source_id: 'e5jklE1', hit_range: '1-220', query_range: '1-220', confidence: 0.97, evalue: 1e-25 }]
+        },
+        {
+          id: 6, source_id: '6mno_F', pdb_id: '6mno', chain_id: 'F', sequence_length: 89, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'F:1-89', start_pos: 1, end_pos: 89, color: '#7C3AED' }],
+          evidence: [{ evidence_id: 6, evidence_type: 'blast', ecod_domain_id: 'e6mnoF1', source_id: 'e6mnoF1', hit_range: '1-89', query_range: '1-89', confidence: 0.68, evalue: 1e-5 }]
+        },
+        {
+          id: 7, source_id: '7pqr_G', pdb_id: '7pqr', chain_id: 'G', sequence_length: 267, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'G:1-267', start_pos: 1, end_pos: 267, color: '#059669' }],
+          evidence: [{ evidence_id: 7, evidence_type: 'hhsearch', ecod_domain_id: 'e7pqrG1', source_id: 'e7pqrG1', hit_range: '1-267', query_range: '1-267', confidence: 0.89, evalue: 1e-12 }]
+        },
+        {
+          id: 8, source_id: '8stu_H', pdb_id: '8stu', chain_id: 'H', sequence_length: 312, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'H:1-160', start_pos: 1, end_pos: 160, color: '#F59E0B' }, { id: 'domain_2', pdb_range: 'H:161-312', start_pos: 161, end_pos: 312, color: '#10B981' }],
+          evidence: [{ evidence_id: 8, evidence_type: 'blast', ecod_domain_id: 'e8stuH1', source_id: 'e8stuH1', hit_range: '1-160', query_range: '1-160', confidence: 0.83, evalue: 1e-10 }]
+        },
+        {
+          id: 9, source_id: '9vwx_I', pdb_id: '9vwx', chain_id: 'I', sequence_length: 203, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'I:1-203', start_pos: 1, end_pos: 203, color: '#EF4444' }],
+          evidence: [{ evidence_id: 9, evidence_type: 'hhsearch', ecod_domain_id: 'e9vwxI1', source_id: 'e9vwxI1', hit_range: '1-203', query_range: '1-203', confidence: 0.91, evalue: 1e-16 }]
+        },
+        {
+          id: 10, source_id: '1yz0_J', pdb_id: '1yz0', chain_id: 'J', sequence_length: 378, batch_id: 1,
+          domains: [{ id: 'domain_1', pdb_range: 'J:1-190', start_pos: 1, end_pos: 190, color: '#8B5CF6' }, { id: 'domain_2', pdb_range: 'J:191-378', start_pos: 191, end_pos: 378, color: '#06B6D4' }],
+          evidence: [{ evidence_id: 10, evidence_type: 'blast', ecod_domain_id: 'e1yz0J1', source_id: 'e1yz0J1', hit_range: '1-190', query_range: '1-190', confidence: 0.79, evalue: 1e-9 }]
         }
       ]
 
       setSession(mockSession)
-      setProteins(mockProteins)
+      setProteins(mockProteins.slice(0, batchSize))  // Use selected batch size
       setCurrentIndex(0)
-      setAllDecisions(new Array(mockProteins.length).fill(null))
+      setAllDecisions(new Array(batchSize).fill(null))  // Match batch size
 
       if (mockProteins.length > 0) {
         await loadProteinForCuration(mockProteins[0])
@@ -514,6 +529,7 @@ export default function ImprovedCurationInterface() {
     setShowBatchSummary(false)
     setCuratorName('')
     setSelectedBatchId(null)
+    setBatchSize(10)  // Reset to default
   }
 
   // Render session startup
@@ -549,6 +565,21 @@ export default function ImprovedCurationInterface() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium mb-2">Batch Size</label>
+                <select
+                  value={batchSize}
+                  onChange={(e) => setBatchSize(parseInt(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  disabled={isStartingSession}
+                >
+                  <option value={5}>5 proteins (Quick session)</option>
+                  <option value={10}>10 proteins (Standard)</option>
+                  <option value={15}>15 proteins (Extended)</option>
+                  <option value={20}>20 proteins (Long session)</option>
+                </select>
+              </div>
+
               <Button
                 onClick={startCurationSession}
                 disabled={!curatorName.trim() || isStartingSession}
@@ -562,7 +593,7 @@ export default function ImprovedCurationInterface() {
                 ) : (
                   <>
                     <Play className="w-4 h-4 mr-2" />
-                    Start Curation
+                    Start Curation ({batchSize} proteins)
                   </>
                 )}
               </Button>

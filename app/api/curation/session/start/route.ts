@@ -76,22 +76,19 @@ export async function POST(request: NextRequest) {
 
     const proteinSourceIds = proteins.map(p => p.source_id)
 
-    // Create new session - FIX: Handle JSON array properly
+    // Create new session - FIX: Use only existing columns
     const sessionQuery = `
       INSERT INTO pdb_analysis.curation_session (
-        curator_name, target_batch_size, locked_proteins, status, session_metadata
-      ) VALUES ($1, $2, $3, 'in_progress', $4)
-      RETURNING id, curator_name, target_batch_size, locked_proteins, created_at, session_metadata
+        curator_name, target_batch_size, locked_proteins, status
+      ) VALUES ($1, $2, $3::jsonb, 'in_progress')
+      RETURNING id, curator_name, target_batch_size, locked_proteins, created_at
     `
-
-    const sessionMetadata = batch_id ? { batch_id, batch_name: `Batch ${batch_id}` } : null
 
     const sessionResult = await prisma.$queryRawUnsafe(
       sessionQuery,
       curator_name,
       batch_size,
-      JSON.stringify(proteinSourceIds), // Convert to JSON string for PostgreSQL
-      sessionMetadata ? JSON.stringify(sessionMetadata) : null
+      JSON.stringify(proteinSourceIds) // Convert to JSON string for PostgreSQL
     )
 
     const session = (sessionResult as any[])[0]
@@ -114,7 +111,11 @@ export async function POST(request: NextRequest) {
       session,
       proteins,
       message: `Created session with ${proteins.length} proteins for curation`,
-      batch_summary: batch_id ? { batch_id, protein_count: proteins.length } : null
+      batch_summary: batch_id ? {
+        batch_id,
+        batch_name: `Batch ${batch_id}`,
+        protein_count: proteins.length
+      } : null
     })
 
   } catch (error) {

@@ -59,13 +59,15 @@ interface CurationProtein {
   }
   domains: any[]
   evidence: any[]
+  domain_count?: number
+  total_evidence_items?: number
 }
 
 interface CurationDecision {
-  has_domain: boolean | null  // API expects has_domain (singular)
-  domain_assigned_correctly: boolean | null  // API expects this field name
+  has_domain: boolean | null
+  domain_assigned_correctly: boolean | null
   boundaries_correct: boolean | null
-  is_fragment: boolean | null  // API expects is_fragment (singular)
+  is_fragment: boolean | null
   is_repeat_protein: boolean | null
   confidence_level: number
   notes: string
@@ -81,6 +83,14 @@ interface CurationEvidence {
   query_range: string
   confidence: number
   evalue: number
+  probability?: number
+  score?: number
+  ref_t_group?: string
+  ref_t_group_name?: string
+  ref_h_group?: string
+  ref_h_group_name?: string
+  ref_x_group?: string
+  ref_x_group_name?: string
 }
 
 interface Batch {
@@ -95,7 +105,7 @@ interface Batch {
   partition_count: number
 }
 
-// Batch Selector Component (simplified for this example)
+// Simplified Batch Selector Component for curation interface
 function BatchSelector({
   onBatchSelect,
   currentBatchId,
@@ -107,36 +117,77 @@ function BatchSelector({
 }) {
   const [batches, setBatches] = useState<Batch[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Simplified batch fetching - you'd implement the full logic here
-    setTimeout(() => {
-      setBatches([
-        { id: 1, batch_name: "PDB Update 2024-03", batch_type: "pdb_hhsearch",
-          total_items: 1000, completed_items: 850, status: "domain_partition_complete",
-          ref_version: "develop291", actual_protein_count: 950, partition_count: 920 },
-        { id: 2, batch_name: "Alt Rep Analysis", batch_type: "alt_rep",
-          total_items: 500, completed_items: 500, status: "completed",
-          ref_version: "develop291", actual_protein_count: 480, partition_count: 480 }
-      ])
-      setLoading(false)
-    }, 500)
+    const fetchBatches = async () => {
+      try {
+        setLoading(true)
+        const response = await fetch('/api/batches')
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch batches: ${response.status}`)
+        }
+
+        const data = await response.json()
+
+        // Transform and filter for curation-ready batches
+        const transformedBatches: Batch[] = (data.batches || [])
+          .filter((batch: any) => {
+            // Only show batches with partition data ready for curation
+            return batch.partition_count > 0 &&
+                   ['pdb_hhsearch', 'domain_analysis'].includes(batch.batch_type) &&
+                   ['completed', 'domain_partition_complete', 'domain_partition_complete_with_errors'].includes(batch.status)
+          })
+          .map((batch: any) => ({
+            id: batch.id,
+            batch_name: batch.batch_name,
+            batch_type: batch.batch_type,
+            total_items: batch.total_items,
+            completed_items: batch.completed_items,
+            status: batch.status,
+            ref_version: batch.ref_version,
+            actual_protein_count: batch.actual_protein_count,
+            partition_count: batch.partition_count
+          }))
+          .sort((a, b) => b.id - a.id) // Latest first
+
+        setBatches(transformedBatches)
+        setError(null)
+      } catch (err) {
+        console.error('Error fetching batches:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load batches')
+        setBatches([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchBatches()
   }, [])
 
   if (loading) {
-    return <div className="animate-pulse bg-gray-200 h-8 w-48 rounded-md"></div>
+    return <div className="animate-pulse bg-gray-200 h-8 w-full rounded-md"></div>
+  }
+
+  if (error) {
+    return (
+      <div className="text-red-600 text-sm p-2 bg-red-50 rounded-md">
+        Error: {error}
+      </div>
+    )
   }
 
   return (
     <select
       value={currentBatchId || ''}
       onChange={(e) => onBatchSelect(e.target.value ? parseInt(e.target.value) : null)}
-      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
+      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
     >
       <option value="">Auto-Select Latest Batch</option>
       {batches.map(batch => (
         <option key={batch.id} value={batch.id}>
-          {batch.batch_name} ({batch.partition_count.toLocaleString()} proteins) [{batch.batch_type}]
+          {batch.batch_name} ({batch.partition_count.toLocaleString()} proteins)
         </option>
       ))}
     </select>
@@ -245,7 +296,7 @@ const processDomainDataCorrectly = (domains: any[]): any[] => {
 }
 
 // Main Component
-export default function ImprovedCurationInterface() {
+export default function MainCurationInterface() {
   // Refs for scroll management
   const mainContentRef = useRef<HTMLDivElement>(null)
   const evidenceRef = useRef<HTMLDivElement>(null)
@@ -265,11 +316,11 @@ export default function ImprovedCurationInterface() {
 
   // Curation Decision State - Updated to match API expectations
   const [decision, setDecision] = useState<CurationDecision>({
-    has_domain: null,  // API expects has_domain (singular)
-    domain_assigned_correctly: null,  // API expects this field name
-    boundaries_correct: null,  // API expects this field name
-    is_fragment: null,  // API expects is_fragment (singular)
-    is_repeat_protein: null,  // API expects this field name
+    has_domain: null,
+    domain_assigned_correctly: null,
+    boundaries_correct: null,
+    is_fragment: null,
+    is_repeat_protein: null,
     confidence_level: 3,
     notes: '',
     flagged_for_review: false
@@ -307,91 +358,70 @@ export default function ImprovedCurationInterface() {
 
     setIsStartingSession(true)
     try {
-      // Simulate API call - replace with actual implementation
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Call the real curation session start API
+      const response = await fetch('/api/curation/session/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          curator_name: curatorName.trim(),
+          batch_size: batchSize,
+          batch_id: selectedBatchId || undefined
+        })
+      })
 
-      // Mock session data
-      const mockSession: CurationSession = {
-        id: 1,
-        curator_name: curatorName.trim(),
-        target_batch_size: batchSize,
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      // Create session object from API response
+      const apiSession: CurationSession = {
+        id: data.session.id,
+        curator_name: data.session.curator_name,
+        target_batch_size: data.session.target_batch_size,
         proteins_reviewed: 0,
         current_protein_index: 0,
         status: 'in_progress',
-        locked_proteins: [],
-        created_at: new Date().toISOString(),
-        session_metadata: {
-          batch_id: selectedBatchId || 1,
-          batch_name: 'PDB Update 2024-03',
+        locked_proteins: data.session.locked_proteins || [],
+        created_at: data.session.created_at,
+        session_metadata: data.batch_summary ? {
+          batch_id: data.batch_summary.batch_id,
+          batch_name: data.batch_summary.batch_name,
           reference_version: 'develop291'
-        }
+        } : undefined
       }
 
-      // Mock proteins data - Create 10 proteins for full batch
-      const mockProteins: CurationProtein[] = [
-        {
-          id: 1, source_id: '3hls_A', pdb_id: '3hls', chain_id: 'A', sequence_length: 284, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'A:1-150', start_pos: 1, end_pos: 150, color: '#2563EB' }],
-          evidence: [{ evidence_id: 1, evidence_type: 'hhsearch', ecod_domain_id: 'e3hlsA1', source_id: 'e3hlsA1', hit_range: '1-150', query_range: '1-150', confidence: 0.95, evalue: 1e-20 }]
-        },
-        {
-          id: 2, source_id: '1abc_B', pdb_id: '1abc', chain_id: 'B', sequence_length: 195, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'B:1-195', start_pos: 1, end_pos: 195, color: '#DC2626' }],
-          evidence: [{ evidence_id: 2, evidence_type: 'blast', ecod_domain_id: 'e1abcB1', source_id: 'e1abcB1', hit_range: '1-195', query_range: '1-195', confidence: 0.88, evalue: 1e-15 }]
-        },
-        {
-          id: 3, source_id: '2def_C', pdb_id: '2def', chain_id: 'C', sequence_length: 342, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'C:1-180', start_pos: 1, end_pos: 180, color: '#16A34A' }, { id: 'domain_2', pdb_range: 'C:181-342', start_pos: 181, end_pos: 342, color: '#9333EA' }],
-          evidence: [{ evidence_id: 3, evidence_type: 'hhsearch', ecod_domain_id: 'e2defC1', source_id: 'e2defC1', hit_range: '1-180', query_range: '1-180', confidence: 0.92, evalue: 1e-18 }]
-        },
-        {
-          id: 4, source_id: '4ghi_D', pdb_id: '4ghi', chain_id: 'D', sequence_length: 156, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'D:1-156', start_pos: 1, end_pos: 156, color: '#EA580C' }],
-          evidence: [{ evidence_id: 4, evidence_type: 'blast', ecod_domain_id: 'e4ghiD1', source_id: 'e4ghiD1', hit_range: '1-156', query_range: '1-156', confidence: 0.76, evalue: 1e-8 }]
-        },
-        {
-          id: 5, source_id: '5jkl_E', pdb_id: '5jkl', chain_id: 'E', sequence_length: 428, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'E:1-220', start_pos: 1, end_pos: 220, color: '#0891B2' }, { id: 'domain_2', pdb_range: 'E:221-428', start_pos: 221, end_pos: 428, color: '#DB2777' }],
-          evidence: [{ evidence_id: 5, evidence_type: 'hhsearch', ecod_domain_id: 'e5jklE1', source_id: 'e5jklE1', hit_range: '1-220', query_range: '1-220', confidence: 0.97, evalue: 1e-25 }]
-        },
-        {
-          id: 6, source_id: '6mno_F', pdb_id: '6mno', chain_id: 'F', sequence_length: 89, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'F:1-89', start_pos: 1, end_pos: 89, color: '#7C3AED' }],
-          evidence: [{ evidence_id: 6, evidence_type: 'blast', ecod_domain_id: 'e6mnoF1', source_id: 'e6mnoF1', hit_range: '1-89', query_range: '1-89', confidence: 0.68, evalue: 1e-5 }]
-        },
-        {
-          id: 7, source_id: '7pqr_G', pdb_id: '7pqr', chain_id: 'G', sequence_length: 267, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'G:1-267', start_pos: 1, end_pos: 267, color: '#059669' }],
-          evidence: [{ evidence_id: 7, evidence_type: 'hhsearch', ecod_domain_id: 'e7pqrG1', source_id: 'e7pqrG1', hit_range: '1-267', query_range: '1-267', confidence: 0.89, evalue: 1e-12 }]
-        },
-        {
-          id: 8, source_id: '8stu_H', pdb_id: '8stu', chain_id: 'H', sequence_length: 312, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'H:1-160', start_pos: 1, end_pos: 160, color: '#F59E0B' }, { id: 'domain_2', pdb_range: 'H:161-312', start_pos: 161, end_pos: 312, color: '#10B981' }],
-          evidence: [{ evidence_id: 8, evidence_type: 'blast', ecod_domain_id: 'e8stuH1', source_id: 'e8stuH1', hit_range: '1-160', query_range: '1-160', confidence: 0.83, evalue: 1e-10 }]
-        },
-        {
-          id: 9, source_id: '9vwx_I', pdb_id: '9vwx', chain_id: 'I', sequence_length: 203, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'I:1-203', start_pos: 1, end_pos: 203, color: '#EF4444' }],
-          evidence: [{ evidence_id: 9, evidence_type: 'hhsearch', ecod_domain_id: 'e9vwxI1', source_id: 'e9vwxI1', hit_range: '1-203', query_range: '1-203', confidence: 0.91, evalue: 1e-16 }]
-        },
-        {
-          id: 10, source_id: '1yz0_J', pdb_id: '1yz0', chain_id: 'J', sequence_length: 378, batch_id: 1,
-          domains: [{ id: 'domain_1', pdb_range: 'J:1-190', start_pos: 1, end_pos: 190, color: '#8B5CF6' }, { id: 'domain_2', pdb_range: 'J:191-378', start_pos: 191, end_pos: 378, color: '#06B6D4' }],
-          evidence: [{ evidence_id: 10, evidence_type: 'blast', ecod_domain_id: 'e1yz0J1', source_id: 'e1yz0J1', hit_range: '1-190', query_range: '1-190', confidence: 0.79, evalue: 1e-9 }]
-        }
-      ]
+      // Transform API proteins to CurationProtein format
+      const apiProteins: CurationProtein[] = data.proteins.map((protein: any, index: number) => ({
+        id: protein.id,
+        source_id: protein.source_id,
+        pdb_id: protein.pdb_id,
+        chain_id: protein.chain_id,
+        sequence_length: protein.sequence_length,
+        batch_id: data.batch_summary?.batch_id,
+        batch_info: data.batch_summary,
+        domains: [], // Will be loaded when protein is selected
+        evidence: [] // Will be loaded when protein is selected
+      }))
 
-      setSession(mockSession)
-      setProteins(mockProteins.slice(0, batchSize))  // Use selected batch size
+      setSession(apiSession)
+      setProteins(apiProteins)
       setCurrentIndex(0)
-      setAllDecisions(new Array(batchSize).fill(null))  // Match batch size
+      setAllDecisions(new Array(apiProteins.length).fill(null))
 
-      if (mockProteins.length > 0) {
-        await loadProteinForCuration(mockProteins[0])
+      // Load the first protein for curation
+      if (apiProteins.length > 0) {
+        await loadProteinForCuration(apiProteins[0])
       }
+
     } catch (error) {
       console.error('Error starting session:', error)
-      alert('Failed to start curation session')
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+      alert(`Failed to start curation session: ${errorMessage}`)
     } finally {
       setIsStartingSession(false)
     }
@@ -405,16 +435,47 @@ export default function ImprovedCurationInterface() {
     setReviewStartTime(new Date())
 
     try {
-      // Simulate loading - replace with actual API calls
-      await new Promise(resolve => setTimeout(resolve, 500))
+      // Fetch detailed protein data with domains and evidence
+      const response = await fetch(`/api/proteins/${protein.source_id}/domains`)
 
-      const processedDomains = processDomainDataCorrectly(protein.domains || [])
-      const allEvidence = protein.evidence || []
+      if (!response.ok) {
+        throw new Error(`Failed to load protein data: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      // Process domains from the API response
+      const processedDomains = processDomainDataCorrectly(data.domains || [])
+
+      // Extract evidence from domains
+      const allEvidence = data.domains?.flatMap((domain: any) =>
+        (domain.evidence || []).map((evidence: any) => ({
+          evidence_id: evidence.id || Math.random(),
+          evidence_type: evidence.evidence_type,
+          ecod_domain_id: evidence.source_id,
+          source_id: evidence.source_id,
+          hit_range: evidence.hit_range,
+          query_range: evidence.query_range,
+          confidence: evidence.confidence || 0,
+          evalue: evidence.evalue || 0,
+          probability: evidence.probability,
+          score: evidence.score,
+          ref_t_group: evidence.ref_t_group,
+          ref_t_group_name: evidence.ref_t_group_name,
+          ref_h_group: evidence.ref_h_group,
+          ref_h_group_name: evidence.ref_h_group_name,
+          ref_x_group: evidence.ref_x_group,
+          ref_x_group_name: evidence.ref_x_group_name
+        }))
+      ) || []
 
       const proteinWithData = {
         ...protein,
+        ...data.protein, // Merge any additional protein metadata
         domains: processedDomains,
-        evidence: allEvidence
+        evidence: allEvidence,
+        domain_count: processedDomains.length,
+        total_evidence_items: allEvidence.length
       }
 
       setCurrentProtein(proteinWithData)
@@ -428,14 +489,16 @@ export default function ImprovedCurationInterface() {
           return a.evalue - b.evalue
         })
         setSelectedEvidence(sortedEvidence[0])
+      } else {
+        setSelectedEvidence(null)
       }
 
       // Reset decision for new protein
       setDecision({
-        has_domains: null,
-        domains_assigned_correctly: null,
+        has_domain: null,
+        domain_assigned_correctly: null,
         boundaries_correct: null,
-        has_fragments: null,
+        is_fragment: null,
         is_repeat_protein: null,
         confidence_level: 3,
         notes: '',
@@ -444,7 +507,18 @@ export default function ImprovedCurationInterface() {
 
     } catch (error) {
       console.error('Error loading protein:', error)
-      setStructureError(error instanceof Error ? error.message : 'Unknown error')
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      setStructureError(errorMessage)
+
+      // Set fallback protein data if API fails
+      setCurrentProtein({
+        ...protein,
+        domains: [],
+        evidence: [],
+        domain_count: 0,
+        total_evidence_items: 0
+      })
+      setSelectedEvidence(null)
     } finally {
       setIsLoadingProtein(false)
     }
@@ -457,14 +531,64 @@ export default function ImprovedCurationInterface() {
       return
     }
 
+    if (!session) {
+      alert('No active curation session')
+      return
+    }
+
     try {
-      // Simulate saving decision
-      await new Promise(resolve => setTimeout(resolve, 300))
+      const reviewTimeSeconds = reviewStartTime
+        ? Math.round((Date.now() - reviewStartTime.getTime()) / 1000)
+        : 0
+
+      // Save decision via API
+      const response = await fetch('/api/curation/decision', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: session.id,
+          protein_source_id: currentProtein.source_id,
+          decisions: decision,
+          evidence_used: {
+            primary_evidence_type: selectedEvidence.evidence_type,
+            primary_evidence_source_id: selectedEvidence.source_id,
+            reference_domain_id: selectedEvidence.ecod_domain_id,
+            evidence_confidence: selectedEvidence.confidence,
+            evidence_evalue: selectedEvidence.evalue
+          },
+          review_time_seconds: reviewTimeSeconds
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
 
       // Update local state
       const newDecisions = [...allDecisions]
       newDecisions[currentIndex] = decision
       setAllDecisions(newDecisions)
+
+      // Auto-save session progress
+      if (session) {
+        try {
+          await fetch(`/api/curation/session/${session.id}/auto-save`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              current_protein_index: currentIndex + 1,
+              decisions: newDecisions,
+              notes: decision.notes
+            })
+          })
+        } catch (autoSaveError) {
+          console.warn('Auto-save failed:', autoSaveError)
+          // Don't block the main flow for auto-save failures
+        }
+      }
 
       // Move to next protein or show summary
       if (currentIndex < proteins.length - 1) {
@@ -477,9 +601,11 @@ export default function ImprovedCurationInterface() {
       } else {
         setShowBatchSummary(true)
       }
+
     } catch (error) {
       console.error('Error saving decision:', error)
-      alert('Failed to save curation decision')
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      alert(`Failed to save curation decision: ${errorMessage}`)
     }
   }
 
@@ -509,27 +635,73 @@ export default function ImprovedCurationInterface() {
 
   // Check if all required questions are answered
   const isDecisionComplete = () => {
-    return decision.has_domains !== null &&
-           decision.domains_assigned_correctly !== null &&
+    return decision.has_domain !== null &&
+           decision.domain_assigned_correctly !== null &&
            decision.boundaries_correct !== null &&
-           decision.has_fragments !== null &&
+           decision.is_fragment !== null &&
            decision.is_repeat_protein !== null
   }
 
   // Complete batch
   const completeBatch = async (action: 'commit' | 'discard' | 'revisit') => {
-    alert(`Batch ${action}ed successfully!`)
+    if (!session) {
+      alert('No active session to complete')
+      return
+    }
 
-    // Reset state
-    setSession(null)
-    setProteins([])
-    setCurrentProtein(null)
-    setCurrentIndex(0)
-    setAllDecisions([])
-    setShowBatchSummary(false)
-    setCuratorName('')
-    setSelectedBatchId(null)
-    setBatchSize(10)  // Reset to default
+    try {
+      const response = await fetch(`/api/curation/session/${session.id}/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action,
+          final_notes: `Batch ${action}ed from curation interface`
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      // Show success message with statistics
+      if (action === 'commit') {
+        alert(`Batch committed successfully!\n\nStatistics:\n- ${result.statistics.total_decisions} decisions saved\n- ${result.statistics.has_domain_count} proteins with domains\n- ${result.statistics.flagged_count} flagged for review\n- Average confidence: ${result.statistics.avg_confidence}/5`)
+      } else {
+        alert(`Batch ${action}ed successfully!`)
+      }
+
+      // Reset state
+      setSession(null)
+      setProteins([])
+      setCurrentProtein(null)
+      setCurrentIndex(0)
+      setAllDecisions([])
+      setShowBatchSummary(false)
+      setCuratorName('')
+      setSelectedBatchId(null)
+      setBatchSize(10)
+      setSelectedEvidence(null)
+      setDecision({
+        has_domain: null,
+        domain_assigned_correctly: null,
+        boundaries_correct: null,
+        is_fragment: null,
+        is_repeat_protein: null,
+        confidence_level: 3,
+        notes: '',
+        flagged_for_review: false
+      })
+
+    } catch (error) {
+      console.error('Error completing batch:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      alert(`Failed to ${action} batch: ${errorMessage}`)
+    }
   }
 
   // Render session startup
@@ -807,47 +979,47 @@ export default function ImprovedCurationInterface() {
             <Card className="p-6">
               <h4 className="font-medium mb-4">Protein Assessment Questions</h4>
               <div className="space-y-6">
-                {/* Question 1 - Updated to be protein-centric */}
+                {/* Question 1 */}
                 <div>
                   <p className="font-medium mb-2">1. Is there at least one domain in this protein?</p>
                   <p className="text-sm text-gray-600 mb-3">Consider the overall protein structure and domain predictions</p>
                   <div className="flex gap-4">
                     <Button
-                      variant={decision.has_domains === true ? 'default' : 'outline'}
-                      onClick={() => handleBooleanQuestion('has_domains', true)}
+                      variant={decision.has_domain === true ? 'default' : 'outline'}
+                      onClick={() => handleBooleanQuestion('has_domain', true)}
                     >
                       Yes
                     </Button>
                     <Button
-                      variant={decision.has_domains === false ? 'default' : 'outline'}
-                      onClick={() => handleBooleanQuestion('has_domains', false)}
+                      variant={decision.has_domain === false ? 'default' : 'outline'}
+                      onClick={() => handleBooleanQuestion('has_domain', false)}
                     >
                       No
                     </Button>
                   </div>
                 </div>
 
-                {/* Question 2 - Updated */}
+                {/* Question 2 */}
                 <div>
                   <p className="font-medium mb-2">2. Are the domains assigned correctly?</p>
                   <p className="text-sm text-gray-600 mb-3">Do the predicted domains match the structural reality?</p>
                   <div className="flex gap-4">
                     <Button
-                      variant={decision.domains_assigned_correctly === true ? 'default' : 'outline'}
-                      onClick={() => handleBooleanQuestion('domains_assigned_correctly', true)}
+                      variant={decision.domain_assigned_correctly === true ? 'default' : 'outline'}
+                      onClick={() => handleBooleanQuestion('domain_assigned_correctly', true)}
                     >
                       Yes
                     </Button>
                     <Button
-                      variant={decision.domains_assigned_correctly === false ? 'default' : 'outline'}
-                      onClick={() => handleBooleanQuestion('domains_assigned_correctly', false)}
+                      variant={decision.domain_assigned_correctly === false ? 'default' : 'outline'}
+                      onClick={() => handleBooleanQuestion('domain_assigned_correctly', false)}
                     >
                       No
                     </Button>
                   </div>
                 </div>
 
-                {/* Question 3 - Updated */}
+                {/* Question 3 */}
                 <div>
                   <p className="font-medium mb-2">3. Do the domains have correct boundaries?</p>
                   <p className="text-sm text-gray-600 mb-3">Are the start and end positions accurate?</p>
@@ -867,27 +1039,27 @@ export default function ImprovedCurationInterface() {
                   </div>
                 </div>
 
-                {/* Question 4 - Updated to be protein-centric */}
+                {/* Question 4 */}
                 <div>
                   <p className="font-medium mb-2">4. Is there a fragment defined in this protein?</p>
                   <p className="text-sm text-gray-600 mb-3">Is this protein or any of its domains incomplete?</p>
                   <div className="flex gap-4">
                     <Button
-                      variant={decision.has_fragments === true ? 'default' : 'outline'}
-                      onClick={() => handleBooleanQuestion('has_fragments', true)}
+                      variant={decision.is_fragment === true ? 'default' : 'outline'}
+                      onClick={() => handleBooleanQuestion('is_fragment', true)}
                     >
                       Yes
                     </Button>
                     <Button
-                      variant={decision.has_fragments === false ? 'default' : 'outline'}
-                      onClick={() => handleBooleanQuestion('has_fragments', false)}
+                      variant={decision.is_fragment === false ? 'default' : 'outline'}
+                      onClick={() => handleBooleanQuestion('is_fragment', false)}
                     >
                       No
                     </Button>
                   </div>
                 </div>
 
-                {/* Question 5 - Updated */}
+                {/* Question 5 */}
                 <div>
                   <p className="font-medium mb-2">5. Is this protein an internal repeat protein?</p>
                   <p className="text-sm text-gray-600 mb-3">LRR/CTPR/Bprop or similar repetitive structures</p>

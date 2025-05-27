@@ -1,4 +1,4 @@
-// app/api/curation/decision/route.ts
+// app/api/curation/decision/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Session not found or not active' }, { status: 404 })
     }
 
-    // Insert or update curation decision
+    // Insert or update curation decision - FIX: Pass parameters individually
     await prisma.$queryRawUnsafe(`
       INSERT INTO pdb_analysis.curation_decision (
         session_id, protein_id, source_id,
@@ -65,7 +65,8 @@ export async function POST(request: NextRequest) {
         evidence_confidence = EXCLUDED.evidence_confidence,
         evidence_evalue = EXCLUDED.evidence_evalue,
         updated_at = CURRENT_TIMESTAMP
-    `, [
+    `,
+      // FIXED: Parameters passed individually, not as array
       session_id,
       protein_id,
       protein_source_id,
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
       evidence_used?.reference_domain_id || null,
       evidence_used?.evidence_confidence || null,
       evidence_used?.evidence_evalue || null
-    ])
+    )
 
     return NextResponse.json({
       success: true,

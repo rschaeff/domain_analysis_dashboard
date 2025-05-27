@@ -1,10 +1,10 @@
-// app/api/curation/session/start/route.ts
+// app/api/curation/session/start/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
 export async function POST(request: NextRequest) {
   try {
-    const { curator_name, batch_size = 10 } = await request.json()
+    const { curator_name, batch_size = 10, batch_id } = await request.json()
 
     if (!curator_name) {
       return NextResponse.json({ error: 'Curator name required' }, { status: 400 })
@@ -47,6 +47,8 @@ export async function POST(request: NextRequest) {
           AND p.length BETWEEN 30 AND 1000
           -- Filter to representatives only
           AND (p.is_nonident_rep = true OR p.is_nonident_rep IS NULL)
+          -- Optional batch filter
+          ${batch_id ? 'AND pp.batch_id = $2' : ''}
         GROUP BY p.id, p.source_id, p.pdb_id, p.chain_id, p.length
         HAVING COUNT(DISTINCT de.id) > 0
         ORDER BY best_confidence DESC, evidence_count DESC
@@ -58,7 +60,11 @@ export async function POST(request: NextRequest) {
       FROM available_proteins
     `
 
-    const availableProteins = await prisma.$queryRawUnsafe(nextProteinsQuery, batch_size)
+    // Execute query with proper parameter handling
+    const availableProteins = batch_id
+      ? await prisma.$queryRawUnsafe(nextProteinsQuery, batch_size, batch_id)
+      : await prisma.$queryRawUnsafe(nextProteinsQuery, batch_size)
+
     const proteins = availableProteins as any[]
 
     if (proteins.length === 0) {
@@ -70,19 +76,22 @@ export async function POST(request: NextRequest) {
 
     const proteinSourceIds = proteins.map(p => p.source_id)
 
-    // Create new session (fix array casting issue)
+    // Create new session - FIX: Handle JSON array properly
     const sessionQuery = `
       INSERT INTO pdb_analysis.curation_session (
-        curator_name, target_batch_size, locked_proteins, status
-      ) VALUES ($1, $2, $3, 'in_progress')
-      RETURNING id, curator_name, target_batch_size, locked_proteins, created_at
+        curator_name, target_batch_size, locked_proteins, status, session_metadata
+      ) VALUES ($1, $2, $3, 'in_progress', $4)
+      RETURNING id, curator_name, target_batch_size, locked_proteins, created_at, session_metadata
     `
+
+    const sessionMetadata = batch_id ? { batch_id, batch_name: `Batch ${batch_id}` } : null
 
     const sessionResult = await prisma.$queryRawUnsafe(
       sessionQuery,
       curator_name,
       batch_size,
-      proteinSourceIds  // Pass array directly - PostgreSQL will handle the conversion
+      JSON.stringify(proteinSourceIds), // Convert to JSON string for PostgreSQL
+      sessionMetadata ? JSON.stringify(sessionMetadata) : null
     )
 
     const session = (sessionResult as any[])[0]
@@ -90,9 +99,12 @@ export async function POST(request: NextRequest) {
     // Lock the proteins to this session
     const lockPromises = proteinSourceIds.map(sourceId =>
       prisma.$queryRawUnsafe(`
-        INSERT INTO pdb_analysis.protein_locks (source_id, curator_name, session_id)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (source_id) DO NOTHING
+        INSERT INTO pdb_analysis.protein_locks (source_id, curator_name, session_id, expires_at)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '2 hours')
+        ON CONFLICT (source_id) DO UPDATE SET
+          curator_name = EXCLUDED.curator_name,
+          session_id = EXCLUDED.session_id,
+          expires_at = EXCLUDED.expires_at
       `, sourceId, curator_name, session.id)
     )
 
@@ -101,7 +113,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       session,
       proteins,
-      message: `Created session with ${proteins.length} proteins for curation`
+      message: `Created session with ${proteins.length} proteins for curation`,
+      batch_summary: batch_id ? { batch_id, protein_count: proteins.length } : null
     })
 
   } catch (error) {

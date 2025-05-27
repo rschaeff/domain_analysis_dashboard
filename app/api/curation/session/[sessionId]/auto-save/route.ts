@@ -1,4 +1,4 @@
-// app/api/curation/session/[sessionId]/auto-save/route.ts
+// app/api/curation/session/[sessionId]/auto-save/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
@@ -20,7 +20,16 @@ export async function PUT(
       return NextResponse.json({ error: 'Session not found or not active' }, { status: 404 })
     }
 
-    // Update session with auto-save data
+    // Prepare auto-save data
+    const completedCount = decisions.filter((d: any) => d && d.completed).length
+    const autoSaveData = {
+      decisions,
+      saved_at: new Date().toISOString(),
+      notes,
+      completed_count: completedCount
+    }
+
+    // Update session with auto-save data - FIX: Pass parameters individually
     const updateQuery = `
       UPDATE pdb_analysis.curation_session
       SET
@@ -33,19 +42,12 @@ export async function PUT(
       RETURNING id, current_protein_index, proteins_reviewed, updated_at
     `
 
-    const autoSaveData = {
-      decisions,
-      saved_at: new Date().toISOString(),
-      notes,
-      completed_count: decisions.filter((d: any) => d && d.completed).length
-    }
-
     const result = await prisma.$queryRawUnsafe(
       updateQuery,
       current_protein_index,
-      decisions.filter((d: any) => d && d.completed).length,
+      completedCount,
       JSON.stringify(autoSaveData),
-      notes,
+      notes || '',
       parseInt(sessionId)
     )
 

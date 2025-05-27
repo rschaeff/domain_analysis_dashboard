@@ -437,7 +437,6 @@ export default function MainCurationInterface() {
         console.error('Session start failed:', error)
         alert(`Failed to start session: ${error.error || error.message || 'Unknown error'}`)
       }
-      }
     } catch (error) {
       console.error('Error starting session:', error)
       alert('Failed to start curation session')

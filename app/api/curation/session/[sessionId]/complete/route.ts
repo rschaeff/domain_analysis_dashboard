@@ -29,6 +29,14 @@ export async function POST(
 
     const session = (sessionInfo as any[])[0]
 
+    // Get all decisions for this session (needed for statistics regardless of action)
+    const decisionsQuery = `
+      SELECT cd.protein_id, cd.source_id
+      FROM pdb_analysis.curation_decision cd
+      WHERE cd.session_id = $1
+    `
+    const decisions = await prisma.$queryRawUnsafe(decisionsQuery, parseInt(sessionId))
+
     // Update session status - FIX: Handle potential JSONB concatenation
     const finalStatus = action === 'commit' ? 'committed' :
                        action === 'discard' ? 'discarded' : 'completed'

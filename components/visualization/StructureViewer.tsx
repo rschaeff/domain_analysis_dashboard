@@ -39,6 +39,9 @@ interface PdbValidation {
   exists: boolean
   accessible: boolean
   error?: string
+  note?: string
+  source?: 'local_api' | 'rcsb_api' | 'validation_failed'
+  local_available?: boolean
   checkedAt: Date
 }
 
@@ -71,53 +74,67 @@ export function StructureViewer({
   const [validationError, setValidationError] = useState<string | null>(null)
   const [showValidationDetails, setShowValidationDetails] = useState(false)
 
-  // NEW: Validate PDB structure exists
-  const validatePdbStructure = async (pdbId: string): Promise<PdbValidation> => {
-    try {
-      console.log(`🔍 Validating PDB structure: ${pdbId}`)
+      // NEW: Validate PDB structure exists
+    const validatePdbStructure = async (pdbId: string): Promise<PdbValidation> => {
+      try {
+        console.log(`🔍 Validating PDB structure: ${pdbId} (using local API first)`);
 
-      // Check RCSB API first
-      const apiUrl = `https://data.rcsb.org/rest/v1/core/entry/${pdbId.toLowerCase()}`
-      const apiResponse = await fetch(apiUrl, {
-        method: 'HEAD',
-        mode: 'cors'
-      })
+        // STEP 1: Try your local PDB API first (no CORS issues)
+        try {
+          const localResponse = await fetch(`/api/pdb/${pdbId.toLowerCase()}`, {
+            method: 'HEAD'
+          });
 
-      if (apiResponse.ok) {
-        console.log(`✅ PDB ${pdbId} exists in RCSB`)
-
-        // Check if the actual PDB file is accessible
-        const pdbUrl = `https://files.rcsb.org/view/${pdbId.toLowerCase()}.pdb`
-        const pdbResponse = await fetch(pdbUrl, {
-          method: 'HEAD',
-          mode: 'cors'
-        })
-
-        return {
-          exists: true,
-          accessible: pdbResponse.ok,
-          error: pdbResponse.ok ? undefined : `PDB file not accessible (HTTP ${pdbResponse.status})`,
-          checkedAt: new Date()
+          if (localResponse.ok) {
+            console.log(`✅ PDB ${pdbId} available via local API`);
+            return {
+              exists: true,
+              accessible: true,
+              checkedAt: new Date()
+            };
+          } else {
+            console.log(`⚠️ Local API returned ${localResponse.status} for ${pdbId}`);
+          }
+        } catch (localError) {
+          console.log(`⚠️ Local API error for ${pdbId}:`, localError);
         }
-      } else {
-        console.log(`❌ PDB ${pdbId} not found (HTTP ${apiResponse.status})`)
+
+        // STEP 2: If local API fails, try to validate existence (server-side to avoid CORS)
+        try {
+          // Create a simple validation endpoint that checks server-side
+          const validationResponse = await fetch(`/api/pdb/${pdbId.toLowerCase()}/validate`);
+
+          if (validationResponse.ok) {
+            const validationData = await validationResponse.json();
+            return {
+              exists: validationData.exists || false,
+              accessible: validationData.accessible || false,
+              error: validationData.error,
+              checkedAt: new Date()
+            };
+          }
+        } catch (validationError) {
+          console.log(`⚠️ Validation endpoint error for ${pdbId}:`, validationError);
+        }
+
+        // STEP 3: If all else fails, assume local file issues but structure might exist
         return {
           exists: false,
           accessible: false,
-          error: `PDB ${pdbId} not found in RCSB database (HTTP ${apiResponse.status})`,
+          error: `Structure ${pdbId} not available via local API. Check local repository.`,
           checkedAt: new Date()
-        }
-      }
-    } catch (error) {
-      console.error(`💥 Validation error for PDB ${pdbId}:`, error)
-      return {
-        exists: false,
-        accessible: false,
-        error: `Validation failed: ${error instanceof Error ? error.message : String(error)}`,
-        checkedAt: new Date()
+        };
+
+      } catch (error) {
+        console.error(`💥 Validation error for PDB ${pdbId}:`, error);
+        return {
+          exists: false,
+          accessible: false,
+          error: `Validation failed: ${error instanceof Error ? error.message : String(error)}`,
+          checkedAt: new Date()
+        };
       }
     }
-  }
 
   // NEW: Validate structure on mount
   useEffect(() => {
@@ -285,11 +302,23 @@ export function StructureViewer({
     return <LoadingSpinner size="sm" />
   }
 
-  const getValidationBadge = () => {
-    if (!validation) return <Badge variant="secondary">Checking...</Badge>
-    if (validation.exists && validation.accessible) return <Badge variant="default">Valid</Badge>
-    return <Badge variant="destructive">Invalid</Badge>
-  }
+    const getValidationBadge = () => {
+      if (!validation) return <Badge variant="secondary">Checking...</Badge>
+
+      if (validation.source === 'local_api') {
+        return <Badge variant="default" className="bg-green-600">Local</Badge>
+      }
+
+      if (validation.exists && validation.accessible) {
+        return <Badge variant="default">Available</Badge>
+      }
+
+      if (validation.exists && !validation.accessible) {
+        return <Badge variant="outline" className="border-yellow-500 text-yellow-700">Exists</Badge>
+      }
+
+      return <Badge variant="destructive">Not Found</Badge>
+    }
 
   const canLoadViewer = validation?.exists && validation?.accessible
 
@@ -634,43 +663,68 @@ const filesystemColumns = [
         </div>
 
         {/* NEW: Validation Details */}
-        {showValidationDetails && (
-          <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <strong>Validation Status:</strong>
-                <div className="mt-1 space-y-1">
-                  <div>Exists: {validation?.exists ? '✅ Yes' : '❌ No'}</div>
-                  <div>Accessible: {validation?.accessible ? '✅ Yes' : '❌ No'}</div>
-                  {validation?.error && (
-                    <div className="text-red-600">Error: {validation.error}</div>
-                  )}
-                </div>
-              </div>
-              <div>
-                <strong>External Links:</strong>
-                <div className="mt-1 space-y-1">
-                  <a
-                    href={`https://www.rcsb.org/structure/${pdb_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                  >
-                    RCSB PDB Entry <ExternalLink className="w-3 h-3" />
-                  </a>
-                  <a
-                    href={`https://files.rcsb.org/view/${pdb_id.toLowerCase()}.pdb`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                  >
-                    Direct PDB File <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              </div>
-            </div>
+{showValidationDetails && (
+  <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <strong>Validation Status:</strong>
+        <div className="mt-1 space-y-1">
+          <div>Local API: {validation?.source === 'local_api' ? '✅ Available' : '❌ Not Available'}</div>
+          <div>Structure Exists: {validation?.exists ? '✅ Yes' : '❌ No'}</div>
+          <div>File Accessible: {validation?.accessible ? '✅ Yes' : '❌ No'}</div>
+          {validation?.error && (
+            <div className="text-red-600">Issue: {validation.error}</div>
+          )}
+          {validation?.note && (
+            <div className="text-blue-600">Note: {validation.note}</div>
+          )}
+        </div>
+      </div>
+      <div>
+        <strong>Data Sources:</strong>
+        <div className="mt-1 space-y-1">
+          <div>
+            <span className={validation?.source === 'local_api' ? 'text-green-600 font-medium' : 'text-gray-500'}>
+              🏠 Local Repository
+            </span>
+            {validation?.source === 'local_api' && <span className="ml-2 text-xs">(Primary)</span>}
           </div>
-        )}
+
+          <a
+            href={`https://www.rcsb.org/structure/${pdbId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
+          >
+            🌐 RCSB PDB Entry <ExternalLink className="w-3 h-3" />
+          </a>
+
+          <a
+            href={`/api/pdb/${pdbId.toLowerCase()}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
+          >
+            📁 Local mmCIF File <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      </div>
+    </div>
+
+    {validation?.source === 'rcsb_api' && (
+      <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
+        💡 <strong>Note:</strong> This structure exists at RCSB but is not in your local repository.
+        Consider updating your local PDB sync to include recent structures.
+      </div>
+    )}
+
+    {validation?.source === 'local_api' && (
+      <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded text-xs">
+        ✅ <strong>Optimal:</strong> Structure served from local repository - fastest loading and no external dependencies.
+      </div>
+    )}
+  </div>
+)}
       </Card>
 
       {/* NEW: Enhanced Error Display */}

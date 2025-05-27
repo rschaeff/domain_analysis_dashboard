@@ -76,11 +76,11 @@ export async function POST(request: NextRequest) {
 
     const proteinSourceIds = proteins.map(p => p.source_id)
 
-    // Create new session - FIX: Use only existing columns
+    // Create new session - FIX: Use proper array casting for text[] column
     const sessionQuery = `
       INSERT INTO pdb_analysis.curation_session (
         curator_name, target_batch_size, locked_proteins, status
-      ) VALUES ($1, $2, $3::jsonb, 'in_progress')
+      ) VALUES ($1, $2, $3, 'in_progress')
       RETURNING id, curator_name, target_batch_size, locked_proteins, created_at
     `
 
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
       sessionQuery,
       curator_name,
       batch_size,
-      JSON.stringify(proteinSourceIds) // Convert to JSON string for PostgreSQL
+      proteinSourceIds // Pass array directly for text[] column
     )
 
     const session = (sessionResult as any[])[0]

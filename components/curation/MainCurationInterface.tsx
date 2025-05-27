@@ -738,37 +738,69 @@ export default function MainCurationInterface() {
   }
 
   // Complete batch and commit
-  const completeBatch = async (action: 'commit' | 'discard' | 'revisit') => {
-    if (!session) return
-
-    try {
-      const response = await fetch(`/api/curation/session/${session.id}/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          final_notes: decision.notes
-        })
-      })
-
-      if (response.ok) {
-        alert(`Batch ${action}ed successfully!`)
-        // Reset to start new session
-        setSession(null)
-        setProteins([])
-        setCurrentProtein(null)
-        setCurrentIndex(0)
-        setAllDecisions([])
-        setShowBatchSummary(false)
-        setCuratorName('')
-        setSelectedBatchId(null)
-      }
-    } catch (error) {
-      console.error('Error completing batch:', error)
-      alert('Failed to complete batch')
-    }
+const completeBatch = async (action: 'commit' | 'discard' | 'revisit') => {
+  if (!session) {
+    console.error('No session available for completion')
+    alert('No active session found')
+    return
   }
 
+  console.log(`🎯 Attempting to ${action} batch for session ${session.id}`)
+
+  try {
+    const requestData = {
+      action,
+      final_notes: decision.notes || ''
+    }
+
+    console.log('Request data:', requestData)
+
+    const response = await fetch(`/api/curation/session/${session.id}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestData)
+    })
+
+    console.log('Response status:', response.status)
+
+    if (response.ok) {
+      const result = await response.json()
+      console.log('✅ Batch completion result:', result)
+
+      // Show detailed success message
+      const message = action === 'commit'
+        ? `Successfully committed ${result.committed_proteins || 0} protein decisions!`
+        : `Batch ${action}ed successfully!`
+
+      alert(message)
+
+      // Reset to start new session
+      setSession(null)
+      setProteins([])
+      setCurrentProtein(null)
+      setCurrentIndex(0)
+      setAllDecisions([])
+      setShowBatchSummary(false)
+      setCuratorName('')
+      setSelectedBatchId(null)
+
+      console.log('🔄 Session state reset completed')
+    } else {
+      // Handle non-200 responses
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+      console.error('❌ Batch completion failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorData
+      })
+
+      alert(`Failed to ${action} batch: ${errorData.error || response.statusText}`)
+    }
+  } catch (error) {
+    console.error('❌ Error completing batch:', error)
+    alert(`Failed to ${action} batch: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
+}
   // Render session startup
   if (!session) {
     return (

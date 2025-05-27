@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { SimpleDualStructureTest } from '@/components/curation/SimpleDualStructureTest'
+import { StructureViewer } from '@/components/visualization/StructureViewer'
 import {
   Play,
   Pause,
@@ -15,10 +15,13 @@ import {
   Clock,
   Save,
   Eye,
-  FileText
+  FileText,
+  ExternalLink,
+  RefreshCw,
+  Info
 } from 'lucide-react'
 
-// Domain colors
+// Domain colors for consistency
 const DOMAIN_COLORS = [
   '#2563EB', '#DC2626', '#16A34A', '#9333EA', '#EA580C', '#0891B2',
   '#DB2777', '#7C3AED', '#059669', '#DC2626', '#F59E0B', '#10B981'
@@ -115,13 +118,41 @@ function BatchSelector({
 
       if (response.ok) {
         const data = await response.json()
-        // Filter for domain analysis batches that have actual data
+
+        // Smart filtering for curation-ready batches
         const relevantBatches = (data.batches || [])
-          .filter((b: Batch) =>
-            b.batch_type === 'domain_analysis' &&
-            b.partition_count > 0
-          )
-          .sort((a: Batch, b: Batch) => b.id - a.id) // Latest first
+          .filter((b: Batch) => {
+            // Must have partition data
+            if (b.partition_count <= 0) return false
+
+            // For pdb_hhsearch batches: only include completed or domain_partition_complete
+            if (b.batch_type === 'pdb_hhsearch') {
+              return ['completed', 'domain_partition_complete', 'domain_partition_complete_with_errors'].includes(b.status)
+            }
+
+            // For alt_rep batches: include processed or created
+            if (b.batch_type === 'alt_rep') {
+              return ['processed', 'created', 'completed'].includes(b.status)
+            }
+
+            return true
+          })
+          .sort((a: Batch, b: Batch) => {
+            // Prioritize pdb_hhsearch batches first
+            if (a.batch_type !== b.batch_type) {
+              if (a.batch_type === 'pdb_hhsearch') return -1
+              if (b.batch_type === 'pdb_hhsearch') return 1
+            }
+            return b.id - a.id // Latest first
+          })
+
+        console.log('📊 Curation-ready batches:', relevantBatches.map(b => ({
+          id: b.id,
+          name: b.batch_name,
+          type: b.batch_type,
+          status: b.status,
+          partition_count: b.partition_count
+        })))
 
         setBatches(relevantBatches)
       } else {
@@ -149,11 +180,26 @@ function BatchSelector({
       <div className="flex items-center gap-2">
         <label className="text-sm font-medium text-red-600">Batch Filter:</label>
         <span className="text-sm text-red-500">{error}</span>
+        <Button size="sm" variant="outline" onClick={fetchBatches}>
+          <RefreshCw className="w-3 h-3" />
+        </Button>
       </div>
     )
   }
 
   const selectedBatch = batches.find(b => b.id === currentBatchId)
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'text-green-600'
+      case 'domain_partition_complete': return 'text-blue-600'
+      case 'domain_partition_complete_with_errors': return 'text-yellow-600'
+      case 'processed': return 'text-blue-600'
+      case 'indexed': return 'text-gray-600'
+      case 'created': return 'text-purple-600'
+      default: return 'text-gray-600'
+    }
+  }
 
   return (
     <div className="space-y-2">
@@ -164,16 +210,15 @@ function BatchSelector({
           onChange={(e) => onBatchSelect(e.target.value ? parseInt(e.target.value) : null)}
           className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
-          <option value="">All Batches (Latest)</option>
+          <option value="">All Available Batches (Auto-Select)</option>
           {batches.map(batch => (
             <option key={batch.id} value={batch.id}>
               {batch.batch_name}
               {showStats && batch.partition_count > 0 &&
                 ` (${batch.partition_count.toLocaleString()} proteins)`
               }
-              {batch.status !== 'completed' &&
-                ` - ${batch.status}`
-              }
+              {` [${batch.batch_type}]`}
+              {batch.status !== 'completed' && ` - ${batch.status}`}
             </option>
           ))}
         </select>
@@ -183,20 +228,30 @@ function BatchSelector({
       {selectedBatch && showStats && (
         <div className="flex flex-wrap gap-4 text-xs text-gray-600 ml-20">
           <span>
-            Version: <span className="font-medium">{selectedBatch.ref_version}</span>
+            Type: <span className="font-medium">{selectedBatch.batch_type}</span>
           </span>
           <span>
-            Status: <span className={`font-medium ${
-              selectedBatch.status === 'completed' ? 'text-green-600' : 'text-yellow-600'
-            }`}>
+            Status: <span className={`font-medium ${getStatusColor(selectedBatch.status)}`}>
               {selectedBatch.status}
             </span>
           </span>
           <span>
-            Progress: <span className="font-medium">
-              {((selectedBatch.completed_items / selectedBatch.total_items) * 100).toFixed(1)}%
-            </span>
+            Version: <span className="font-medium">{selectedBatch.ref_version}</span>
           </span>
+          {selectedBatch.total_items > 0 && (
+            <span>
+              Progress: <span className="font-medium">
+                {((selectedBatch.completed_items / selectedBatch.total_items) * 100).toFixed(1)}%
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Show batch type explanation */}
+      {batches.length > 0 && (
+        <div className="text-xs text-gray-500 ml-20">
+          💡 <strong>pdb_hhsearch</strong>: Main domain analysis | <strong>alt_rep</strong>: Alternative representatives
         </div>
       )}
     </div>
@@ -204,47 +259,13 @@ function BatchSelector({
 }
 
 // Utility functions
-const parseEcodDomainId = (ecodDomainId: string | null | undefined): { pdbId: string | null, chainId: string | null } => {
-  if (!ecodDomainId || typeof ecodDomainId !== 'string' || ecodDomainId.length < 6) {
-    console.warn('Invalid ECOD domain ID:', ecodDomainId)
-    return { pdbId: null, chainId: null }
-  }
-
-  try {
-    // ECOD domain IDs typically follow the pattern: e1a0oA1
-    const cleanId = ecodDomainId.startsWith('e') ? ecodDomainId.substring(1) : ecodDomainId
-
-    if (cleanId.length >= 5) {
-      const pdbId = cleanId.substring(0, 4).toLowerCase()
-      let chainId = cleanId.charAt(4).toUpperCase()
-
-      // Handle special case where chain might be after a dot
-      if (cleanId.includes('.')) {
-        const parts = cleanId.split('.')
-        if (parts.length >= 2) {
-          chainId = parts[1].charAt(0).toUpperCase()
-        }
-      }
-
-      // Validate
-      if (/^[a-z0-9]{4}$/.test(pdbId) && /^[A-Z]$/.test(chainId)) {
-        return { pdbId, chainId }
-      }
-    }
-
-    console.warn('Failed to parse ECOD domain ID format:', ecodDomainId)
-    return { pdbId: null, chainId: null }
-  } catch (error) {
-    console.error('Error parsing ECOD domain ID:', ecodDomainId, error)
-    return { pdbId: null, chainId: null }
-  }
-}
-
 const getBestEvidenceId = (evidence: any): string | null => {
+  // Check multiple possible fields for the evidence ID
   return evidence.ecod_domain_id ||
          evidence.source_id ||
          evidence.domain_ref_id ||
          evidence.hit_id ||
+         evidence.domain_id ||
          null
 }
 
@@ -348,12 +369,13 @@ const processDomainDataCorrectly = (domains: any[]): any[] => {
       range: domain.range,
       start_pos: domain.start_pos,
       end_pos: domain.end_pos,
+      start: parsedRange.start || domain.start_pos || domain.start,
+      end: parsedRange.end || domain.end_pos || domain.end,
       threeDMolRanges: parsedRange.ranges,
       displayRange: parsedRange.displayRange,
-      start: parsedRange.start,
-      end: parsedRange.end,
       color: domain.color || DOMAIN_COLORS[index % DOMAIN_COLORS.length],
-      label: `Domain ${index + 1} (${parsedRange.displayRange})`
+      label: `Domain ${domain.domain_number || index + 1} (${parsedRange.displayRange})`,
+      domain_type: 'putative' // Ensure this is set for StructureViewer filtering
     }
   })
 }
@@ -394,6 +416,7 @@ export default function MainCurationInterface() {
   const [isAutoSaving, setIsAutoSaving] = useState(false)
   const [showBatchSummary, setShowBatchSummary] = useState(false)
   const [allDecisions, setAllDecisions] = useState<CurationDecision[]>([])
+  const [showProteinDetails, setShowProteinDetails] = useState(false)
 
   // Start new curation session
   const startCurationSession = async () => {
@@ -508,7 +531,7 @@ export default function MainCurationInterface() {
         warning: domainsData.metadata?.warning
       })
 
-      // Process domains
+      // Process domains for StructureViewer compatibility
       const processedDomains = processDomainDataCorrectly(domainsData.domains || [])
 
       console.log('🔍 Original domains from API:', domainsData.domains)
@@ -925,6 +948,14 @@ export default function MainCurationInterface() {
               </div>
               <div className="flex gap-2">
                 <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowProteinDetails(!showProteinDetails)}
+                >
+                  <Info className="w-4 h-4 mr-1" />
+                  {showProteinDetails ? 'Hide' : 'Show'} Details
+                </Button>
+                <Button
                   onClick={goToPrevious}
                   disabled={currentIndex === 0}
                   variant="outline"
@@ -942,64 +973,74 @@ export default function MainCurationInterface() {
                 </Button>
               </div>
             </div>
+
+            {/* Protein Details */}
+            {showProteinDetails && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <strong>Protein Information:</strong>
+                    <div className="mt-1 space-y-1">
+                      <div>PDB ID: {currentProtein.pdb_id}</div>
+                      <div>Chain: {currentProtein.chain_id}</div>
+                      <div>Source ID: {currentProtein.source_id}</div>
+                      <div>Length: {currentProtein.sequence_length} residues</div>
+                    </div>
+                  </div>
+                  <div>
+                    <strong>Batch Information:</strong>
+                    <div className="mt-1 space-y-1">
+                      <div>Batch ID: {currentProtein.batch_id}</div>
+                      <div>Batch Name: {currentProtein.batch_name}</div>
+                      <div>Batch Type: {currentProtein.batch_type}</div>
+                      <div>Reference: {currentProtein.reference_version}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </Card>
 
-          {/* Structure Comparison */}
-          {structureError && (
+          {/* Structure Viewer */}
+          {structureError ? (
             <Card className="p-4 border-red-200 bg-red-50">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <h4 className="font-medium text-red-800">Error Loading Structure</h4>
                   <p className="text-red-700 text-sm mt-1">{structureError}</p>
-                  <Button
-                    onClick={() => loadProteinForCuration(currentProtein)}
-                    size="sm"
-                    variant="outline"
-                    className="mt-2"
-                  >
-                    Retry Loading
-                  </Button>
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      onClick={() => loadProteinForCuration(currentProtein)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <RefreshCw className="w-4 h-4 mr-1" />
+                      Retry Loading
+                    </Button>
+                    <a
+                      href={`https://www.rcsb.org/structure/${currentProtein.pdb_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
+                    >
+                      Check PDB <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
                 </div>
               </div>
             </Card>
+          ) : (
+            <StructureViewer
+              pdb_id={currentProtein.pdb_id}
+              chain_id={currentProtein.chain_id}
+              domains={currentProtein.domains}
+              onDomainClick={(domain) => {
+                console.log('Domain clicked for curation context:', domain)
+                // You can implement domain-specific curation actions here
+              }}
+            />
           )}
-
-          {selectedEvidence && !structureError && (() => {
-            const evidenceId = getBestEvidenceId(selectedEvidence)
-            const { pdbId, chainId } = parseEcodDomainId(evidenceId)
-
-            if (!pdbId || !chainId) {
-              return (
-                <Card className="p-4 border-yellow-200 bg-yellow-50">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-5 h-5 text-yellow-600" />
-                    <span className="text-yellow-800">
-                      Cannot parse reference structure from evidence ID: {evidenceId || 'undefined'}
-                    </span>
-                  </div>
-                </Card>
-              )
-            }
-
-            return (
-              <SimpleDualStructureTest
-                queryPdbId={currentProtein.pdb_id}
-                queryChainId={currentProtein.chain_id}
-                queryDomains={currentProtein.domains}
-                queryRange={selectedEvidence.query_range}
-
-                referencePdbId={pdbId}
-                referenceChainId={chainId}
-                referenceDomainId={evidenceId}
-                referenceRange={selectedEvidence.hit_range}
-                hitRange={selectedEvidence.hit_range}
-
-                onStructuresLoaded={() => setStructuresLoaded(true)}
-                onError={setStructureError}
-              />
-            )
-          })()}
 
           {/* Evidence Selection */}
           <Card className="p-4">
@@ -1043,6 +1084,47 @@ export default function MainCurationInterface() {
               })}
             </div>
           </Card>
+
+          {/* Selected Evidence Details */}
+          {selectedEvidence && (
+            <Card className="p-4 bg-blue-50">
+              <h4 className="font-medium text-blue-800 mb-3">Selected Evidence Details</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <span className="font-medium text-blue-700">Type:</span>
+                  <div>{selectedEvidence.evidence_type}</div>
+                </div>
+                <div>
+                  <span className="font-medium text-blue-700">Source:</span>
+                  <div className="font-mono text-xs">{selectedEvidence.source_id}</div>
+                </div>
+                <div>
+                  <span className="font-medium text-blue-700">Confidence:</span>
+                  <div>{(selectedEvidence.confidence * 100).toFixed(1)}%</div>
+                </div>
+                <div>
+                  <span className="font-medium text-blue-700">E-value:</span>
+                  <div>{selectedEvidence.evalue < 1e-10 ? selectedEvidence.evalue.toExponential(2) : selectedEvidence.evalue.toFixed(4)}</div>
+                </div>
+                <div>
+                  <span className="font-medium text-blue-700">Query Range:</span>
+                  <div>{selectedEvidence.query_range}</div>
+                </div>
+                <div>
+                  <span className="font-medium text-blue-700">Hit Range:</span>
+                  <div>{selectedEvidence.hit_range}</div>
+                </div>
+                {selectedEvidence.ref_t_group && (
+                  <div className="col-span-2">
+                    <span className="font-medium text-blue-700">Classification:</span>
+                    <div className="text-xs">
+                      {selectedEvidence.ref_t_group_name || selectedEvidence.ref_t_group}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
 
           {/* Curation Questions */}
           <Card className="p-6">

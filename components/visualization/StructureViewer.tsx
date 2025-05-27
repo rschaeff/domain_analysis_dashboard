@@ -49,7 +49,7 @@ interface StructureViewerProps {
   onDomainClick?: (domain: any) => void
 }
 
-export function EnhancedStructureViewer({
+export function StructureViewer({
   pdb_id,
   chain_id,
   domains = [],

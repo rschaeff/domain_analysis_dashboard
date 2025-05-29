@@ -1,4 +1,4 @@
-// app/api/proteins/summary/route.ts - UPDATED VERSION with curation filters
+// app/api/proteins/summary/route.ts - FIXED VERSION with graceful curation handling
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const minLength = searchParams.get('sequence_length_min')
     const maxLength = searchParams.get('sequence_length_max')
 
-    // NEW: Curation filters
+    // Curation filters (check if they exist before using)
     const hasCurationDecision = searchParams.get('has_curation_decision')
     const curationStatus = searchParams.get('curation_status')
     const curationDecisionType = searchParams.get('curation_decision_type')
@@ -32,6 +32,28 @@ export async function GET(request: NextRequest) {
     const curationDateTo = searchParams.get('curation_date_to')
     const flaggedForReview = searchParams.get('flagged_for_review')
     const needsReview = searchParams.get('needs_review')
+
+    // Check if curation table exists and get its schema
+    let curationTableExists = false
+    let curationColumns: string[] = []
+
+    try {
+      const schemaCheck = await prisma.$queryRawUnsafe(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'pdb_analysis'
+        AND table_name = 'curation_decision'
+      `)
+
+      if (Array.isArray(schemaCheck) && schemaCheck.length > 0) {
+        curationTableExists = true
+        curationColumns = (schemaCheck as any[]).map(row => row.column_name)
+        console.log('Curation table columns found:', curationColumns)
+      }
+    } catch (schemaError) {
+      console.log('Curation table not available:', schemaError.message)
+      curationTableExists = false
+    }
 
     // Build WHERE conditions
     const whereConditions: string[] = []
@@ -64,49 +86,57 @@ export async function GET(request: NextRequest) {
       whereConditions.push(`ds.best_domain_confidence >= ${addParam(parseFloat(minConfidence))}`)
     }
 
-    // NEW: Curation decision filters
-    if (hasCurationDecision !== null) {
-      if (hasCurationDecision === 'true') {
-        whereConditions.push(`cd.id IS NOT NULL`)
-      } else if (hasCurationDecision === 'false') {
-        whereConditions.push(`cd.id IS NULL`)
+    // Add curation filters only if table exists and has required columns
+    if (curationTableExists) {
+      if (hasCurationDecision !== null) {
+        if (hasCurationDecision === 'true') {
+          whereConditions.push(`cd.id IS NOT NULL`)
+        } else if (hasCurationDecision === 'false') {
+          whereConditions.push(`cd.id IS NULL`)
+        }
       }
-    }
 
-    if (curationStatus) {
-      const statusList = curationStatus.split(',').map(s => s.trim()).filter(Boolean)
-      if (statusList.length > 0) {
-        const statusParams = statusList.map(status => addParam(status)).join(',')
-        whereConditions.push(`cd.status IN (${statusParams})`)
+      if (curationStatus && curationColumns.includes('status')) {
+        const statusList = curationStatus.split(',').map(s => s.trim()).filter(Boolean)
+        if (statusList.length > 0) {
+          const statusParams = statusList.map(status => addParam(status)).join(',')
+          whereConditions.push(`cd.status IN (${statusParams})`)
+        }
       }
-    }
 
-    if (curationDecisionType) {
-      const typeList = curationDecisionType.split(',').map(s => s.trim()).filter(Boolean)
-      if (typeList.length > 0) {
-        const typeParams = typeList.map(type => addParam(type)).join(',')
-        whereConditions.push(`cd.decision_type IN (${typeParams})`)
+      if (curationDecisionType && curationColumns.includes('decision_type')) {
+        const typeList = curationDecisionType.split(',').map(s => s.trim()).filter(Boolean)
+        if (typeList.length > 0) {
+          const typeParams = typeList.map(type => addParam(type)).join(',')
+          whereConditions.push(`cd.decision_type IN (${typeParams})`)
+        }
       }
-    }
 
-    if (curatorName) {
-      whereConditions.push(`cd.curator_name ILIKE ${addParam(`%${curatorName}%`)}`)
-    }
+      if (curatorName && curationColumns.includes('curator_name')) {
+        whereConditions.push(`cd.curator_name ILIKE ${addParam(`%${curatorName}%`)}`)
+      }
 
-    if (curationDateFrom) {
-      whereConditions.push(`cd.decision_date >= ${addParam(curationDateFrom)}`)
-    }
+      if (curationDateFrom && curationColumns.includes('decision_date')) {
+        whereConditions.push(`cd.decision_date >= ${addParam(curationDateFrom)}`)
+      }
 
-    if (curationDateTo) {
-      whereConditions.push(`cd.decision_date <= ${addParam(curationDateTo)}`)
-    }
+      if (curationDateTo && curationColumns.includes('decision_date')) {
+        whereConditions.push(`cd.decision_date <= ${addParam(curationDateTo)}`)
+      }
 
-    if (flaggedForReview === 'true') {
-      whereConditions.push(`cd.flagged_for_review = true`)
-    }
+      if (flaggedForReview === 'true' && curationColumns.includes('flagged_for_review')) {
+        whereConditions.push(`cd.flagged_for_review = true`)
+      }
 
-    if (needsReview === 'true') {
-      whereConditions.push(`cd.needs_review = true`)
+      if (needsReview === 'true' && curationColumns.includes('needs_review')) {
+        whereConditions.push(`cd.needs_review = true`)
+      }
+    } else {
+      // If curation filters are requested but table doesn't exist, inform user
+      if (hasCurationDecision || curationStatus || curationDecisionType || curatorName ||
+          curationDateFrom || curationDateTo || flaggedForReview || needsReview) {
+        console.warn('Curation filters requested but curation_decision table not available')
+      }
     }
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : ''
@@ -128,13 +158,67 @@ export async function GET(request: NextRequest) {
         case 'sequence_length':
           return `p.length ${direction} NULLS LAST`
         case 'curation_date':
-          return `cd.decision_date ${direction} NULLS LAST`
+          if (curationTableExists && curationColumns.includes('decision_date')) {
+            return `cd.decision_date ${direction} NULLS LAST`
+          } else {
+            // Fallback to timestamp if curation date not available
+            return `pp.timestamp ${direction} NULLS LAST`
+          }
         default:
           return `pp.timestamp DESC NULLS LAST`
       }
     }
 
-    // UPDATED QUERY: Include curation decision data
+    // Build curation fields selection - only include if table exists and has columns
+    let curationFields = ''
+    let curationJoin = ''
+
+    if (curationTableExists) {
+      const availableFields = []
+
+      if (curationColumns.includes('id')) availableFields.push('cd.id AS curation_decision_id')
+      if (curationColumns.includes('decision_type')) availableFields.push('cd.decision_type')
+      if (curationColumns.includes('status')) availableFields.push('cd.status AS curation_status')
+      if (curationColumns.includes('curator_name')) availableFields.push('cd.curator_name')
+      if (curationColumns.includes('decision_date')) availableFields.push('cd.decision_date')
+      if (curationColumns.includes('flagged_for_review')) availableFields.push('cd.flagged_for_review')
+      if (curationColumns.includes('needs_review')) availableFields.push('cd.needs_review')
+      if (curationColumns.includes('confidence_level')) availableFields.push('cd.confidence_level AS curation_confidence')
+      if (curationColumns.includes('notes')) availableFields.push('cd.notes AS curation_notes')
+
+      if (availableFields.length > 0) {
+        curationFields = `,
+        -- Curation decision information
+        ${availableFields.join(',\n        ')},
+        CASE WHEN cd.id IS NOT NULL THEN true ELSE false END AS has_curation_decision`
+
+        // Determine the join column (usually protein_id)
+        const joinColumn = curationColumns.includes('protein_id') ? 'protein_id' :
+                          curationColumns.includes('processing_id') ? 'processing_id' : 'id'
+
+        curationJoin = `
+        -- Join to curation decisions table
+        LEFT JOIN pdb_analysis.curation_decision cd ON pp.id = cd.${joinColumn}`
+      }
+    }
+
+    // If no curation fields, add default false values
+    if (!curationFields) {
+      curationFields = `,
+        -- Curation decision information (table not available)
+        NULL AS curation_decision_id,
+        NULL AS decision_type,
+        NULL AS curation_status,
+        NULL AS curator_name,
+        NULL AS decision_date,
+        false AS flagged_for_review,
+        false AS needs_review,
+        NULL AS curation_confidence,
+        NULL AS curation_notes,
+        false AS has_curation_decision`
+    }
+
+    // Main data query
     const dataQuery = `
       WITH domain_stats AS (
         SELECT
@@ -222,19 +306,9 @@ export async function GET(request: NextRequest) {
         -- Calculate residues assigned
         COALESCE(cs.residues_assigned, 0) AS residues_assigned,
 
-        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - pp.timestamp)) / 86400.0 AS days_since_processing,
+        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - pp.timestamp)) / 86400.0 AS days_since_processing
 
-        -- NEW: Curation decision information
-        cd.id AS curation_decision_id,
-        cd.decision_type,
-        cd.status AS curation_status,
-        cd.curator_name,
-        cd.decision_date,
-        cd.flagged_for_review,
-        cd.needs_review,
-        cd.confidence_level AS curation_confidence,
-        cd.notes AS curation_notes,
-        CASE WHEN cd.id IS NOT NULL THEN true ELSE false END AS has_curation_decision
+        ${curationFields}
 
       FROM pdb_analysis.partition_proteins pp
       -- Join to main protein table for actual sequence length
@@ -242,9 +316,7 @@ export async function GET(request: NextRequest) {
       LEFT JOIN domain_stats ds ON pp.id = ds.protein_id
       LEFT JOIN evidence_stats es ON pp.id = es.protein_id
       LEFT JOIN coverage_stats cs ON pp.id = cs.protein_id
-
-      -- NEW: Join to curation decisions table
-      LEFT JOIN pdb_analysis.curation_decision cd ON pp.id = cd.protein_id
+      ${curationJoin}
 
       ${whereClause}
       ORDER BY ${getSortClause()}
@@ -255,7 +327,7 @@ export async function GET(request: NextRequest) {
       SELECT COUNT(*) as total
       FROM pdb_analysis.partition_proteins pp
       LEFT JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
-      LEFT JOIN pdb_analysis.curation_decision cd ON pp.id = cd.protein_id
+      ${curationTableExists ? 'LEFT JOIN pdb_analysis.curation_decision cd ON pp.id = cd.protein_id' : ''}
       LEFT JOIN (
         SELECT
           pp_1.id AS protein_id,
@@ -267,7 +339,7 @@ export async function GET(request: NextRequest) {
       ${whereClause}
     `
 
-    console.log('UPDATED: Using partition tables with curation decision filters')
+    console.log('Using partition tables with curation features:', curationTableExists ? 'enabled' : 'disabled')
     console.log('Query params:', params)
 
     const [results, countResult] = await Promise.all([
@@ -320,21 +392,21 @@ export async function GET(request: NextRequest) {
         protein.hhsearch_evidence > 0 && 'hhsearch'
       ].filter(Boolean).join(','),
 
-      // NEW: Curation-related fields
+      // Curation-related fields (safely handle missing data)
       has_curation_decision: Boolean(protein.has_curation_decision),
-      curation_decision_id: protein.curation_decision_id,
-      decision_type: protein.decision_type,
-      curation_status: protein.curation_status,
-      curator_name: protein.curator_name,
-      decision_date: protein.decision_date,
+      curation_decision_id: protein.curation_decision_id || null,
+      decision_type: protein.decision_type || null,
+      curation_status: protein.curation_status || null,
+      curator_name: protein.curator_name || null,
+      decision_date: protein.decision_date || null,
       flagged_for_review: Boolean(protein.flagged_for_review),
       needs_review: Boolean(protein.needs_review),
       curation_confidence: Number(protein.curation_confidence || 0),
-      curation_notes: protein.curation_notes,
+      curation_notes: protein.curation_notes || null,
 
       // Data source indicator
-      data_source: 'partition_tables_with_curation',
-      architecture: 'curation_enabled'
+      data_source: 'partition_tables_with_optional_curation',
+      architecture: curationTableExists ? 'curation_enabled' : 'curation_disabled'
     }))
 
     return NextResponse.json({
@@ -356,10 +428,14 @@ export async function GET(request: NextRequest) {
         direction: sortDir
       },
       metadata: {
-        source: 'partition_tables_with_curation',
-        query_complexity: 'curation_enhanced',
+        source: 'partition_tables_with_optional_curation',
+        curation_available: curationTableExists,
+        curation_columns: curationTableExists ? curationColumns : [],
+        query_complexity: 'graceful_curation_handling',
         result_count: processedResults.length,
-        note: 'Includes curation decision data and filters'
+        note: curationTableExists ?
+          'Includes curation decision data and filters' :
+          'Curation table not available - using fallback values'
       }
     })
 
@@ -367,9 +443,9 @@ export async function GET(request: NextRequest) {
     console.error('Error in curation-enhanced partition API:', error)
     return NextResponse.json(
       {
-        error: 'Failed to fetch partition data with curation filters',
+        error: 'Failed to fetch partition data',
         details: error.message,
-        hint: 'Using partition tables with curation decision joins'
+        hint: 'Check if curation_decision table exists and has correct schema'
       },
       { status: 500 }
     )

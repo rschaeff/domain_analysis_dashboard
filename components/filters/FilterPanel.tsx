@@ -18,7 +18,11 @@ import {
   FileText,
   RotateCcw,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  UserCheck,
+  Eye,
+  Calendar,
+  User
 } from 'lucide-react'
 
 interface FilterPanelProps {
@@ -46,7 +50,7 @@ interface AutocompleteProps {
   disabled?: boolean
 }
 
-// Preset filter configurations
+// Preset filter configurations - UPDATED with curation presets
 const FILTER_PRESETS = [
   {
     id: 'high_quality',
@@ -92,6 +96,33 @@ const FILTER_PRESETS = [
     description: 'Domains classified only by HHSearch',
     filters: {
       evidence_types: 'hhsearch'
+    }
+  },
+  {
+    id: 'curated',
+    name: 'Curated',
+    icon: UserCheck,
+    description: 'Proteins with manual curation decisions',
+    filters: {
+      has_curation_decision: true
+    }
+  },
+  {
+    id: 'needs_curation',
+    name: 'Needs Curation',
+    icon: Eye,
+    description: 'Proteins flagged for manual review',
+    filters: {
+      flagged_for_review: true
+    }
+  },
+  {
+    id: 'uncurated',
+    name: 'Not Curated',
+    icon: User,
+    description: 'Proteins without curation decisions',
+    filters: {
+      has_curation_decision: false
     }
   }
 ]
@@ -400,6 +431,22 @@ export function FilterPanel({
     const newFilters = { ...filters }
     delete newFilters.sequence_length_min
     delete newFilters.sequence_length_max
+    onFiltersChange(newFilters)
+    setActivePreset(null)
+  }
+
+  const clearCurationFilters = () => {
+    if (loading) return
+
+    const newFilters = { ...filters }
+    delete newFilters.has_curation_decision
+    delete newFilters.curation_status
+    delete newFilters.curation_decision_type
+    delete newFilters.curator_name
+    delete newFilters.curation_date_from
+    delete newFilters.curation_date_to
+    delete newFilters.flagged_for_review
+    delete newFilters.needs_review
     onFiltersChange(newFilters)
     setActivePreset(null)
   }
@@ -759,6 +806,154 @@ export function FilterPanel({
               </div>
             </div>
           </div>
+
+          {/* NEW: Curation Filters Section */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-sm font-semibold text-gray-900">Manual Curation</h4>
+              {(filters.has_curation_decision !== undefined ||
+                filters.curation_status?.length ||
+                filters.curation_decision_type?.length ||
+                filters.curator_name ||
+                filters.curation_date_from ||
+                filters.curation_date_to ||
+                filters.flagged_for_review !== undefined ||
+                filters.needs_review !== undefined) && (
+                <button
+                  onClick={clearCurationFilters}
+                  disabled={loading}
+                  className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                  type="button"
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {/* Basic Curation Status */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-700">Curation Status</label>
+                  <select
+                    value={filters.has_curation_decision === undefined ? '' : filters.has_curation_decision ? 'true' : 'false'}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      updateFilter('has_curation_decision',
+                        value === '' ? undefined : value === 'true'
+                      )
+                    }}
+                    disabled={loading}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:bg-gray-100"
+                  >
+                    <option value="">All proteins</option>
+                    <option value="true">Has curation decision</option>
+                    <option value="false">No curation decision</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-700">Review Status</label>
+                  <div className="space-y-2">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={filters.flagged_for_review === true}
+                        onChange={(e) => updateFilter('flagged_for_review', e.target.checked || undefined)}
+                        disabled={loading}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">Flagged for review</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={filters.needs_review === true}
+                        onChange={(e) => updateFilter('needs_review', e.target.checked || undefined)}
+                        disabled={loading}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">Needs review</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-700">Curator</label>
+                  <Input
+                    placeholder="Curator name"
+                    value={filters.curator_name || ''}
+                    onChange={(e) => updateFilter('curator_name', e.target.value || undefined)}
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+
+              {/* Curation Date Range */}
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-700">Curation Date Range</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Input
+                      type="date"
+                      placeholder="From date"
+                      value={filters.curation_date_from || ''}
+                      onChange={(e) => updateFilter('curation_date_from', e.target.value || undefined)}
+                      disabled={loading}
+                    />
+                  </div>
+                  <div>
+                    <Input
+                      type="date"
+                      placeholder="To date"
+                      value={filters.curation_date_to || ''}
+                      onChange={(e) => updateFilter('curation_date_to', e.target.value || undefined)}
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Decision Types and Status */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-700">Decision Type</label>
+                  <Input
+                    placeholder="e.g., accept,reject,modify"
+                    value={filters.curation_decision_type?.join(',') || ''}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      updateFilter('curation_decision_type',
+                        value ? value.split(',').map(s => s.trim()).filter(Boolean) : undefined
+                      )
+                    }}
+                    disabled={loading}
+                  />
+                  <div className="text-xs text-gray-500 mt-1">
+                    Comma-separated decision types
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-gray-700">Curation Status</label>
+                  <Input
+                    placeholder="e.g., approved,pending,rejected"
+                    value={filters.curation_status?.join(',') || ''}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      updateFilter('curation_status',
+                        value ? value.split(',').map(s => s.trim()).filter(Boolean) : undefined
+                      )
+                    }}
+                    disabled={loading}
+                  />
+                  <div className="text-xs text-gray-500 mt-1">
+                    Comma-separated status values
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -773,6 +968,8 @@ export function FilterPanel({
               let displayValue: string
               if (Array.isArray(value)) {
                 displayValue = value.length === 1 ? value[0] : `${value.length} selected`
+              } else if (typeof value === 'boolean') {
+                displayValue = value ? 'Yes' : 'No'
               } else {
                 displayValue = String(value)
               }
@@ -791,7 +988,15 @@ export function FilterPanel({
                 sequence_length_min: 'Min Length',
                 sequence_length_max: 'Max Length',
                 min_evidence_count: 'Min Evidence',
-                evidence_types: 'Evidence Types'
+                evidence_types: 'Evidence Types',
+                has_curation_decision: 'Curation Status',
+                curation_status: 'Curation Status',
+                curation_decision_type: 'Decision Type',
+                curator_name: 'Curator',
+                curation_date_from: 'Curation From',
+                curation_date_to: 'Curation To',
+                flagged_for_review: 'Flagged',
+                needs_review: 'Needs Review'
               }
 
               return (

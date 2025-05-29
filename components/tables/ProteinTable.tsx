@@ -1,24 +1,27 @@
+// components/tables/ProteinTable.tsx - Enhanced with curation status
 'use client'
 
-import React, { useState } from 'react'
-import { Card } from '@/components/ui/Card'
-import { Button } from '@/components/ui/Button'
+import React from 'react'
 import { Badge } from '@/components/ui/Badge'
-import { 
-  ChevronDown, 
-  ChevronRight, 
-  Eye, 
-  BarChart3,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { PaginationParams } from '@/lib/types'
+import {
   ChevronLeft,
-  ChevronRight as ChevronRightIcon,
-  Database,
+  ChevronRight,
+  Eye,
+  ExternalLink,
+  UserCheck,
   Clock,
-  Zap,
-  ArrowUp,
-  ArrowDown
+  Star,
+  Activity,
+  Database,
+  Flag,
+  AlertTriangle,
+  CheckCircle,
+  User,
+  Calendar
 } from 'lucide-react'
 
 interface ProteinSummary {
@@ -30,13 +33,17 @@ interface ProteinSummary {
   batch_id: number
   reference_version: string
   is_classified: boolean
+  processing_date: string
+  days_old: number
+  is_recent: boolean
 
-  // Domain summary - FIXED FIELD NAMES
+  // Domain summary
   domain_count: number
-  domains_classified: number  // ← This matches API response
+  domains_classified: number
   avg_confidence: number
   best_confidence: number
   coverage: number
+  confidence_level: 'high' | 'medium' | 'low'
 
   // Evidence summary
   total_evidence_count: number
@@ -45,35 +52,17 @@ interface ProteinSummary {
   has_domain_blast: boolean
   has_hhsearch: boolean
 
-  // Processing info
-  processing_date: string
-  days_old?: number
-  is_recent?: boolean
-  confidence_level?: 'high' | 'medium' | 'low'
-  classification_status?: string
-
-  // Individual domains (loaded on expansion)
-  domains?: DomainDetails[]
-}
-
-interface DomainDetails {
-  id: string
-  domain_number: number
-  range: string
-  confidence: number
-  t_group: string | null
-  h_group: string | null
-  x_group: string | null
-  a_group: string | null
-  source: string
-  evidence_count: number
-}
-
-interface PaginationParams {
-  page: number
-  size: number
-  total: number
-  totalPages?: number
+  // NEW: Curation-related fields
+  has_curation_decision?: boolean
+  curation_decision_id?: number
+  decision_type?: string
+  curation_status?: string
+  curator_name?: string
+  decision_date?: string
+  flagged_for_review?: boolean
+  needs_review?: boolean
+  curation_confidence?: number
+  curation_notes?: string
 }
 
 interface ProteinTableProps {
@@ -81,10 +70,75 @@ interface ProteinTableProps {
   pagination: PaginationParams
   onPageChange: (page: number) => void
   onProteinClick: (protein: ProteinSummary) => void
-  sortBy?: string
-  sortDirection?: 'asc' | 'desc'
-  onSortChange?: (sortKey: string) => void
   loading?: boolean
+  showCurationStatus?: boolean
+}
+
+// Helper function to format dates
+const formatDate = (dateString: string | undefined) => {
+  if (!dateString) return 'N/A'
+  return new Date(dateString).toLocaleDateString()
+}
+
+// Helper function to get curation status badge
+const getCurationBadge = (protein: ProteinSummary) => {
+  if (!protein.has_curation_decision) {
+    return (
+      <Badge variant="outline" className="text-gray-600 border-gray-300">
+        <User className="w-3 h-3 mr-1" />
+        Not Curated
+      </Badge>
+    )
+  }
+
+  if (protein.flagged_for_review) {
+    return (
+      <Badge variant="destructive" className="bg-orange-100 text-orange-800 border-orange-300">
+        <Flag className="w-3 h-3 mr-1" />
+        Flagged
+      </Badge>
+    )
+  }
+
+  if (protein.needs_review) {
+    return (
+      <Badge variant="destructive" className="bg-yellow-100 text-yellow-800 border-yellow-300">
+        <AlertTriangle className="w-3 h-3 mr-1" />
+        Needs Review
+      </Badge>
+    )
+  }
+
+  const statusColors = {
+    approved: 'bg-green-100 text-green-800 border-green-300',
+    pending: 'bg-blue-100 text-blue-800 border-blue-300',
+    rejected: 'bg-red-100 text-red-800 border-red-300'
+  }
+
+  const statusClass = statusColors[protein.curation_status as keyof typeof statusColors] || 'bg-gray-100 text-gray-800 border-gray-300'
+
+  return (
+    <Badge variant="outline" className={statusClass}>
+      <UserCheck className="w-3 h-3 mr-1" />
+      {protein.curation_status || 'Curated'}
+    </Badge>
+  )
+}
+
+// Helper function to get confidence badge
+const getConfidenceBadge = (confidence: number, level: string) => {
+  const colors = {
+    high: 'bg-green-100 text-green-800',
+    medium: 'bg-yellow-100 text-yellow-800',
+    low: 'bg-red-100 text-red-800'
+  }
+
+  return (
+    <Badge variant="outline" className={colors[level as keyof typeof colors]}>
+      <Star className="w-3 h-3 mr-1" />
+      {confidence.toFixed(2)}
+    </Badge>
+  )
 }
 
 export function ProteinTable({
@@ -92,197 +146,18 @@ export function ProteinTable({
   pagination,
   onPageChange,
   onProteinClick,
-  sortBy = 'recent',
-  sortDirection = 'desc',
-  onSortChange,
-  loading = false
+  loading = false,
+  showCurationStatus = true
 }: ProteinTableProps) {
-  const [expandedProteins, setExpandedProteins] = useState<Set<string>>(new Set())
-  const [loadingDomains, setLoadingDomains] = useState<Set<string>>(new Set())
-
-// In ProteinTable.tsx, update the toggleProteinExpansion function:
-
-const toggleProteinExpansion = async (protein: ProteinSummary) => {
-  const newExpanded = new Set(expandedProteins)
-
-  if (newExpanded.has(protein.id)) {
-    newExpanded.delete(protein.id)
-  } else {
-    newExpanded.add(protein.id)
-
-    // Load domain details if not already loaded
-    if (!protein.domains) {
-      setLoadingDomains(prev => new Set([...prev, protein.id]))
-
-      try {
-        const response = await fetch(`/api/proteins/${protein.source_id}/domains`)
-        if (response.ok) {
-          const data = await response.json()
-
-          // FIX: Use data.domains instead of expecting domains directly
-          console.log('[PROTEIN TABLE] API response:', data)
-          console.log('[PROTEIN TABLE] Domains array:', data.domains)
-
-          // Update the protein object with domain details
-          protein.domains = data.domains?.filter((d: any) => d.domain_type === 'putative') || []
-
-          console.log('[PROTEIN TABLE] Filtered putative domains:', protein.domains)
-        } else {
-          console.error('[PROTEIN TABLE] API error:', response.status, response.statusText)
-          protein.domains = []
-        }
-      } catch (error) {
-        console.error('Failed to load domain details:', error)
-        protein.domains = []
-      } finally {
-        setLoadingDomains(prev => {
-          const newSet = new Set(prev)
-          newSet.delete(protein.id)
-          return newSet
-        })
-      }
-    }
-  }
-
-  setExpandedProteins(newExpanded)
-}
-
-  const handleSort = (sortKey: string) => {
-    if (onSortChange) {
-      onSortChange(sortKey)
-    }
-  }
-
-  const renderSortableHeader = (label: string, sortKey: string, className = '') => (
-    <th className={`text-left py-3 px-4 font-medium text-gray-700 ${className}`}>
-      <button
-        onClick={() => handleSort(sortKey)}
-        className={`flex items-center gap-1 hover:text-blue-600 transition-colors ${
-          sortBy === sortKey ? 'text-blue-600' : ''
-        }`}
-      >
-        {label}
-        {sortBy === sortKey && (
-          sortDirection === 'desc' ?
-            <ArrowDown className="w-4 h-4" /> :
-            <ArrowUp className="w-4 h-4" />
-        )}
-      </button>
-    </th>
-  )
-
-  const renderConfidenceBadge = (confidence: number | null) => {
-    if (!confidence) return <Badge variant="outline">N/A</Badge>
-
-    if (confidence >= 0.8) {
-      return <Badge className="bg-green-100 text-green-800">{confidence.toFixed(2)}</Badge>
-    } else if (confidence >= 0.5) {
-      return <Badge className="bg-yellow-100 text-yellow-800">{confidence.toFixed(2)}</Badge>
-    } else {
-      return <Badge className="bg-red-100 text-red-800">{confidence.toFixed(2)}</Badge>
-    }
-  }
-
-  const renderClassificationStatus = (protein: ProteinSummary) => {
-    if (!protein.is_classified) {
-      return (
-        <div className="flex items-center gap-2">
-          <XCircle className="w-4 h-4 text-red-500" />
-          <span className="text-red-700">Unclassified</span>
-        </div>
-      )
-    }
-
-    if (protein.domains_classified === protein.domain_count && protein.domain_count > 0) {
-      return (
-        <div className="flex items-center gap-2">
-          <CheckCircle className="w-4 h-4 text-green-500" />
-          <span className="text-green-700">Fully Classified</span>
-        </div>
-      )
-    }
-
-    return (
-      <div className="flex items-center gap-2">
-        <AlertCircle className="w-4 h-4 text-yellow-500" />
-        <span className="text-yellow-700">
-          Partially ({protein.domains_classified}/{protein.domain_count})
-        </span>
-      </div>
-    )
-  }
-
-  const renderEvidenceIndicators = (protein: ProteinSummary) => {
-    return (
-      <div className="flex gap-1">
-        <Badge
-          variant={protein.has_chain_blast ? "default" : "outline"}
-          className={`text-xs ${protein.has_chain_blast ? 'bg-blue-500' : 'text-gray-400'}`}
-        >
-          CB
-        </Badge>
-        <Badge
-          variant={protein.has_domain_blast ? "default" : "outline"}
-          className={`text-xs ${protein.has_domain_blast ? 'bg-purple-500' : 'text-gray-400'}`}
-        >
-          DB
-        </Badge>
-        <Badge
-          variant={protein.has_hhsearch ? "default" : "outline"}
-          className={`text-xs ${protein.has_hhsearch ? 'bg-green-500' : 'text-gray-400'}`}
-        >
-          HH
-        </Badge>
-      </div>
-    )
-  }
-
-  const renderProcessingInfo = (protein: ProteinSummary) => {
-    const daysOld = protein.days_old || 0
-    const isRecent = protein.is_recent || daysOld < 7
-
-    return (
-      <div className="text-sm">
-        <div className="flex items-center gap-1">
-          <span className="font-medium">#{protein.batch_id}</span>
-          {isRecent && <Zap className="w-3 h-3 text-green-500" title="Recent" />}
-        </div>
-        <div className="text-xs text-gray-500 flex items-center gap-1">
-          <Clock className="w-3 h-3" />
-          {daysOld === 0 ? 'Today' :
-           daysOld === 1 ? '1 day ago' :
-           daysOld < 7 ? `${daysOld} days ago` :
-           daysOld < 30 ? `${Math.floor(daysOld / 7)} weeks ago` :
-           `${Math.floor(daysOld / 30)} months ago`}
-        </div>
-      </div>
-    )
-  }
-
-  const renderClassificationBadge = (value: string | null, type: string) => {
-    if (!value) {
-      return <Badge variant="outline" className="text-gray-400">Unassigned</Badge>
-    }
-
-    const colors = {
-      't_group': 'bg-blue-100 text-blue-800',
-      'h_group': 'bg-purple-100 text-purple-800',
-      'x_group': 'bg-green-100 text-green-800',
-      'a_group': 'bg-orange-100 text-orange-800'
-    }
-
-    return (
-      <Badge className={colors[type as keyof typeof colors] || 'bg-gray-100 text-gray-800'}>
-        {value}
-      </Badge>
-    )
-  }
+  const totalPages = Math.ceil(pagination.total / pagination.size)
 
   if (loading) {
     return (
-      <Card className="p-8 text-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-        <p className="text-gray-600">Loading proteins...</p>
+      <Card className="p-8">
+        <div className="flex items-center justify-center">
+          <LoadingSpinner />
+          <span className="ml-2 text-gray-600">Loading proteins...</span>
+        </div>
       </Card>
     )
   }
@@ -290,275 +165,257 @@ const toggleProteinExpansion = async (protein: ProteinSummary) => {
   if (proteins.length === 0) {
     return (
       <Card className="p-8 text-center">
-        <Database className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-        <div className="text-gray-500 mb-4">No proteins found</div>
-        <p className="text-sm text-gray-400">
-          Try adjusting your filters or check if data is available in the database.
-        </p>
+        <div className="text-gray-500">
+          <Database className="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <h3 className="text-lg font-medium mb-2">No proteins found</h3>
+          <p>Try adjusting your filters or search criteria.</p>
+        </div>
       </Card>
     )
   }
 
   return (
     <div className="space-y-4">
-      {/* Summary Header */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-          Protein Analysis Results
-        </h3>
-        <div className="flex gap-6 text-sm text-gray-600">
-          <span>{proteins.length} proteins on this page</span>
-          <span>•</span>
-          <span>{pagination.total} total proteins</span>
-          <span>•</span>
-          <span>
-            Sorted by {sortBy === 'recent' ? 'most recent' :
-                     sortBy === 'batch' ? 'latest batch' :
-                     sortBy === 'confidence' ? 'best confidence' :
-                     sortBy === 'coverage' ? 'domain coverage' :
-                     sortBy === 'domains' ? 'domain count' : sortBy}
-          </span>
-          <span>•</span>
-          <span>{proteins.filter(p => p.is_recent).length} processed recently</span>
+      {/* Table Header Info */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-gray-600">
+          Showing {proteins.length} of {pagination.total.toLocaleString()} proteins
+        </div>
+        <div className="flex items-center gap-4">
+          {showCurationStatus && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Curation Status:</span>
+              <div className="flex gap-1">
+                <div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div>
+                <span className="text-xs text-gray-500">Curated</span>
+                <div className="w-3 h-3 bg-gray-100 border border-gray-300 rounded ml-2"></div>
+                <span className="text-xs text-gray-500">Not Curated</span>
+                <div className="w-3 h-3 bg-orange-100 border border-orange-300 rounded ml-2"></div>
+                <span className="text-xs text-gray-500">Flagged</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Table */}
+      {/* Main Table */}
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left py-3 px-4 font-medium text-gray-700">Protein</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700">Classification</th>
-                {renderSortableHeader('Domains', 'domains')}
-                {renderSortableHeader('Confidence', 'confidence')}
-                {renderSortableHeader('Coverage', 'coverage')}
-                <th className="text-left py-3 px-4 font-medium text-gray-700">Evidence</th>
-                {renderSortableHeader('Processing', 'recent')}
-                <th className="text-left py-3 px-4 font-medium text-gray-700">Actions</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-900">Protein</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-900">Domains</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-900">Evidence</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-900">Quality</th>
+                {showCurationStatus && (
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">Curation</th>
+                )}
+                <th className="text-left py-3 px-4 font-medium text-gray-900">Processing</th>
+                <th className="text-right py-3 px-4 font-medium text-gray-900">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {proteins.map((protein, index) => (
-                 <React.Fragment key={`${protein.source_id}-${protein.batch_id}-${index}`}>
-                  {/* Main protein row */}
-                  <tr key={`protein-${protein.id}`} className="hover:bg-gray-50 transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => toggleProteinExpansion(protein)}
-                          className="text-gray-400 hover:text-gray-600 transition-colors"
-                        >
-                          {expandedProteins.has(protein.id) ? (
-                            <ChevronDown className="w-4 h-4" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4" />
-                          )}
-                        </button>
-
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => onProteinClick(protein)}
-                              className="text-blue-600 hover:text-blue-800 font-medium text-lg"
-                            >
-                              {protein.pdb_id}_{protein.chain_id}
-                            </button>
-                            {protein.is_recent && (
-                              <Badge className="bg-green-100 text-green-800 text-xs">
-                                Recent
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {protein.sequence_length} residues
-                          </div>
-                        </div>
+              {proteins.map((protein) => (
+                <tr
+                  key={protein.source_id}
+                  className="hover:bg-gray-50 transition-colors"
+                >
+                  {/* Protein Info */}
+                  <td className="py-4 px-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">
+                          {protein.pdb_id}_{protein.chain_id}
+                        </span>
+                        {protein.is_recent && (
+                          <Badge variant="default" className="text-xs">
+                            New
+                          </Badge>
+                        )}
                       </div>
-                    </td>
+                      <div className="text-sm text-gray-500">
+                        {protein.sequence_length.toLocaleString()} residues
+                      </div>
+                      {protein.batch_id && (
+                        <div className="text-xs text-blue-600">
+                          Batch {protein.batch_id}
+                        </div>
+                      )}
+                    </div>
+                  </td>
 
-                    <td className="py-3 px-4">
-                      {renderClassificationStatus(protein)}
-                    </td>
-
-                    <td className="py-3 px-4">
-                      <div className="text-center">
-                        <div className="text-lg font-semibold">
+                  {/* Domain Info */}
+                  <td className="py-4 px-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">
                           {protein.domain_count}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {protein.domains_classified} classified
-                        </div>
+                        </span>
+                        {protein.domain_count > 0 && (
+                          <Badge
+                            variant={protein.is_classified ? "default" : "outline"}
+                            className="text-xs"
+                          >
+                            {protein.domains_classified}/{protein.domain_count}
+                          </Badge>
+                        )}
                       </div>
-                    </td>
+                      <div className="flex items-center gap-1">
+                        <Activity className="w-3 h-3 text-gray-400" />
+                        <span className="text-sm text-gray-600">
+                          {(protein.coverage * 100).toFixed(1)}% coverage
+                        </span>
+                      </div>
+                    </div>
+                  </td>
 
-                    <td className="py-3 px-4">
+                  {/* Evidence */}
+                  <td className="py-4 px-4">
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">
+                        {protein.total_evidence_count} items
+                      </div>
+                      <div className="flex gap-1">
+                        {protein.has_chain_blast && (
+                          <Badge variant="outline" className="text-xs">BLAST</Badge>
+                        )}
+                        {protein.has_hhsearch && (
+                          <Badge variant="outline" className="text-xs">HHSearch</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+
+                  {/* Quality */}
+                  <td className="py-4 px-4">
+                    <div className="space-y-1">
+                      {protein.best_confidence > 0 ? (
+                        getConfidenceBadge(protein.best_confidence, protein.confidence_level)
+                      ) : (
+                        <Badge variant="outline" className="text-gray-500">
+                          No confidence
+                        </Badge>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* Curation Status */}
+                  {showCurationStatus && (
+                    <td className="py-4 px-4">
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">Best:</span>
-                          {renderConfidenceBadge(protein.best_confidence)}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">Avg:</span>
-                          {renderConfidenceBadge(protein.avg_confidence)}
-                        </div>
+                        {getCurationBadge(protein)}
+                        {protein.curator_name && (
+                          <div className="text-xs text-gray-500">
+                            by {protein.curator_name}
+                          </div>
+                        )}
+                        {protein.decision_date && (
+                          <div className="text-xs text-gray-400">
+                            <Calendar className="w-3 h-3 inline mr-1" />
+                            {formatDate(protein.decision_date)}
+                          </div>
+                        )}
                       </div>
                     </td>
-
-                    <td className="py-3 px-4">
-                      <div className="text-center">
-                        <div className={`text-lg font-semibold ${
-                          protein.coverage >= 0.8 ? 'text-green-600' :
-                          protein.coverage >= 0.5 ? 'text-yellow-600' : 'text-red-600'
-                        }`}>
-                          {(protein.coverage * 100).toFixed(0)}%
-                        </div>
-                        <div className="text-xs text-gray-500">sequence</div>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-4">
-                      <div className="space-y-1">
-                        {renderEvidenceIndicators(protein)}
-                        <div className="text-xs text-gray-500">
-                          {protein.total_evidence_count} total
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-4">
-                      {renderProcessingInfo(protein)}
-                    </td>
-
-                    <td className="py-3 px-4">
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onProteinClick(protein)}
-                          title="View protein details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => toggleProteinExpansion(protein)}
-                          title="View domain breakdown"
-                        >
-                          <BarChart3 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-
-                  {/* Expanded domain details */}
-                  {expandedProteins.has(protein.id) && (
-                    <tr key={`expanded-${protein.id}`}>
-                      <td colSpan={8} className="py-0 bg-gray-50">
-                        <div className="px-8 py-4">
-                          {loadingDomains.has(protein.id) ? (
-                            <div className="text-center py-4 text-gray-500">
-                              Loading domain details...
-                            </div>
-                          ) : protein.domains && protein.domains.length > 0 ? (
-                            <div className="space-y-3">
-                              <h4 className="font-medium text-gray-700 mb-3">
-                                Domain Breakdown ({protein.domains.length} domains)
-                              </h4>
-                              
-                              <div className="grid gap-3">
-                                {protein.domains.map((domain) => (
-                                  <div key={domain.id} className="bg-white rounded border p-4">
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-4">
-                                        <div className="text-sm">
-                                          <span className="font-medium">Domain {domain.domain_number}</span>
-                                          <span className="text-gray-500 ml-2">({domain.range})</span>
-                                        </div>
-                                        
-                                        <div className="flex gap-2">
-                                          {renderClassificationBadge(domain.t_group, 't_group')}
-                                          {domain.h_group && renderClassificationBadge(domain.h_group, 'h_group')}
-                                        </div>
-                                      </div>
-                                      
-                                      <div className="flex items-center gap-4">
-                                        <div className="text-right">
-                                          <div className="text-sm text-gray-500">Confidence</div>
-                                          {renderConfidenceBadge(domain.confidence)}
-                                        </div>
-                                        
-                                        <div className="text-right">
-                                          <div className="text-sm text-gray-500">Source</div>
-                                          <Badge variant="outline" className="text-xs">
-                                            {domain.source}
-                                          </Badge>
-                                        </div>
-                                        
-                                        <div className="text-right">
-                                          <div className="text-sm text-gray-500">Evidence</div>
-                                          <div className="text-sm font-medium">
-                                            {domain.evidence_count} items
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-center py-4 text-gray-500">
-                              No domain details available
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
                   )}
-                </React.Fragment>
+
+                  {/* Processing Info */}
+                  <td className="py-4 px-4">
+                    <div className="space-y-1">
+                      <div className="text-sm text-gray-600">
+                        {protein.days_old === 0 ? 'Today' :
+                         protein.days_old === 1 ? '1 day ago' :
+                         `${protein.days_old} days ago`}
+                      </div>
+                      {protein.reference_version && (
+                        <div className="text-xs text-gray-400">
+                          {protein.reference_version}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* Actions */}
+                  <td className="py-4 px-4 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onProteinClick(protein)}
+                        className="flex items-center gap-1"
+                      >
+                        <Eye className="w-3 h-3" />
+                        View
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => window.open(`/protein/${protein.source_id}`, '_blank')}
+                        className="flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
         </div>
-
-        {/* Pagination */}
-        {pagination.total > pagination.size && (
-          <div className="px-6 py-4 border-t bg-gray-50">
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-gray-700">
-                Showing {((pagination.page - 1) * pagination.size) + 1} to {Math.min(pagination.page * pagination.size, pagination.total)} of {pagination.total} proteins
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onPageChange(pagination.page - 1)}
-                  disabled={pagination.page === 1}
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </Button>
-
-                <span className="text-sm text-gray-600">
-                  Page {pagination.page} of {Math.ceil(pagination.total / pagination.size)}
-                </span>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onPageChange(pagination.page + 1)}
-                  disabled={pagination.page >= Math.ceil(pagination.total / pagination.size)}
-                >
-                  <ChevronRightIcon className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </Card>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-gray-600">
+            Page {pagination.page} of {totalPages}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange(pagination.page - 1)}
+              disabled={pagination.page <= 1}
+              className="flex items-center gap-1"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Previous
+            </Button>
+
+            {/* Page numbers */}
+            <div className="flex gap-1">
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                const pageNum = Math.max(1, pagination.page - 2) + i
+                if (pageNum > totalPages) return null
+
+                return (
+                  <Button
+                    key={pageNum}
+                    variant={pageNum === pagination.page ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => onPageChange(pageNum)}
+                    className="w-8 h-8 p-0"
+                  >
+                    {pageNum}
+                  </Button>
+                )
+              })}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange(pagination.page + 1)}
+              disabled={pagination.page >= totalPages}
+              className="flex items-center gap-1"
+            >
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

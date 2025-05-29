@@ -1,4 +1,4 @@
-// app/api/proteins/summary/route.ts - CORRECTED VERSION using partition tables with fixed calculations
+// app/api/proteins/summary/route.ts - UPDATED VERSION with curation filters
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
@@ -22,6 +22,16 @@ export async function GET(request: NextRequest) {
     const minConfidence = searchParams.get('min_confidence')
     const minLength = searchParams.get('sequence_length_min')
     const maxLength = searchParams.get('sequence_length_max')
+
+    // NEW: Curation filters
+    const hasCurationDecision = searchParams.get('has_curation_decision')
+    const curationStatus = searchParams.get('curation_status')
+    const curationDecisionType = searchParams.get('curation_decision_type')
+    const curatorName = searchParams.get('curator_name')
+    const curationDateFrom = searchParams.get('curation_date_from')
+    const curationDateTo = searchParams.get('curation_date_to')
+    const flaggedForReview = searchParams.get('flagged_for_review')
+    const needsReview = searchParams.get('needs_review')
 
     // Build WHERE conditions
     const whereConditions: string[] = []
@@ -54,6 +64,51 @@ export async function GET(request: NextRequest) {
       whereConditions.push(`ds.best_domain_confidence >= ${addParam(parseFloat(minConfidence))}`)
     }
 
+    // NEW: Curation decision filters
+    if (hasCurationDecision !== null) {
+      if (hasCurationDecision === 'true') {
+        whereConditions.push(`cd.id IS NOT NULL`)
+      } else if (hasCurationDecision === 'false') {
+        whereConditions.push(`cd.id IS NULL`)
+      }
+    }
+
+    if (curationStatus) {
+      const statusList = curationStatus.split(',').map(s => s.trim()).filter(Boolean)
+      if (statusList.length > 0) {
+        const statusParams = statusList.map(status => addParam(status)).join(',')
+        whereConditions.push(`cd.status IN (${statusParams})`)
+      }
+    }
+
+    if (curationDecisionType) {
+      const typeList = curationDecisionType.split(',').map(s => s.trim()).filter(Boolean)
+      if (typeList.length > 0) {
+        const typeParams = typeList.map(type => addParam(type)).join(',')
+        whereConditions.push(`cd.decision_type IN (${typeParams})`)
+      }
+    }
+
+    if (curatorName) {
+      whereConditions.push(`cd.curator_name ILIKE ${addParam(`%${curatorName}%`)}`)
+    }
+
+    if (curationDateFrom) {
+      whereConditions.push(`cd.decision_date >= ${addParam(curationDateFrom)}`)
+    }
+
+    if (curationDateTo) {
+      whereConditions.push(`cd.decision_date <= ${addParam(curationDateTo)}`)
+    }
+
+    if (flaggedForReview === 'true') {
+      whereConditions.push(`cd.flagged_for_review = true`)
+    }
+
+    if (needsReview === 'true') {
+      whereConditions.push(`cd.needs_review = true`)
+    }
+
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : ''
 
     // Build ORDER BY clause
@@ -72,12 +127,14 @@ export async function GET(request: NextRequest) {
           return `ds.domains_found ${direction} NULLS LAST`
         case 'sequence_length':
           return `p.length ${direction} NULLS LAST`
+        case 'curation_date':
+          return `cd.decision_date ${direction} NULLS LAST`
         default:
           return `pp.timestamp DESC NULLS LAST`
       }
     }
 
-    // CORRECTED QUERY: Fix the broken calculations by using actual data
+    // UPDATED QUERY: Include curation decision data
     const dataQuery = `
       WITH domain_stats AS (
         SELECT
@@ -129,12 +186,12 @@ export async function GET(request: NextRequest) {
         pp.reference_version,
         pp.timestamp AS processing_date,
 
-        -- FIXED: Use actual sequence length from main protein table
+        -- Use actual sequence length from main protein table
         COALESCE(p.length, 0) AS sequence_length,
 
         pp.is_classified,
 
-        -- FIXED: Use calculated coverage
+        -- Use calculated coverage
         COALESCE(cs.calculated_coverage, 0) AS coverage,
 
         COALESCE(ds.domains_found, 0) AS domains_found,
@@ -162,10 +219,22 @@ export async function GET(request: NextRequest) {
           ELSE 'LIMITED_EVIDENCE'
         END AS evidence_quality,
 
-        -- FIXED: Calculate residues assigned
+        -- Calculate residues assigned
         COALESCE(cs.residues_assigned, 0) AS residues_assigned,
 
-        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - pp.timestamp)) / 86400.0 AS days_since_processing
+        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - pp.timestamp)) / 86400.0 AS days_since_processing,
+
+        -- NEW: Curation decision information
+        cd.id AS curation_decision_id,
+        cd.decision_type,
+        cd.status AS curation_status,
+        cd.curator_name,
+        cd.decision_date,
+        cd.flagged_for_review,
+        cd.needs_review,
+        cd.confidence_level AS curation_confidence,
+        cd.notes AS curation_notes,
+        CASE WHEN cd.id IS NOT NULL THEN true ELSE false END AS has_curation_decision
 
       FROM pdb_analysis.partition_proteins pp
       -- Join to main protein table for actual sequence length
@@ -173,6 +242,9 @@ export async function GET(request: NextRequest) {
       LEFT JOIN domain_stats ds ON pp.id = ds.protein_id
       LEFT JOIN evidence_stats es ON pp.id = es.protein_id
       LEFT JOIN coverage_stats cs ON pp.id = cs.protein_id
+
+      -- NEW: Join to curation decisions table
+      LEFT JOIN pdb_analysis.curation_decision cd ON pp.id = cd.protein_id
 
       ${whereClause}
       ORDER BY ${getSortClause()}
@@ -183,6 +255,7 @@ export async function GET(request: NextRequest) {
       SELECT COUNT(*) as total
       FROM pdb_analysis.partition_proteins pp
       LEFT JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
+      LEFT JOIN pdb_analysis.curation_decision cd ON pp.id = cd.protein_id
       LEFT JOIN (
         SELECT
           pp_1.id AS protein_id,
@@ -194,7 +267,7 @@ export async function GET(request: NextRequest) {
       ${whereClause}
     `
 
-    console.log('CORRECTED: Using partition tables with fixed calculations')
+    console.log('UPDATED: Using partition tables with curation decision filters')
     console.log('Query params:', params)
 
     const [results, countResult] = await Promise.all([
@@ -247,9 +320,21 @@ export async function GET(request: NextRequest) {
         protein.hhsearch_evidence > 0 && 'hhsearch'
       ].filter(Boolean).join(','),
 
+      // NEW: Curation-related fields
+      has_curation_decision: Boolean(protein.has_curation_decision),
+      curation_decision_id: protein.curation_decision_id,
+      decision_type: protein.decision_type,
+      curation_status: protein.curation_status,
+      curator_name: protein.curator_name,
+      decision_date: protein.decision_date,
+      flagged_for_review: Boolean(protein.flagged_for_review),
+      needs_review: Boolean(protein.needs_review),
+      curation_confidence: Number(protein.curation_confidence || 0),
+      curation_notes: protein.curation_notes,
+
       // Data source indicator
-      data_source: 'partition_tables_corrected',
-      architecture: 'fixed_calculations'
+      data_source: 'partition_tables_with_curation',
+      architecture: 'curation_enabled'
     }))
 
     return NextResponse.json({
@@ -271,20 +356,20 @@ export async function GET(request: NextRequest) {
         direction: sortDir
       },
       metadata: {
-        source: 'partition_tables_corrected',
-        query_complexity: 'corrected_calculations',
+        source: 'partition_tables_with_curation',
+        query_complexity: 'curation_enhanced',
         result_count: processedResults.length,
-        note: 'Fixed sequence_length and coverage calculations'
+        note: 'Includes curation decision data and filters'
       }
     })
 
   } catch (error) {
-    console.error('Error in corrected partition API:', error)
+    console.error('Error in curation-enhanced partition API:', error)
     return NextResponse.json(
       {
-        error: 'Failed to fetch corrected partition data',
+        error: 'Failed to fetch partition data with curation filters',
         details: error.message,
-        hint: 'Using partition tables with corrected calculations'
+        hint: 'Using partition tables with curation decision joins'
       },
       { status: 500 }
     )

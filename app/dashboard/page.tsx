@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { DomainFilters, PaginationParams } from '@/lib/types'
+import { DomainFilters, PaginationParams, ProteinSummary } from '@/lib/types'
 import { FilterPanel } from '@/components/filters/FilterPanel'
 import { ProteinTable } from '@/components/tables/ProteinTable'
 import { ArchitectureGroupedTable } from '@/components/tables/ArchitectureGroupedTable'
@@ -18,7 +18,7 @@ import {
   AlertTriangle, CheckCircle, XCircle, AlertCircle, RefreshCw,
   TrendingUp, Database, Zap, Activity, Clock, Target, Star,
   FileText, Loader2, UserCheck, Edit3, Play, Settings,
-  ArrowRight, TrendingDown, Award, Beaker
+  ArrowRight, TrendingDown, Award, Beaker, User
 } from 'lucide-react'
 
 // Enhanced statistics interface with all expected fields
@@ -52,40 +52,6 @@ interface CurationStatistics {
   total_curable_proteins: number
   completion_percentage: number
   remaining_proteins: number
-}
-
-interface ProteinSummary {
-  id: string
-  pdb_id: string
-  chain_id: string
-  source_id: string
-  sequence_length: number
-  batch_id: number
-  reference_version: string
-  is_classified: boolean
-
-  // Domain summary
-  domain_count: number
-  domains_classified: number
-  avg_confidence: number
-  best_confidence: number
-  coverage: number
-
-  // Evidence summary
-  total_evidence_count: number
-  evidence_types: string
-  has_chain_blast: boolean
-  has_domain_blast: boolean
-  has_hhsearch: boolean
-
-  // Processing info
-  processing_date: string
-  days_old: number
-  is_recent: boolean
-  confidence_level: 'high' | 'medium' | 'low'
-  residues_assigned: number
-  classification_status: string
-  evidence_quality: string
 }
 
 // Enhanced view mode type
@@ -123,12 +89,14 @@ function useUrlState() {
       filters: {} as DomainFilters
     }
 
-    // Parse filters from URL
+    // Parse basic filters from URL
     const filterKeys = [
       'pdb_id', 'chain_id', 'domain_number', 'batch_id',
       'min_confidence', 'max_confidence',
       'sequence_length_min', 'sequence_length_max',
-      'min_evidence_count', 'evidence_types'
+      'min_evidence_count', 'evidence_types',
+      // Curation filter keys
+      'curator_name', 'curation_date_from', 'curation_date_to'
     ]
 
     filterKeys.forEach(key => {
@@ -144,12 +112,21 @@ function useUrlState() {
       }
     })
 
+    // Parse boolean filters
+    const booleanFilters = ['has_curation_decision', 'flagged_for_review', 'needs_review']
+    booleanFilters.forEach(key => {
+      const value = searchParams.get(key)
+      if (value !== null) {
+        state.filters[key as keyof DomainFilters] = value === 'true'
+      }
+    })
+
     // Parse array filters
-    const arrayFilters = ['t_groups', 'h_groups', 'x_groups', 'a_groups']
+    const arrayFilters = ['t_groups', 'h_groups', 'x_groups', 'a_groups', 'curation_status', 'curation_decision_type']
     arrayFilters.forEach(key => {
       const value = searchParams.get(key)
       if (value) {
-        const filterKey = key.replace('s', '') as keyof DomainFilters
+        const filterKey = key.replace('s', '').replace('curation_status', 'curation_status').replace('curation_decision_type', 'curation_decision_type') as keyof DomainFilters
         state.filters[filterKey] = value.split(',')
       }
     })
@@ -206,7 +183,11 @@ function useUrlState() {
         'min_confidence', 'max_confidence',
         'sequence_length_min', 'sequence_length_max',
         'min_evidence_count', 'evidence_types',
-        't_groups', 'h_groups', 'x_groups', 'a_groups'
+        't_groups', 'h_groups', 'x_groups', 'a_groups',
+        // Curation filter params
+        'has_curation_decision', 'curation_status', 'curation_decision_type',
+        'curator_name', 'curation_date_from', 'curation_date_to',
+        'flagged_for_review', 'needs_review'
       ]
 
       filterKeys.forEach(key => params.delete(key))
@@ -218,10 +199,16 @@ function useUrlState() {
             const paramKey = key === 't_group' ? 't_groups' :
                             key === 'h_group' ? 'h_groups' :
                             key === 'x_group' ? 'x_groups' :
-                            key === 'a_group' ? 'a_groups' : key
+                            key === 'a_group' ? 'a_groups' :
+                            key === 'curation_status' ? 'curation_status' :
+                            key === 'curation_decision_type' ? 'curation_decision_type' : key
             params.set(paramKey, value.join(','))
           } else if (!Array.isArray(value)) {
-            params.set(key, value.toString())
+            if (typeof value === 'boolean') {
+              params.set(key, value.toString())
+            } else {
+              params.set(key, value.toString())
+            }
           }
         }
       })
@@ -411,9 +398,15 @@ export default function EnhancedDashboard() {
             else if (key === 'h_group') paramKey = 'h_groups'
             else if (key === 'x_group') paramKey = 'x_groups'
             else if (key === 'a_group') paramKey = 'a_groups'
+            else if (key === 'curation_status') paramKey = 'curation_status'
+            else if (key === 'curation_decision_type') paramKey = 'curation_decision_type'
             params.set(paramKey, value.join(','))
           } else if (!Array.isArray(value)) {
-            params.set(key, value.toString())
+            if (typeof value === 'boolean') {
+              params.set(key, value.toString())
+            } else {
+              params.set(key, value.toString())
+            }
           }
         }
       })
@@ -926,7 +919,8 @@ export default function EnhancedDashboard() {
                               { key: 'batch', label: 'Latest Batch', icon: Grid },
                               { key: 'confidence', label: 'Confidence', icon: Star },
                               { key: 'coverage', label: 'Coverage', icon: Activity },
-                              { key: 'domains', label: 'Domains', icon: Layers }
+                              { key: 'domains', label: 'Domains', icon: Layers },
+                              { key: 'curation_date', label: 'Curation Date', icon: UserCheck }
                             ].map(({ key, label, icon: IconComponent }) => (
                               <Button
                                 key={key}
@@ -976,6 +970,7 @@ export default function EnhancedDashboard() {
                   onPageChange={handlePageChange}
                   onProteinClick={handleProteinClick}
                   loading={loading}
+                  showCurationStatus={true}
                 />
               ) : viewMode === 'architecture' ? (
                 loading ? (

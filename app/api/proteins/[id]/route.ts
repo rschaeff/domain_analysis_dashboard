@@ -159,41 +159,49 @@ export async function GET(
 
 const putativeDomainsQuery = `
   SELECT
-    pds.id,
-    pds.protein_id,
-    pds.pdb_id,
-    pds.chain_id,
-    pds.batch_id,
-    pds.reference_version,
-    pds.timestamp,
-    pds.domain_number,
-    pds.domain_id,
-    pds.start_pos,
-    pds.end_pos,
-    pds.range,
-    pds.pdb_range,
-    pds.pdb_start,
-    pds.pdb_end,
-    pds.source,
-    pds.source_id,
-    pds.confidence,
-    pds.t_group,
+    pd.id,
+    pd.protein_id,
+    pp.pdb_id,
+    pp.chain_id,
+    pp.batch_id,
+    pp.reference_version,
+    pp.timestamp,
+    pd.domain_number,
+    pd.domain_id,
+    pd.start_pos,
+    pd.end_pos,
+    pd.range,
+    pd.pdb_range,
+    pd.pdb_start,
+    pd.pdb_end,
+    pd.source,
+    pd.source_id,
+    pd.confidence,
+    pd.t_group,
     tc.name as t_group_name,
-    pds.h_group,
+    pd.h_group,
     hc.name as h_group_name,
-    pds.x_group,
+    pd.x_group,
     xc.name as x_group_name,
-    pds.a_group,
-    pds.evidence_count,
-    pds.evidence_types,
+    pd.a_group,
+    -- Calculate evidence stats
+    COUNT(de.id) as evidence_count,
+    COUNT(DISTINCT de.evidence_type) as evidence_types,
     'putative' as domain_type
-  FROM pdb_analysis.partition_domain_summary pds
-  LEFT JOIN pdb_analysis.t_classification tc ON pds.t_group = tc.t_id
-  LEFT JOIN pdb_analysis.h_classification hc ON pds.h_group = hc.h_id
-  LEFT JOIN pdb_analysis.x_classification xc ON pds.x_group = xc.x_id
-  WHERE pds.pdb_id = $1 AND pds.chain_id = $2
-  ORDER BY pds.domain_number
-`
+  FROM pdb_analysis.partition_proteins pp
+  LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
+  LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
+  LEFT JOIN pdb_analysis.t_classification tc ON pd.t_group = tc.t_id
+  LEFT JOIN pdb_analysis.h_classification hc ON pd.h_group = hc.h_id
+  LEFT JOIN pdb_analysis.x_classification xc ON pd.x_group = xc.x_id
+  WHERE pp.pdb_id = $1 AND pp.chain_id = $2
+    AND pp.process_version IN ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')  -- ADD THIS
+  GROUP BY pd.id, pd.protein_id, pp.pdb_id, pp.chain_id, pp.batch_id,
+           pp.reference_version, pp.timestamp, pd.domain_number, pd.domain_id,
+           pd.start_pos, pd.end_pos, pd.range, pd.pdb_range, pd.pdb_start,
+           pd.pdb_end, pd.source, pd.source_id, pd.confidence, pd.t_group,
+           tc.name, pd.h_group, hc.name, pd.x_group, xc.name, pd.a_group
+  ORDER BY pd.domain_number`
 
 const putativeDomains = await prisma.$queryRawUnsafe(
   putativeDomainsQuery,

@@ -1,4 +1,4 @@
-// app/api/proteins/route.ts - FIXED VERSION with graceful curation handling
+// app/api/proteins/route.ts - UPDATED with representative/propagation support
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@/lib/config'
@@ -22,6 +22,9 @@ export async function GET(request: NextRequest) {
     // Parse sorting parameters
     const sort = searchParams.get('sort') || 'recent'
     const sortDirection = searchParams.get('sort_dir') || 'desc'
+
+    // Parse view mode: 'representatives' (default), 'propagated', or 'all'
+    const viewMode = searchParams.get('view_mode') || 'representatives'
 
     // Parse filters
     const filters: any = {}
@@ -154,7 +157,7 @@ export async function GET(request: NextRequest) {
         false as has_curation_decision`
     }
 
-    // Build the base query with better temporal information
+    // Build the base query with process_version filtering and sequence MD5 support
     let baseQuery = `
       SELECT
         p.id,
@@ -168,6 +171,11 @@ export async function GET(request: NextRequest) {
         p.length as sequence_length,
         p.created_at,
         p.updated_at,
+        -- Process version and sequence identity info
+        pp.process_version,
+        p.sequence_md5,
+        -- Count propagated sequences with same MD5
+        COALESCE(prop_count.propagated_count, 0) as propagated_count,
         -- Domain statistics
         COUNT(d.id) as domain_count,
         COUNT(CASE WHEN d.t_group IS NOT NULL THEN 1 END) as fully_classified_domains,
@@ -197,13 +205,33 @@ export async function GET(request: NextRequest) {
       LEFT JOIN pdb_analysis.domain d ON p.id = d.protein_id
       LEFT JOIN pdb_analysis.domain_evidence de ON d.id = de.domain_id
       LEFT JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
+      -- Count propagated sequences for each representative
+      LEFT JOIN (
+        SELECT
+          p2.sequence_md5,
+          COUNT(*) as propagated_count
+        FROM pdb_analysis.protein p2
+        JOIN pdb_analysis.partition_proteins pp2 ON p2.id = pp2.id
+        WHERE pp2.process_version = 'mini_pyecod_propagated_1.0'
+        GROUP BY p2.sequence_md5
+      ) prop_count ON p.sequence_md5 = prop_count.sequence_md5
       ${curationJoin}
     `
 
-    // Build WHERE clause
+    // Build WHERE clause with process version filtering
     const whereConditions: string[] = []
     const queryParams: any[] = []
     let paramIndex = 1
+
+    // CORE FILTER: Exclude old algorithm by default
+    if (viewMode === 'representatives') {
+      whereConditions.push(`pp.process_version = 'mini_pyecod_1.0'`)
+    } else if (viewMode === 'propagated') {
+      whereConditions.push(`pp.process_version = 'mini_pyecod_propagated_1.0'`)
+    } else if (viewMode === 'all') {
+      whereConditions.push(`pp.process_version IN ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')`)
+    }
+    // Note: '1.0' and null are always excluded unless explicitly requested
 
     if (filters.pdb_id) {
       whereConditions.push(`p.pdb_id = $${paramIndex}`)
@@ -301,7 +329,8 @@ export async function GET(request: NextRequest) {
     // Add GROUP BY clause - need to include curation fields if they exist
     let groupByFields = `
       p.id, p.pdb_id, p.chain_id, p.source_id, p.unp_acc,
-      p.name, p.type, p.tax_id, p.length, p.created_at, p.updated_at`
+      p.name, p.type, p.tax_id, p.length, p.created_at, p.updated_at,
+      pp.process_version, p.sequence_md5, prop_count.propagated_count`
 
     if (curationTableExists) {
       groupByFields += `,
@@ -344,6 +373,9 @@ export async function GET(request: NextRequest) {
       case 'length':
         orderByClause = `ORDER BY p.length ${sortDirection.toUpperCase()}, processing_date DESC NULLS LAST, p.pdb_id, p.chain_id`
         break
+      case 'propagated':
+        orderByClause = `ORDER BY propagated_count ${sortDirection.toUpperCase()}, processing_date DESC NULLS LAST, p.pdb_id, p.chain_id`
+        break
       case 'alphabetic':
         orderByClause = 'ORDER BY p.pdb_id, p.chain_id'
         break
@@ -362,7 +394,7 @@ export async function GET(request: NextRequest) {
     // Add ORDER BY to the query
     baseQuery += ' ' + orderByClause
 
-    // Calculate statistics for filtered dataset
+    // Calculate statistics for filtered dataset (representatives only for consistency)
     const statsQuery = `
       SELECT
         COUNT(*) as total_proteins,
@@ -372,7 +404,8 @@ export async function GET(request: NextRequest) {
         AVG(sequence_length) as avg_sequence_length,
         COUNT(CASE WHEN days_since_processing <= 7 THEN 1 END) as recent_proteins,
         COUNT(CASE WHEN has_curation_decision = true THEN 1 END) as curated_proteins,
-        COUNT(CASE WHEN flagged_for_review = true THEN 1 END) as flagged_proteins
+        COUNT(CASE WHEN flagged_for_review = true THEN 1 END) as flagged_proteins,
+        SUM(propagated_count) as total_propagated_sequences
       FROM (
         ${baseQuery}
       ) AS protein_stats
@@ -395,6 +428,11 @@ export async function GET(request: NextRequest) {
       classification_completeness: protein.domain_count > 0 ?
         protein.fully_classified_domains / protein.domain_count : 0,
 
+      // Representative/propagation specific fields
+      is_representative: protein.process_version === 'mini_pyecod_1.0',
+      is_propagated: protein.process_version === 'mini_pyecod_propagated_1.0',
+      has_propagated_sequences: protein.propagated_count > 0,
+
       // Curation-related computed fields (safely handle missing data)
       has_curation_decision: Boolean(protein.has_curation_decision),
       flagged_for_review: Boolean(protein.flagged_for_review),
@@ -412,12 +450,13 @@ export async function GET(request: NextRequest) {
       avgSequenceLength: Number(stats[0]?.avg_sequence_length || 0),
       recentProteins: Number(stats[0]?.recent_proteins || 0),
       curatedProteins: Number(stats[0]?.curated_proteins || 0),
-      flaggedProteins: Number(stats[0]?.flagged_proteins || 0)
+      flaggedProteins: Number(stats[0]?.flagged_proteins || 0),
+      totalPropagatedSequences: Number(stats[0]?.total_propagated_sequences || 0)
     }
 
     const total = statistics.totalProteins
 
-    // Add sorting metadata with curation options
+    // Add sorting metadata with propagation-aware options
     const availableSorts = [
       { key: 'recent', label: 'Most Recent', description: 'Recently processed proteins first' },
       { key: 'batch', label: 'Latest Batch', description: 'Newest batches first' },
@@ -425,6 +464,7 @@ export async function GET(request: NextRequest) {
       { key: 'coverage', label: 'Coverage', description: 'Best domain coverage first' },
       { key: 'domains', label: 'Domain Count', description: 'Most domains first' },
       { key: 'length', label: 'Sequence Length', description: 'Longest sequences first' },
+      { key: 'propagated', label: 'Propagated Count', description: 'Most propagated sequences first' },
       { key: 'alphabetic', label: 'Alphabetic', description: 'PDB ID alphabetically' }
     ]
 
@@ -450,14 +490,18 @@ export async function GET(request: NextRequest) {
       statistics,
       sorting: sortingInfo,
       metadata: {
-        source: 'proteins_with_optional_curation',
+        source: 'proteins_with_representative_support',
+        view_mode: viewMode,
+        process_version_filter: viewMode === 'representatives' ? 'mini_pyecod_1.0' :
+                               viewMode === 'propagated' ? 'mini_pyecod_propagated_1.0' : 'all_current',
         curation_available: curationTableExists,
-        curation_columns: curationTableExists ? curationColumns : []
+        curation_columns: curationTableExists ? curationColumns : [],
+        excluded_versions: ['1.0'] // Always exclude the old algorithm
       }
     })
 
   } catch (error) {
-    console.error('Error fetching proteins with curation filters:', error)
+    console.error('Error fetching proteins with representative support:', error)
     return NextResponse.json(
       {
         error: 'Failed to fetch proteins',

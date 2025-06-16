@@ -1,4 +1,4 @@
-// app/api/proteins/summary/route.ts - FIXED VERSION with graceful curation handling
+// app/api/proteins/summary/route.ts - UPDATED with representative/propagation support
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/database'
 
@@ -14,6 +14,9 @@ export async function GET(request: NextRequest) {
     // Sorting
     const sort = searchParams.get('sort') || 'recent'
     const sortDir = searchParams.get('sort_dir') || 'desc'
+
+    // View mode: 'representatives' (default), 'propagated', or 'all'
+    const viewMode = searchParams.get('view_mode') || 'representatives'
 
     // Basic filters
     const pdbId = searchParams.get('pdb_id')
@@ -63,6 +66,16 @@ export async function GET(request: NextRequest) {
       params.push(value)
       return `$${params.length}`
     }
+
+    // CORE FILTER: Process version filtering (exclude old algorithm)
+    if (viewMode === 'representatives') {
+      whereConditions.push(`pp.process_version = ${addParam('mini_pyecod_1.0')}`)
+    } else if (viewMode === 'propagated') {
+      whereConditions.push(`pp.process_version = ${addParam('mini_pyecod_propagated_1.0')}`)
+    } else if (viewMode === 'all') {
+      whereConditions.push(`pp.process_version IN (${addParam('mini_pyecod_1.0')}, ${addParam('mini_pyecod_propagated_1.0')})`)
+    }
+    // Note: '1.0' and null are always excluded
 
     if (pdbId) {
       whereConditions.push(`pp.pdb_id ILIKE ${addParam(`%${pdbId}%`)}`)
@@ -157,6 +170,8 @@ export async function GET(request: NextRequest) {
           return `ds.domains_found ${direction} NULLS LAST`
         case 'sequence_length':
           return `p.length ${direction} NULLS LAST`
+        case 'propagated':
+          return `prop_count.propagated_count ${direction} NULLS LAST`
         case 'curation_date':
           if (curationTableExists && curationColumns.includes('decision_date')) {
             return `cd.decision_date ${direction} NULLS LAST`
@@ -218,7 +233,7 @@ export async function GET(request: NextRequest) {
         false AS has_curation_decision`
     }
 
-    // Main data query
+    // Main data query with representative/propagation support
     const dataQuery = `
       WITH domain_stats AS (
         SELECT
@@ -260,6 +275,15 @@ export async function GET(request: NextRequest) {
         LEFT JOIN pdb_analysis.protein p ON pp_1.pdb_id = p.pdb_id AND pp_1.chain_id = p.chain_id
         LEFT JOIN pdb_analysis.partition_domains pd ON pp_1.id = pd.protein_id
         GROUP BY pp_1.id, p.length
+      ),
+      propagation_stats AS (
+        SELECT
+          p2.sequence_md5,
+          COUNT(*) as propagated_count
+        FROM pdb_analysis.protein p2
+        JOIN pdb_analysis.partition_proteins pp2 ON p2.id = pp2.id
+        WHERE pp2.process_version = 'mini_pyecod_propagated_1.0'
+        GROUP BY p2.sequence_md5
       )
       SELECT
         pp.id AS processing_id,
@@ -269,9 +293,11 @@ export async function GET(request: NextRequest) {
         pp.batch_id,
         pp.reference_version,
         pp.timestamp AS processing_date,
+        pp.process_version,
 
         -- Use actual sequence length from main protein table
         COALESCE(p.length, 0) AS sequence_length,
+        p.sequence_md5,
 
         pp.is_classified,
 
@@ -288,6 +314,17 @@ export async function GET(request: NextRequest) {
         COALESCE(es.chain_blast_evidence, 0) AS chain_blast_evidence,
         COALESCE(es.domain_blast_evidence, 0) AS domain_blast_evidence,
         COALESCE(es.hhsearch_evidence, 0) AS hhsearch_evidence,
+
+        -- Representative/propagation info
+        COALESCE(prop_count.propagated_count, 0) AS propagated_count,
+        CASE
+          WHEN pp.process_version = 'mini_pyecod_1.0' THEN true
+          ELSE false
+        END AS is_representative,
+        CASE
+          WHEN pp.process_version = 'mini_pyecod_propagated_1.0' THEN true
+          ELSE false
+        END AS is_propagated,
 
         CASE
           WHEN COALESCE(ds.domains_found, 0) = 0 THEN 'NO_DOMAINS_FOUND'
@@ -311,11 +348,12 @@ export async function GET(request: NextRequest) {
         ${curationFields}
 
       FROM pdb_analysis.partition_proteins pp
-      -- Join to main protein table for actual sequence length
+      -- Join to main protein table for actual sequence length and MD5
       LEFT JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
       LEFT JOIN domain_stats ds ON pp.id = ds.protein_id
       LEFT JOIN evidence_stats es ON pp.id = es.protein_id
       LEFT JOIN coverage_stats cs ON pp.id = cs.protein_id
+      LEFT JOIN propagation_stats prop_count ON p.sequence_md5 = prop_count.sequence_md5
       ${curationJoin}
 
       ${whereClause}
@@ -339,7 +377,10 @@ export async function GET(request: NextRequest) {
       ${whereClause}
     `
 
-    console.log('Using partition tables with curation features:', curationTableExists ? 'enabled' : 'disabled')
+    console.log(`Using partition tables with representative mode: ${viewMode}`, {
+      curation_enabled: curationTableExists,
+      process_version_filter: viewMode
+    })
     console.log('Query params:', params)
 
     const [results, countResult] = await Promise.all([
@@ -368,6 +409,7 @@ export async function GET(request: NextRequest) {
       sequence_length: Number(protein.sequence_length || 0),
       coverage: Number(protein.coverage || 0),
       total_evidence_count: Number(protein.total_evidence_generated || 0),
+      propagated_count: Number(protein.propagated_count || 0),
 
       // Add computed fields for UI compatibility
       days_old: Math.floor(Number(protein.days_since_processing || 0)),
@@ -392,6 +434,9 @@ export async function GET(request: NextRequest) {
         protein.hhsearch_evidence > 0 && 'hhsearch'
       ].filter(Boolean).join(','),
 
+      // Representative/propagation indicators
+      has_propagated_sequences: Number(protein.propagated_count || 0) > 0,
+
       // Curation-related fields (safely handle missing data)
       has_curation_decision: Boolean(protein.has_curation_decision),
       curation_decision_id: protein.curation_decision_id || null,
@@ -405,8 +450,8 @@ export async function GET(request: NextRequest) {
       curation_notes: protein.curation_notes || null,
 
       // Data source indicator
-      data_source: 'partition_tables_with_optional_curation',
-      architecture: curationTableExists ? 'curation_enabled' : 'curation_disabled'
+      data_source: 'partition_tables_with_representative_support',
+      architecture: `${viewMode}_mode_${curationTableExists ? 'curation_enabled' : 'curation_disabled'}`
     }))
 
     return NextResponse.json({
@@ -428,24 +473,28 @@ export async function GET(request: NextRequest) {
         direction: sortDir
       },
       metadata: {
-        source: 'partition_tables_with_optional_curation',
+        source: 'partition_tables_with_representative_support',
+        view_mode: viewMode,
+        process_version_filter: viewMode === 'representatives' ? 'mini_pyecod_1.0' :
+                               viewMode === 'propagated' ? 'mini_pyecod_propagated_1.0' : 'all_current',
+        excluded_versions: ['1.0'], // Always exclude the old algorithm
         curation_available: curationTableExists,
         curation_columns: curationTableExists ? curationColumns : [],
-        query_complexity: 'graceful_curation_handling',
+        query_complexity: 'representative_aware_with_propagation_counts',
         result_count: processedResults.length,
         note: curationTableExists ?
-          'Includes curation decision data and filters' :
-          'Curation table not available - using fallback values'
+          'Includes curation decision data and representative/propagation tracking' :
+          'Representative/propagation tracking enabled - curation table not available'
       }
     })
 
   } catch (error) {
-    console.error('Error in curation-enhanced partition API:', error)
+    console.error('Error in representative-enhanced partition API:', error)
     return NextResponse.json(
       {
         error: 'Failed to fetch partition data',
         details: error.message,
-        hint: 'Check if curation_decision table exists and has correct schema'
+        hint: 'Check if representative/propagation process_version fields are correct'
       },
       { status: 500 }
     )

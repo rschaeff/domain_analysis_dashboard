@@ -57,6 +57,9 @@ interface CurationStatistics {
 // Enhanced view mode type
 type ViewMode = 'proteins' | 'architecture' | 'audit' | 'curation'
 
+// Protein view mode (representatives, propagated, or all)
+type ProteinViewMode = 'representatives' | 'propagated' | 'all'
+
 // Safe number formatting helper
 const safeToLocaleString = (value: number | undefined | null): string => {
   if (value === undefined || value === null || isNaN(value)) {

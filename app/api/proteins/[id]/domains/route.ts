@@ -58,7 +58,7 @@ export async function GET(
       )
     }
 
-    // Check for multiple batches if needed - FIXED QUERY
+    // Check for multiple batches if needed - UPDATED for representative approach
     let batchInfo: any = null
     if (includeBatchInfo) {
       const batchCheckQuery = `
@@ -70,6 +70,7 @@ export async function GET(
           FROM pdb_analysis.partition_proteins pp
           LEFT JOIN ecod_schema.batch b ON pp.batch_id = b.id
           WHERE pp.pdb_id = $1 AND pp.chain_id = $2
+            AND pp.process_version IN ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
           ORDER BY pp.batch_id DESC
         )
         SELECT

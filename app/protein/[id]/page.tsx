@@ -1,17 +1,20 @@
 'use client'
 
 import React from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { DomainSummary, ProteinOverview } from '@/lib/types'
 import { BoundaryVisualization } from '@/components/visualization/BoundaryVisualization'
 import { MultiTrackDomainVisualization } from '@/components/visualization/MultiTrackDomainVisualization'
 import { SequenceViewer } from '@/components/visualization/SequenceViewer'
 import { StructureViewer } from '@/components/visualization/StructureViewer'
+import { PropagatedSequencesTab } from '@/components/protein/PropagatedSequencesTab'
+import { RepresentativeIndicator } from '@/components/protein/RepresentativeIndicator'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { ArrowLeft, BarChart3, Eye, Download, Edit } from 'lucide-react'
+import { ArrowLeft, BarChart3, Eye, Download, Edit, TrendingUp, Users, Database } from 'lucide-react'
 
 // Domain colors with high contrast for visualization
 const DOMAIN_COLORS = [

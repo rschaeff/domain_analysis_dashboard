@@ -105,10 +105,10 @@ export async function GET(
       LEFT JOIN ecod_schema.batch b ON pp.batch_id = b.id
       LEFT JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
       WHERE pp.pdb_id = $1 AND pp.chain_id = $2
+        AND pp.process_version IN ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')  -- ADD THIS LINE
       ${batchId ? 'AND pp.batch_id = $3' : ''}
       ORDER BY pp.timestamp DESC
-      LIMIT 1
-    `
+      LIMIT 1`
 
     const queryParams = batchId ? [pdbId, chainId, parseInt(batchId)] : [pdbId, chainId]
     const proteinResult = await prisma.$queryRawUnsafe(proteinQuery, ...queryParams)

@@ -43,6 +43,7 @@ export async function GET(
         de.created_at
       FROM pdb_analysis.domain_evidence de
       WHERE de.domain_id = $1
+        AND pp.process_version in ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
       ORDER BY de.evidence_type, de.confidence DESC
     `
 

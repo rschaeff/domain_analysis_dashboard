@@ -15,6 +15,7 @@ export async function GET() {
         FROM pdb_analysis.partition_proteins pp
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         WHERE pp.is_classified = true
+          AND pp.process_version in ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
         GROUP BY pp.batch_id, pp.pdb_id, pp.chain_id, pp.is_classified, pp.id
         HAVING COUNT(pd.id) = 0
         
@@ -47,6 +48,7 @@ export async function GET() {
           'Protein classification status disagrees with domain classifications' as description
         FROM pdb_analysis.partition_proteins pp
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
+        WHERE pp.process_version in ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
         GROUP BY pp.batch_id, pp.pdb_id, pp.chain_id, pp.is_classified, pp.id
         HAVING (pp.is_classified = true AND COUNT(CASE WHEN pd.t_group IS NOT NULL THEN 1 END) = 0)
             OR (pp.is_classified = false AND COUNT(CASE WHEN pd.t_group IS NOT NULL THEN 1 END) > 0)

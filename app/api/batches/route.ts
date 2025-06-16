@@ -53,6 +53,7 @@ export async function GET() {
       LEFT JOIN ecod_schema.process_status ps ON b.id = ps.batch_id
       LEFT JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
       LEFT JOIN pdb_analysis.partition_proteins pp ON ep.source_id = pp.pdb_id || '_' || pp.chain_id
+        AND pp.process_version in ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
       WHERE b.type IN ('pdb_hhsearch', 'domain_analysis')
       GROUP BY b.id, b.batch_name, b.type, b.total_items, b.completed_items,
                b.status, b.ref_version, b.created_at, b.completed_at

@@ -71,18 +71,17 @@ export async function GET(request: NextRequest) {
         WHERE 1=1 ${batchFilterPS} ${representativeFilter}
         GROUP BY ps.batch_id
       ),
-      batch_protein_list AS (
-        -- Get the actual list of proteins in each batch for proper matching
-        SELECT
-          ps.batch_id,
-          ep.source_id,
-          ep.pdb_id,
-          ep.chain_id,
-          ps.is_representative
-        FROM ecod_schema.process_status ps
-        JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
-        WHERE 1=1 ${batchFilterPS} ${representativeFilter}
-      ),
+        batch_protein_list AS (
+          SELECT
+            ps.batch_id,
+            ep.source_id,
+            ep.pdb_id,
+            ep.chain_id,
+            ps.is_representative
+          FROM ecod_schema.process_status ps
+          JOIN ecod_schema.protein ep ON ps.protein_id = ep.id
+          WHERE 1=1 ${batchFilterPS} ${representativeFilter}
+        ),
       -- IMPORTANT: The key fix is adding 'AND pp.batch_id = bpl.batch_id'
       -- to prevent cross-batch contamination where the same protein chain
       -- appears in multiple batches and we were counting ALL partition results
@@ -115,6 +114,7 @@ export async function GET(request: NextRequest) {
         LEFT JOIN pdb_analysis.partition_proteins pp ON (
           bpl.source_id = (pp.pdb_id || '_' || pp.chain_id)
           AND pp.batch_id = bpl.batch_id  -- CRITICAL: constrain by batch_id
+          AND pp.process_version in ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
         )
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
@@ -130,6 +130,7 @@ export async function GET(request: NextRequest) {
         LEFT JOIN pdb_analysis.partition_proteins pp ON (
           bpl.source_id = (pp.pdb_id || '_' || pp.chain_id)
           AND pp.batch_id = bpl.batch_id  -- CRITICAL: constrain by batch_id
+          AND  pp.process_version in ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
         )
         WHERE pp.id IS NULL
         GROUP BY bpl.batch_id

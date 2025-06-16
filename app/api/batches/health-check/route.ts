@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
           
         FROM ecod_schema.batch b
         LEFT JOIN pdb_analysis.partition_proteins pp ON b.id = pp.batch_id
+          AND pp.process_version in ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id  
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
         GROUP BY b.id, b.batch_name, b.type, b.status, b.total_items, 

@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
         FROM pdb_analysis.partition_proteins pp
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
+        WHERE pp.process_version in ('mini_pyecod_1.0', 'mini_pyecod_propagated_1.0')
         GROUP BY pp.batch_id, pp.pdb_id, pp.chain_id, pp.sequence_length, pp.id
       )
       SELECT 

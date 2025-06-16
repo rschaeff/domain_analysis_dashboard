@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
         FROM pdb_analysis.partition_proteins pp
         LEFT JOIN pdb_analysis.partition_domains pd ON pp.id = pd.protein_id
         WHERE pp.is_classified = true
+          AND pp.process_version = 'mini_pyecod_1.0'
         GROUP BY pp.id, pp.pdb_id, pp.chain_id, pp.sequence_length, pp.timestamp
         HAVING COUNT(pd.id) > 0
       ),

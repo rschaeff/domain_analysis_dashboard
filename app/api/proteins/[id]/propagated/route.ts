@@ -50,13 +50,13 @@ export async function GET(
         p.pdb_id,
         p.chain_id,
         p.source_id,
-        p.sequence_md5,
+        pp.sequence_md5,
         pp.process_version,
         pp.batch_id,
         pp.reference_version,
         pp.timestamp
       FROM pdb_analysis.protein p
-      JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
+      JOIN pdb_analysis.partition_proteins pp ON p.pdb_id = pp.pdb_id AND p.chain_id = pp.chain_id
       WHERE p.pdb_id = $1 AND p.chain_id = $2
         AND pp.process_version = 'mini_pyecod_1.0'
       LIMIT 1
@@ -81,7 +81,7 @@ export async function GET(
       )
     }
 
-    // Get propagated sequences with the same MD5
+    // Get propagated sequences with the same MD5 - MUCH SIMPLER NOW!
     const propagatedQuery = `
       SELECT
         p.id,
@@ -93,7 +93,7 @@ export async function GET(
         p.type,
         p.tax_id,
         p.length as sequence_length,
-        p.sequence_md5,
+        pp.sequence_md5,
         pp.batch_id,
         pp.reference_version,
         pp.timestamp as processing_date,
@@ -113,13 +113,13 @@ export async function GET(
         b.status as batch_status,
         -- Processing age
         EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - pp.timestamp)) / 86400.0 as days_since_processing
-      FROM pdb_analysis.protein p
-      JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
+      FROM pdb_analysis.partition_proteins pp
+      JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
       LEFT JOIN ecod_schema.batch b ON pp.batch_id = b.id
-      -- Domain statistics subquery
+      -- Domain statistics subquery (simpler with direct partition_proteins)
       LEFT JOIN (
         SELECT
-          pd.protein_id,
+          pp2.id as partition_protein_id,
           COUNT(pd.id) as domain_count,
           COUNT(CASE WHEN pd.t_group IS NOT NULL THEN 1 END) as domains_classified,
           AVG(pd.confidence) as avg_confidence,
@@ -130,32 +130,34 @@ export async function GET(
             ELSE 0.0
           END as coverage,
           COALESCE(SUM(pd.length), 0) as residues_assigned
-        FROM pdb_analysis.partition_domains pd
-        JOIN pdb_analysis.protein p2 ON pd.protein_id = p2.id
-        GROUP BY pd.protein_id, p2.length
-      ) pd_stats ON p.id = pd_stats.protein_id
-      -- Evidence statistics subquery
+        FROM pdb_analysis.partition_proteins pp2
+        JOIN pdb_analysis.protein p2 ON pp2.pdb_id = p2.pdb_id AND pp2.chain_id = p2.chain_id
+        LEFT JOIN pdb_analysis.partition_domains pd ON pp2.id = pd.protein_id
+        GROUP BY pp2.id, p2.length
+      ) pd_stats ON pp.id = pd_stats.partition_protein_id
+      -- Evidence statistics subquery (simpler)
       LEFT JOIN (
         SELECT
-          pd.protein_id,
+          pp2.id as partition_protein_id,
           COUNT(de.id) as evidence_count
-        FROM pdb_analysis.partition_domains pd
+        FROM pdb_analysis.partition_proteins pp2
+        LEFT JOIN pdb_analysis.partition_domains pd ON pp2.id = pd.protein_id
         LEFT JOIN pdb_analysis.domain_evidence de ON pd.id = de.domain_id
-        GROUP BY pd.protein_id
-      ) ev_stats ON p.id = ev_stats.protein_id
-      WHERE p.sequence_md5 = $1
+        GROUP BY pp2.id
+      ) ev_stats ON pp.id = ev_stats.partition_protein_id
+      WHERE pp.sequence_md5 = $1
         AND pp.process_version = 'mini_pyecod_propagated_1.0'
         AND p.id != $2  -- Exclude the representative itself
       ORDER BY pp.timestamp DESC, p.pdb_id, p.chain_id
       LIMIT $3 OFFSET $4
     `
 
-    // Count total propagated sequences
+    // Count total propagated sequences - MUCH SIMPLER!
     const countQuery = `
       SELECT COUNT(*) as total
-      FROM pdb_analysis.protein p
-      JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
-      WHERE p.sequence_md5 = $1
+      FROM pdb_analysis.partition_proteins pp
+      JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
+      WHERE pp.sequence_md5 = $1
         AND pp.process_version = 'mini_pyecod_propagated_1.0'
         AND p.id != $2
     `
@@ -180,7 +182,7 @@ export async function GET(
 
     const total = Number((countResult as any[])[0]?.total || 0)
 
-    // Calculate summary statistics for all propagated sequences
+    // Calculate summary statistics for all propagated sequences - CLEANER!
     const summaryQuery = `
       SELECT
         COUNT(*) as total_propagated,
@@ -190,11 +192,11 @@ export async function GET(
         COUNT(DISTINCT pp.batch_id) as unique_batches,
         MIN(pp.timestamp) as earliest_processing,
         MAX(pp.timestamp) as latest_processing
-      FROM pdb_analysis.protein p
-      JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
+      FROM pdb_analysis.partition_proteins pp
+      JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
       LEFT JOIN (
         SELECT
-          pd.protein_id,
+          pp2.id as partition_protein_id,
           COUNT(pd.id) as domain_count,
           MAX(pd.confidence) as best_confidence,
           CASE
@@ -202,11 +204,12 @@ export async function GET(
             THEN LEAST(1.0, SUM(pd.length)::float / p2.length::float)
             ELSE 0.0
           END as coverage
-        FROM pdb_analysis.partition_domains pd
-        JOIN pdb_analysis.protein p2 ON pd.protein_id = p2.id
-        GROUP BY pd.protein_id, p2.length
-      ) pd_stats ON p.id = pd_stats.protein_id
-      WHERE p.sequence_md5 = $1
+        FROM pdb_analysis.partition_proteins pp2
+        JOIN pdb_analysis.protein p2 ON pp2.pdb_id = p2.pdb_id AND pp2.chain_id = p2.chain_id
+        LEFT JOIN pdb_analysis.partition_domains pd ON pp2.id = pd.protein_id
+        GROUP BY pp2.id, p2.length
+      ) pd_stats ON pp.id = pd_stats.partition_protein_id
+      WHERE pp.sequence_md5 = $1
         AND pp.process_version = 'mini_pyecod_propagated_1.0'
         AND p.id != $2
     `

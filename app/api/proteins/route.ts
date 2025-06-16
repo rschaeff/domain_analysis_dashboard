@@ -173,9 +173,13 @@ export async function GET(request: NextRequest) {
         p.updated_at,
         -- Process version and sequence identity info
         pp.process_version,
-        p.sequence_md5,
-        -- Count propagated sequences with same MD5
-        COALESCE(prop_count.propagated_count, 0) as propagated_count,
+        pp.sequence_md5,
+        -- Count propagated sequences with same MD5 (simple subquery now!)
+        (SELECT COUNT(*)
+         FROM pdb_analysis.partition_proteins pp2
+         WHERE pp2.sequence_md5 = pp.sequence_md5
+           AND pp2.process_version = 'mini_pyecod_propagated_1.0'
+        ) as propagated_count,
         -- Domain statistics
         COUNT(d.id) as domain_count,
         COUNT(CASE WHEN d.t_group IS NOT NULL THEN 1 END) as fully_classified_domains,
@@ -204,17 +208,7 @@ export async function GET(request: NextRequest) {
       FROM pdb_analysis.protein p
       LEFT JOIN pdb_analysis.domain d ON p.id = d.protein_id
       LEFT JOIN pdb_analysis.domain_evidence de ON d.id = de.domain_id
-      LEFT JOIN pdb_analysis.partition_proteins pp ON p.id = pp.id
-      -- Count propagated sequences for each representative
-      LEFT JOIN (
-        SELECT
-          p2.sequence_md5,
-          COUNT(*) as propagated_count
-        FROM pdb_analysis.protein p2
-        JOIN pdb_analysis.partition_proteins pp2 ON p2.id = pp2.id
-        WHERE pp2.process_version = 'mini_pyecod_propagated_1.0'
-        GROUP BY p2.sequence_md5
-      ) prop_count ON p.sequence_md5 = prop_count.sequence_md5
+      LEFT JOIN pdb_analysis.partition_proteins pp ON p.pdb_id = pp.pdb_id AND p.chain_id = pp.chain_id
       ${curationJoin}
     `
 
@@ -326,11 +320,11 @@ export async function GET(request: NextRequest) {
       baseQuery += ' WHERE ' + whereConditions.join(' AND ')
     }
 
-    // Add GROUP BY clause - need to include curation fields if they exist
+    // Add GROUP BY clause - much simpler now with direct MD5
     let groupByFields = `
       p.id, p.pdb_id, p.chain_id, p.source_id, p.unp_acc,
       p.name, p.type, p.tax_id, p.length, p.created_at, p.updated_at,
-      pp.process_version, p.sequence_md5, prop_count.propagated_count`
+      pp.process_version, pp.sequence_md5`
 
     if (curationTableExists) {
       groupByFields += `,

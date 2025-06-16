@@ -278,12 +278,11 @@ export async function GET(request: NextRequest) {
       ),
       propagation_stats AS (
         SELECT
-          p2.sequence_md5,
+          pp2.sequence_md5,
           COUNT(*) as propagated_count
-        FROM pdb_analysis.protein p2
-        JOIN pdb_analysis.partition_proteins pp2 ON p2.id = pp2.id
+        FROM pdb_analysis.partition_proteins pp2
         WHERE pp2.process_version = 'mini_pyecod_propagated_1.0'
-        GROUP BY p2.sequence_md5
+        GROUP BY pp2.sequence_md5
       )
       SELECT
         pp.id AS processing_id,
@@ -297,7 +296,7 @@ export async function GET(request: NextRequest) {
 
         -- Use actual sequence length from main protein table
         COALESCE(p.length, 0) AS sequence_length,
-        p.sequence_md5,
+        pp.sequence_md5,
 
         pp.is_classified,
 
@@ -348,12 +347,12 @@ export async function GET(request: NextRequest) {
         ${curationFields}
 
       FROM pdb_analysis.partition_proteins pp
-      -- Join to main protein table for actual sequence length and MD5
+      -- Join to main protein table for actual sequence length
       LEFT JOIN pdb_analysis.protein p ON pp.pdb_id = p.pdb_id AND pp.chain_id = p.chain_id
       LEFT JOIN domain_stats ds ON pp.id = ds.protein_id
       LEFT JOIN evidence_stats es ON pp.id = es.protein_id
       LEFT JOIN coverage_stats cs ON pp.id = cs.protein_id
-      LEFT JOIN propagation_stats prop_count ON p.sequence_md5 = prop_count.sequence_md5
+      LEFT JOIN propagation_stats prop_count ON pp.sequence_md5 = prop_count.sequence_md5
       ${curationJoin}
 
       ${whereClause}
